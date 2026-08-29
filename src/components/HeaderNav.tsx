@@ -35,6 +35,7 @@ interface HeaderNavProps {
   onOpenArtists?: () => void;
   onOpenGenre?: (slug: string) => void;
   onOpenGenres?: () => void;
+  onOpenHome?: () => void;
   onOpenAuth?: () => void;
   onOpenPaywall?: () => void;
   isUnlocked?: boolean;
@@ -74,6 +75,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   onOpenArtists,
   onOpenGenre,
   onOpenGenres,
+  onOpenHome,
   onOpenAuth,
   onOpenPaywall,
   isUnlocked = false,
@@ -203,11 +205,20 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
       <div className="w-full grid grid-cols-1 xl:grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 pb-2 border-b border-white/10">
         <div className="flex items-center justify-between gap-2 sm:gap-3 xl:justify-start">
           {/* Logo / App Name */}
-          <div className="flex items-center gap-1.5 font-black text-sm sm:text-base tracking-tight text-white">
+          <a
+            href="/"
+            onClick={(event) => {
+              if (!onOpenHome) return;
+              event.preventDefault();
+              onOpenHome();
+            }}
+            className="flex items-center gap-1.5 font-black text-sm sm:text-base tracking-tight text-white hover:text-[#00e676] transition-colors"
+            aria-label="Song Guess Game home"
+          >
             <img src="/favicon.png" alt="" className="h-7 w-7 rounded-full object-cover" />
             <span className="hidden xs:inline">Song Guess Game</span>
             <span className="xs:hidden">Song Guess</span>
-          </div>
+          </a>
           <div className="flex items-center gap-1.5 xl:hidden">
             <AccountMenu
               session={authSession}

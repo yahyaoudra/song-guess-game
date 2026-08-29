@@ -1072,6 +1072,7 @@ export default function App() {
         onOpenArtists={() => navigateToPage('/artist')}
         onOpenGenre={(slug) => navigateToPage(getGenrePath(slug))}
         onOpenGenres={() => navigateToPage('/play/genre')}
+        onOpenHome={() => navigateToPage('/')}
         onOpenAuth={() => setIsAuthOpen(true)}
         onOpenPaywall={() => setIsPaywallOpen(true)}
         isUnlocked={authSession.entitlement.active}
