@@ -774,20 +774,7 @@ export default function App() {
       : activeView === 'countries'
       ? getRouteConfig('system:country-index', publicConfig)
       : null;
-  const homeSeo: AdminPageConfig = {
-    countryCode: 'GLOBAL',
-    slug: '',
-    pageTitle: 'Song Guess Game - Music Trivia by Artist, Genre & Country',
-    metaDescription: 'Play Song Guess Game online. Guess songs from tiny snippets, explore artist discographies, country packs, genres, multiplayer modes, and unlimited play.',
-    keywords: 'song guess game, heardle, music quiz, song trivia, artist heardle, genre heardle, country music quiz',
-    canonicalUrl: `${publicConfig.appUrl}/`,
-    customHeading: 'Song Guess Game',
-    customIntroText: 'Guess songs by artist, genre, country, and era.',
-    socialTitle: 'Song Guess Game - Music Trivia by Artist, Genre & Country',
-    socialDescription: 'A Heardle-style song guessing game with artists, genres, countries, multiplayer, and unlimited play.',
-    socialImageUrl: '',
-    updatedAt: ''
-  };
+  const homeSeo = getRouteConfig('system:home', publicConfig);
   const contactSeo: AdminPageConfig = {
     ...homeSeo,
     pageTitle: 'Contact Song Guess Game',

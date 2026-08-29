@@ -120,7 +120,7 @@ export function createDefaultRouteConfig(routeKey: string, appUrl = DEFAULT_APP_
       metaDescription: 'Play Song Guess Game online. Guess songs from tiny snippets, explore artist discographies, country packs, genres, multiplayer modes, and unlimited play.',
       keywords: 'song guess game, heardle, music quiz, song trivia, artist heardle, genre heardle, country music quiz',
       canonicalUrl: `${cleanAppUrl}/`,
-      customHeading: 'Song Guess Game',
+      customHeading: 'Guess the Song Game',
       customIntroText: 'Guess songs by artist, genre, country, and era.',
       socialTitle: 'Song Guess Game - Music Trivia by Artist, Genre & Country',
       socialDescription: 'A Heardle-style song guessing game with artists, genres, countries, multiplayer, and unlimited play.',

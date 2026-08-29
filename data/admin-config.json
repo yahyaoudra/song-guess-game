@@ -388,21 +388,43 @@
       "updatedAt": "2026-08-27T06:07:25.860Z"
     }
   },
-  "routeConfigs": {},
+  "routeConfigs": {
+    "system:home": {
+      "countryCode": "GLOBAL",
+      "slug": "",
+      "pageTitle": "Song Guess Game - Music Trivia by Artist, Genre & Country",
+      "metaDescription": "Play Song Guess Game online. Guess songs from tiny snippets, explore artist discographies, country packs, genres, multiplayer modes, and unlimited play.",
+      "keywords": "song guess game, heardle, music quiz, song trivia, artist heardle, genre heardle, country music quiz",
+      "canonicalUrl": "https://songguessgame.online/",
+      "customHeading": "Guess the Song Game",
+      "customIntroText": "Guess songs by artist, genre, country, and era.",
+      "socialTitle": "Song Guess Game - Music Trivia by Artist, Genre & Country",
+      "socialDescription": "A Heardle-style song guessing game with artists, genres, countries, multiplayer, and unlimited play.",
+      "socialImageUrl": "",
+      "updatedAt": "2026-08-29T19:05:00.000Z"
+    }
+  },
   "featuredArtistSlugs": [
-    "cheb-khaled",
-    "bad-bunny",
+    "taylor-swift",
     "drake",
+    "the-weeknd",
+    "billie-eilish",
+    "ariana-grande",
+    "sabrina-carpenter",
+    "justin-bieber",
+    "bruno-mars",
+    "pitbull",
+    "kendrick-lamar",
+    "travis-scott",
+    "bad-bunny",
     "karol-g",
     "shakira",
-    "stormy",
     "avicii",
-    "central-cee",
-    "justin-bieber",
     "adele",
-    "zara-larsson",
-    "travis-scott",
-    "taylor-swift"
+    "central-cee",
+    "cheb-khaled",
+    "stormy",
+    "zara-larsson"
   ],
   "adSlots": [
     {

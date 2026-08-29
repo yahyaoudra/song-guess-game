@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, ExternalLink, Loader2, Search, Star } from 'lucide-react';
-import { getArtistChallenges } from '../utils/challengeCatalog';
+import { getArtistChallenges, orderArtistsByFeaturedPriority } from '../utils/challengeCatalog';
 import { getArtistPath } from '../utils/runtimeConfig';
 import { RequestedArtist, SpotifyArtistSuggestion } from '../adminTypes';
 import { searchSpotifyArtists } from '../utils/authApi';
@@ -50,10 +50,10 @@ export const ArtistBrowserPage: React.FC<ArtistBrowserPageProps> = ({
         coverImage: artist.coverImage
       }));
     const rebuiltBaseSlugs = new Set(persistedArtists.map((artist) => baseArtistSlug(artist.slug)));
-    return [
+    return orderArtistsByFeaturedPriority([
       ...persistedArtists,
       ...baseArtists.filter((artist) => !rebuiltBaseSlugs.has(artist.slug))
-    ];
+    ]);
   }, [requestedArtists]);
   const filteredArtists = useMemo(() => {
     const cleanQuery = query.trim().toLowerCase();

@@ -35,12 +35,12 @@ import {
   uploadBannerAsset
 } from '../utils/adminApi';
 import { fetchRequestedArtists } from '../utils/authApi';
-import { getArtistChallenges, getGenreChallenges } from '../utils/challengeCatalog';
+import { baseArtistSlug, getArtistChallenges, getGenreChallenges, orderArtistsByFeaturedPriority, TOP_US_FEATURED_ARTIST_SLUGS } from '../utils/challengeCatalog';
 import { createDefaultRouteConfig } from '../utils/runtimeConfig';
 import { getSafeImageUrl } from '../utils/safeUrl';
 
 type AdminTab = 'overview' | 'seo' | 'ads' | 'integrations' | 'monetization' | 'activity' | 'robots' | 'security';
-type SeoTargetType = 'country' | 'genre' | 'artist';
+type SeoTargetType = 'home' | 'country' | 'genre' | 'artist';
 
 interface AdminBackOfficeModalProps {
   onClose: () => void;
@@ -141,10 +141,13 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
         ...artist,
         source: 'catalog' as const
       }));
-    return [...requestedReady, ...catalog];
+    return orderArtistsByFeaturedPriority([...requestedReady, ...catalog]);
   }, [artistChallenges, requestedArtists]);
   const defaultFeaturedArtistSlugs = useMemo(
-    () => artistChoices.slice(0, FEATURED_ARTIST_LIMIT).map((artist) => artist.slug),
+    () => [
+      ...TOP_US_FEATURED_ARTIST_SLUGS.filter((slug) => artistChoices.some((artist) => baseArtistSlug(artist.slug) === slug)),
+      ...artistChoices.map((artist) => artist.slug)
+    ].filter((slug, index, all) => all.indexOf(slug) === index).slice(0, FEATURED_ARTIST_LIMIT),
     [artistChoices]
   );
   const activeFeaturedArtistSlugs = useMemo(() => {
@@ -165,6 +168,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
   }, [activeTab, isAuthenticated]);
 
   const selectedRouteKey = useMemo(() => {
+    if (seoTargetType === 'home') return 'system:home';
     if (seoTargetType === 'genre') return `genre:${selectedGenreSlug}`;
     if (seoTargetType === 'artist') return `artist:${selectedArtistSlug}`;
     return '';
@@ -399,9 +403,10 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
   };
 
   const toggleFeaturedArtist = (slug: string) => {
+    const baseSlug = baseArtistSlug(slug);
     updateFeaturedArtists((currentSlugs) => (
-      currentSlugs.includes(slug)
-        ? currentSlugs.filter((item) => item !== slug)
+      currentSlugs.includes(slug) || currentSlugs.includes(baseSlug)
+        ? currentSlugs.filter((item) => item !== slug && item !== baseSlug)
         : [...currentSlugs, slug]
     ));
   };
@@ -666,8 +671,8 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
           {activeTab === 'seo' && selectedPage && (
             <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4 text-left">
               <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-3 max-h-[56vh] overflow-y-auto space-y-3">
-                <div className="grid grid-cols-3 gap-1 rounded-xl bg-[#151d18] p-1">
-                  {(['country', 'genre', 'artist'] as SeoTargetType[]).map((type) => (
+                <div className="grid grid-cols-4 gap-1 rounded-xl bg-[#151d18] p-1">
+                  {(['home', 'country', 'genre', 'artist'] as SeoTargetType[]).map((type) => (
                     <button
                       key={type}
                       onClick={() => setSeoTargetType(type)}
@@ -679,6 +684,15 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                     </button>
                   ))}
                 </div>
+
+                {seoTargetType === 'home' && (
+                  <div className="rounded-xl border border-[#00e676]/25 bg-[#00e676]/8 p-3">
+                    <p className="text-xs font-black text-white">Home page SEO</p>
+                    <p className="mt-1 text-[11px] leading-5 text-white/45">
+                      Controls the title, meta description, H1, intro text, and social image for the main domain.
+                    </p>
+                  </div>
+                )}
 
                 {seoTargetType === 'country' && COUNTRIES.map((country) => (
                   <button
@@ -735,7 +749,9 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                     </div>
 
                     {artistChoices.map((artist) => {
-                      const isFeatured = activeFeaturedArtistSlugs.includes(artist.slug);
+                      const isFeatured =
+                        activeFeaturedArtistSlugs.includes(artist.slug) ||
+                        activeFeaturedArtistSlugs.includes(baseArtistSlug(artist.slug));
                       return (
                         <div
                           key={artist.slug}

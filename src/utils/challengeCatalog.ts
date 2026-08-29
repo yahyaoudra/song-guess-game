@@ -23,6 +23,36 @@ export interface GenreChallenge {
 
 const DEFAULT_COVER = 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=800&auto=format&fit=crop&q=80';
 
+export const TOP_US_FEATURED_ARTIST_NAMES = [
+  'Taylor Swift',
+  'Drake',
+  'The Weeknd',
+  'Billie Eilish',
+  'Ariana Grande',
+  'Sabrina Carpenter'
+];
+
+export const TOP_US_FEATURED_ARTIST_SLUGS = TOP_US_FEATURED_ARTIST_NAMES.map(slugifyChallenge);
+
+export function baseArtistSlug(slug: string): string {
+  return slug.replace(/-[a-z0-9]{8}$/, '');
+}
+
+export function orderArtistsByFeaturedPriority<T extends { slug: string; songsCount?: number; name: string }>(artists: T[]): T[] {
+  const priority = new Map(TOP_US_FEATURED_ARTIST_SLUGS.map((slug, index) => [slug, index]));
+  return [...artists].sort((left, right) => {
+    const leftPriority = priority.get(baseArtistSlug(left.slug));
+    const rightPriority = priority.get(baseArtistSlug(right.slug));
+    if (leftPriority !== undefined || rightPriority !== undefined) {
+      return (leftPriority ?? Number.MAX_SAFE_INTEGER) - (rightPriority ?? Number.MAX_SAFE_INTEGER);
+    }
+    const leftCount = left.songsCount || 0;
+    const rightCount = right.songsCount || 0;
+    if (rightCount !== leftCount) return rightCount - leftCount;
+    return left.name.localeCompare(right.name);
+  });
+}
+
 export const GENRE_DEFINITIONS: Array<Omit<GenreChallenge, 'songIds' | 'songsCount' | 'coverImage'>> = [
   {
     slug: 'k-pop',
@@ -182,10 +212,7 @@ export function getArtistChallenges(): ArtistChallenge[] {
     });
   });
 
-  return Array.from(bySlug.values()).sort((left, right) => {
-    if (right.songsCount !== left.songsCount) return right.songsCount - left.songsCount;
-    return left.name.localeCompare(right.name);
-  });
+  return orderArtistsByFeaturedPriority(Array.from(bySlug.values()));
 }
 
 export function getArtistChallenge(slug: string): ArtistChallenge | null {

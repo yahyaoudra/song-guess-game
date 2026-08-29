@@ -5,7 +5,7 @@ import { AuthSessionResponse, RequestedArtist } from '../adminTypes';
 import { DIFFICULTY_COLORS } from '../data/moroccanSongs';
 import { QUIZ_COLLECTIONS } from '../data/quizCollections';
 import { COUNTRIES } from '../data/countries';
-import { getArtistChallenges, getGenreChallenges } from '../utils/challengeCatalog';
+import { getArtistChallenges, getGenreChallenges, orderArtistsByFeaturedPriority } from '../utils/challengeCatalog';
 import { getArtistPath, getCountryPath, getGenrePath } from '../utils/runtimeConfig';
 import { AccountMenu } from './AccountMenu';
 
@@ -103,13 +103,17 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
       }));
     const requestedSlugs = new Set(requestedReady.map((artist) => artist.slug));
     const rebuiltBaseSlugs = new Set(requestedReady.map((artist) => baseArtistSlug(artist.slug)));
-    return [
+    return orderArtistsByFeaturedPriority([
       ...requestedReady,
       ...allArtistChallenges.filter((artist) => !requestedSlugs.has(artist.slug) && !rebuiltBaseSlugs.has(artist.slug))
-    ];
+    ]);
   }, [allArtistChallenges, requestedArtists]);
   const featuredArtists = useMemo(() => {
     const bySlug = new Map(allArtists.map((artist) => [artist.slug, artist]));
+    allArtists.forEach((artist) => {
+      const baseSlug = baseArtistSlug(artist.slug);
+      if (!bySlug.has(baseSlug)) bySlug.set(baseSlug, artist);
+    });
     const configured = (featuredArtistSlugs || []).flatMap((slug) => {
       const artist = bySlug.get(slug);
       return artist ? [artist] : [];

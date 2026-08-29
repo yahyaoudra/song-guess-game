@@ -11,6 +11,10 @@ const LIMIT = Number(process.env.SPOTIFY_BACKFILL_LIMIT || getArgValue('--limit'
 const MAX_ALBUMS = Number(process.env.SPOTIFY_BACKFILL_MAX_ALBUMS || getArgValue('--max-albums') || 20);
 const MARKET = process.env.SPOTIFY_MARKET || 'US';
 const REQUEST_TIMEOUT_MS = Number(process.env.SPOTIFY_BACKFILL_TIMEOUT_MS || 15_000);
+const TARGET_ARTISTS = getArgValue('--artists')
+  .split(',')
+  .map((artist) => artist.trim())
+  .filter(Boolean);
 
 type SpotifyArtistApiItem = {
   id?: string;
@@ -106,7 +110,8 @@ async function fetchSpotifyJson<T>(endpoint: string, attempt = 1): Promise<T> {
     return fetchSpotifyJson<T>(endpoint, attempt + 1);
   }
   if (!response.ok) {
-    throw new Error(`Spotify API returned ${response.status}.`);
+    const body = await response.text().catch(() => '');
+    throw new Error(`Spotify API returned ${response.status}${body ? `: ${body.slice(0, 240)}` : ''}.`);
   }
   return await withTimeout(response.json() as Promise<T>, 'Spotify JSON parse timed out.');
 }
@@ -161,6 +166,69 @@ async function buildArtistPack(name: string): Promise<RequestedArtist> {
   const slugBase = slugifyChallenge(spotifyArtist.name || name);
   const slug = `${slugBase}-${spotifyArtist.id.slice(0, 8).toLowerCase()}`;
 
+  const seen = new Set<string>();
+  const songs: Song[] = [];
+  const pushTrack = (track: any, album?: SpotifyAlbumSummary) => {
+    const title = safeText(track?.name, 160);
+    const artist = Array.isArray(track?.artists) && track.artists.length > 0
+      ? track.artists.map((item: any) => safeText(item.name, 120)).filter(Boolean).join(' & ')
+      : safeText(spotifyArtist.name, 100) || name;
+    const key = `${title}-${artist}`.toLowerCase();
+    if (!title || seen.has(key)) return;
+    seen.add(key);
+    const trackAlbum = track?.album || album || {};
+    const releaseYear = Number(String(trackAlbum.release_date || album?.release_date || '').slice(0, 4));
+    const artworkUrl = safeHttpsUrl(trackAlbum.images?.[0]?.url) || safeHttpsUrl(album?.images?.[0]?.url) || safeHttpsUrl(spotifyArtist.images?.[0]?.url);
+    const directPreview = safeHttpsUrl(track.preview_url);
+    const params = new URLSearchParams({ title, artist });
+    if (directPreview) params.set('url', directPreview);
+    songs.push({
+      id: `requested-${slug}-${safeText(String(track.id || songs.length), 80)}`,
+      title,
+      artist,
+      album: safeText(trackAlbum.name || album?.name, 160) || `${artist} Essentials`,
+      genre: 'Spotify Artist Catalog',
+      countryCode: 'GLOBAL',
+      releaseYear: Number.isFinite(releaseYear) ? releaseYear : undefined,
+      artworkUrl,
+      previewUrl: `/api/music/preview?${params.toString()}`,
+      spotifyTrackId: safeText(track.id, 80),
+      spotifyUri: safeText(track.uri, 120),
+      spotifyUrl: safeHttpsUrl(track.external_urls?.spotify || album?.external_urls?.spotify),
+      difficulty: songs.length < 5 ? 'EASY' : songs.length < 20 ? 'MEDIUM' : 'HARD'
+    });
+  };
+
+  try {
+    const topTracks = await fetchSpotifyJson<{ tracks?: Array<any> }>(
+      `/artists/${encodeURIComponent(spotifyArtist.id)}/top-tracks?${new URLSearchParams({ market: MARKET }).toString()}`
+    );
+    for (const track of topTracks.tracks || []) {
+      pushTrack(track);
+      if (songs.length >= 50) break;
+    }
+  } catch (error) {
+    console.warn(`top tracks unavailable for ${spotifyArtist.name || name}: ${error instanceof Error ? error.message : error}`);
+  }
+
+  if (songs.length < MIN_SONGS) {
+    const searchTracks = await fetchSpotifyJson<{ tracks?: { items?: Array<any> } }>(
+      `/search?${new URLSearchParams({
+        q: spotifyArtist.name || name,
+        type: 'track',
+        market: MARKET,
+        limit: '10'
+      }).toString()}`
+    );
+    for (const track of searchTracks.tracks?.items || []) {
+      const trackArtists = Array.isArray(track?.artists) ? track.artists : [];
+      const hasExactArtist = trackArtists.some((item: any) => safeText(item.name, 120).toLowerCase() === String(spotifyArtist.name || name).toLowerCase());
+      if (!hasExactArtist) continue;
+      pushTrack(track);
+      if (songs.length >= 50) break;
+    }
+  }
+
   const albums: SpotifyAlbumSummary[] = [];
   for (let offset = 0; offset < MAX_ALBUMS; offset += 10) {
     const response = await fetchSpotifyJson<{ items?: SpotifyAlbumSummary[]; total?: number }>(
@@ -175,41 +243,13 @@ async function buildArtistPack(name: string): Promise<RequestedArtist> {
     if (!response.items?.length || albums.length >= (response.total || albums.length)) break;
   }
 
-  const seen = new Set<string>();
-  const songs: Song[] = [];
   for (const album of albums) {
     if (!album.id) continue;
     const tracks = await fetchSpotifyJson<{ items?: Array<any> }>(
       `/albums/${encodeURIComponent(album.id)}/tracks?${new URLSearchParams({ market: MARKET, limit: '50' }).toString()}`
     );
     for (const track of tracks.items || []) {
-      const title = safeText(track?.name, 160);
-      const artist = Array.isArray(track?.artists) && track.artists.length > 0
-        ? track.artists.map((item: any) => safeText(item.name, 120)).filter(Boolean).join(' & ')
-        : safeText(spotifyArtist.name, 100) || name;
-      const key = `${title}-${artist}`.toLowerCase();
-      if (!title || seen.has(key)) continue;
-      seen.add(key);
-      const releaseYear = Number(String(album.release_date || '').slice(0, 4));
-      const artworkUrl = safeHttpsUrl(album.images?.[0]?.url) || safeHttpsUrl(spotifyArtist.images?.[0]?.url);
-      const directPreview = safeHttpsUrl(track.preview_url);
-      const params = new URLSearchParams({ title, artist });
-      if (directPreview) params.set('url', directPreview);
-      songs.push({
-        id: `requested-${slug}-${safeText(String(track.id || songs.length), 80)}`,
-        title,
-        artist,
-        album: safeText(album.name, 160) || `${artist} Essentials`,
-        genre: 'Spotify Artist Catalog',
-        countryCode: 'GLOBAL',
-        releaseYear: Number.isFinite(releaseYear) ? releaseYear : undefined,
-        artworkUrl,
-        previewUrl: `/api/music/preview?${params.toString()}`,
-        spotifyTrackId: safeText(track.id, 80),
-        spotifyUri: safeText(track.uri, 120),
-        spotifyUrl: safeHttpsUrl(track.external_urls?.spotify || album.external_urls?.spotify),
-        difficulty: songs.length < 5 ? 'EASY' : songs.length < 20 ? 'MEDIUM' : 'HARD'
-      });
+      pushTrack(track, album);
       if (songs.length >= 50) break;
     }
     if (songs.length >= 50) break;
@@ -238,9 +278,15 @@ async function main(): Promise<void> {
   const existingBaseSlugs = new Set(existing
     .filter((artist) => (artist.songsCount || 0) >= MIN_SONGS)
     .map((artist) => artist.slug.replace(/-[a-z0-9]{8}$/, '')));
-  const targetArtists = getArtistChallenges()
-    .filter((artist) => artist.songsCount < MIN_SONGS && !existingBaseSlugs.has(artist.slug))
-    .slice(0, LIMIT > 0 ? LIMIT : undefined);
+  const targetArtists = TARGET_ARTISTS.length > 0
+    ? TARGET_ARTISTS.map((name) => ({
+        name,
+        slug: slugifyChallenge(name),
+        songsCount: 0
+      }))
+    : getArtistChallenges()
+        .filter((artist) => artist.songsCount < MIN_SONGS && !existingBaseSlugs.has(artist.slug))
+        .slice(0, LIMIT > 0 ? LIMIT : undefined);
 
   console.log(`Backfilling ${targetArtists.length} artist packs with min ${MIN_SONGS} songs target.`);
   const rebuilt = [...existing];

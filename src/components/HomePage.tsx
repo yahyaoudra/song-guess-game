@@ -3,8 +3,8 @@ import { gsap } from 'gsap';
 import { ArrowRight, Check, Globe2, Headphones, Mic2, Play, Sparkles, Tags, Trophy, Users } from 'lucide-react';
 import { PublicRuntimeConfig, RequestedArtist } from '../adminTypes';
 import { COUNTRIES } from '../data/countries';
-import { getArtistChallenges, getGenreChallenges } from '../utils/challengeCatalog';
-import { getArtistPath, getCountryPath, getGenrePath } from '../utils/runtimeConfig';
+import { baseArtistSlug, getArtistChallenges, getGenreChallenges, orderArtistsByFeaturedPriority } from '../utils/challengeCatalog';
+import { createDefaultRouteConfig, getArtistPath, getCountryPath, getGenrePath } from '../utils/runtimeConfig';
 
 interface HomePageProps {
   publicConfig: PublicRuntimeConfig;
@@ -40,6 +40,7 @@ export const HomePage: React.FC<HomePageProps> = ({ publicConfig, requestedArtis
   const heroRef = useRef<HTMLDivElement | null>(null);
   const carouselRef = useRef<HTMLDivElement | null>(null);
   const tweenRef = useRef<gsap.core.Tween | null>(null);
+  const homeSeo = publicConfig.routeConfigs['system:home'] || createDefaultRouteConfig('system:home', publicConfig.appUrl);
 
   const artists = useMemo(() => {
     const requested = requestedArtists
@@ -56,8 +57,12 @@ export const HomePage: React.FC<HomePageProps> = ({ publicConfig, requestedArtis
       coverImage: artist.coverImage,
       songsCount: artist.songsCount
     }));
-    const bySlug = new Map([...requested, ...staticArtists].map((artist) => [artist.slug, artist]));
-    return Array.from(bySlug.values()).slice(0, 24);
+    const rebuiltBaseSlugs = new Set(requested.map((artist) => baseArtistSlug(artist.slug)));
+    const bySlug = new Map([
+      ...requested,
+      ...staticArtists.filter((artist) => !rebuiltBaseSlugs.has(artist.slug))
+    ].map((artist) => [artist.slug, artist]));
+    return orderArtistsByFeaturedPriority(Array.from(bySlug.values())).slice(0, 24);
   }, [requestedArtists]);
 
   const topArtists = artists.slice(0, 12);
@@ -104,10 +109,10 @@ export const HomePage: React.FC<HomePageProps> = ({ publicConfig, requestedArtis
             Music guessing for every scene
           </div>
           <h1 data-home-reveal className="mt-5 max-w-4xl text-5xl font-black leading-[0.92] tracking-tight sm:text-7xl">
-            Song Guess Game
+            {homeSeo.customHeading || 'Guess the Song Game'}
           </h1>
           <p data-home-reveal className="mt-5 max-w-2xl text-lg leading-8 text-white/65">
-            Guess songs from tiny snippets, play by artist, genre, country, or era, and challenge friends with visual score cards.
+            Guess songs from tiny snippets, play by artist, genre, country, or era, and challenge friends with visual score cards. Try to guess the song in 0.1 seconds when the hook hits.
           </p>
           <div data-home-reveal className="mt-8 flex flex-col gap-3 sm:flex-row">
             <button
@@ -127,13 +132,16 @@ export const HomePage: React.FC<HomePageProps> = ({ publicConfig, requestedArtis
           </div>
           <div data-home-reveal className="mt-8 grid gap-3 sm:grid-cols-3">
             {[
-              ['1', 'Listen'],
-              ['2', 'Guess'],
-              ['3', 'Win and share']
-            ].map(([step, label]) => (
+              ['1', 'Listen', Headphones],
+              ['2', 'Guess', Mic2],
+              ['3', 'Win and share', Trophy]
+            ].map(([step, label, Icon]) => (
               <div key={step} className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
-                <div className="text-xs font-black text-[#00e676]">STEP {step}</div>
-                <div className="mt-1 text-sm font-black text-white">{label}</div>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-xs font-black text-[#00e676]">STEP {step}</div>
+                  <Icon className="h-5 w-5 text-[#00e676]" />
+                </div>
+                <div className="mt-2 text-sm font-black text-white">{label}</div>
               </div>
             ))}
           </div>
@@ -181,7 +189,7 @@ export const HomePage: React.FC<HomePageProps> = ({ publicConfig, requestedArtis
       <section className="rounded-lg border border-white/10 bg-[#101713] p-4 sm:p-6">
         <div className="grid gap-3 md:grid-cols-3">
           {[
-            ['Artist packs', 'Taylor Swift, Drake, Avicii, 7ari, Mocci, and more', Mic2],
+            ['Artists Heardle', 'Taylor Swift, Drake, the Weeknd, Billie Eilish, Ariana Grande, Sabrina Carpenter', Mic2],
             ['Genre and era runs', 'K-Pop, Bollywood, rap, country, 80s, 90s, 2000s', Tags],
             ['Multiplayer ready', 'Friend codes and same-device party play', Users]
           ].map(([title, body, Icon]) => (
@@ -313,6 +321,37 @@ export const HomePage: React.FC<HomePageProps> = ({ publicConfig, requestedArtis
               </div>
             ))}
           </div>
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-white/10 bg-[#101713] p-5 sm:p-6">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase tracking-wide text-[#00e676]">Streamer mode</p>
+            <h2 className="mt-2 text-3xl font-black sm:text-4xl">Made for fast chat challenges</h2>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-white/58">
+              Song Guess Game fits the same high-speed music guessing format played by Twitch and Kick streamers like ohnepixel: short clips, fast guesses, and shareable wins.
+            </p>
+          </div>
+          <button onClick={() => onNavigate('/play')} className="inline-flex h-11 items-center justify-center rounded-lg bg-[#00e676] px-5 text-sm font-black text-black hover:bg-[#1fe682]">
+            Play Now
+          </button>
+        </div>
+        <div className="mt-5 grid gap-4 lg:grid-cols-3">
+          {[
+            'https://www.instagram.com/reel/DcdVPnkMANS/embed',
+            'https://www.instagram.com/reel/Dcd5x8ssjKL/embed',
+            'https://www.instagram.com/reel/DcVmjydME0l/embed'
+          ].map((src) => (
+            <iframe
+              key={src}
+              src={src}
+              title="Song guessing reel"
+              className="h-[520px] w-full rounded-lg border border-white/10 bg-black"
+              loading="lazy"
+              allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
+            />
+          ))}
         </div>
       </section>
 
