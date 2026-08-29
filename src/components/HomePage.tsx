@@ -371,10 +371,10 @@ export const HomePage: React.FC<HomePageProps> = ({ publicConfig, requestedArtis
       <section className="rounded-lg border border-white/10 bg-[#101713] p-5 sm:p-6">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-xs font-black uppercase tracking-wide text-[#00e676]">Streamer mode</p>
-            <h2 className="mt-2 text-3xl font-black sm:text-4xl">Made for fast chat challenges</h2>
+            <p className="text-xs font-black uppercase tracking-wide text-[#00e676]">Seen it online?</p>
+            <h2 className="mt-2 text-3xl font-black sm:text-4xl">Play the song guessing game from the clips</h2>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-white/58">
-              Song Guess Game fits the same high-speed music guessing format played by Twitch and Kick streamers like ohnepixel: short clips, fast guesses, and shareable wins.
+              If you searched after watching ohnepixel or other Twitch and Kick creators play fast song guessing clips, this is the same idea built for everyone: short snippets, quick guesses, artist packs, genres, countries, and shareable results.
             </p>
           </div>
           <button onClick={() => onNavigate('/play')} className="inline-flex h-11 items-center justify-center rounded-lg bg-[#00e676] px-5 text-sm font-black text-black hover:bg-[#1fe682]">
