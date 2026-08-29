@@ -1097,6 +1097,7 @@ export default function App() {
           selectedCountryCode={settings.selectedCountry || 'GLOBAL'}
           onSelectCountryCode={handleCollectionCountrySelect}
           onSelectCollection={handleCollectionSelect}
+          onOpenArtist={(slug) => navigateToPage(getArtistPath(slug))}
           onClose={() => setIsCollectionsOpen(false)}
         />
       )}
@@ -1136,7 +1137,13 @@ export default function App() {
       )}
 
       {isMultiplayerOpen && (
-        <MultiplayerModal onClose={() => setIsMultiplayerOpen(false)} />
+        <MultiplayerModal
+          onClose={() => setIsMultiplayerOpen(false)}
+          isUnlocked={authSession.entitlement.active}
+          authSession={authSession}
+          onOpenAuth={() => setIsAuthOpen(true)}
+          onOpenPaywall={() => setIsPaywallOpen(true)}
+        />
       )}
 
       {isPaywallOpen && (
@@ -1359,6 +1366,11 @@ export default function App() {
             </h1>
             {activeSeo.customIntroText && (
               <p className="text-[11px] text-white/50">{activeSeo.customIntroText}</p>
+            )}
+            {activeChallenge?.type === 'artist' && (
+              <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wide text-[#00e676]/70">
+                Artist pack refreshes automatically once a week
+              </p>
             )}
           </div>
         )}
@@ -1604,7 +1616,13 @@ export default function App() {
       )}
 
       {isMultiplayerOpen && (
-        <MultiplayerModal onClose={() => setIsMultiplayerOpen(false)} />
+        <MultiplayerModal
+          onClose={() => setIsMultiplayerOpen(false)}
+          isUnlocked={authSession.entitlement.active}
+          authSession={authSession}
+          onOpenAuth={() => setIsAuthOpen(true)}
+          onOpenPaywall={() => setIsPaywallOpen(true)}
+        />
       )}
 
       {isPaywallOpen && (

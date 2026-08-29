@@ -151,6 +151,8 @@ export interface RequestedArtist {
   coverImage: string;
   status: 'ready' | 'pending';
   createdAt: string;
+  updatedAt?: string;
+  nextRefreshAt?: string;
 }
 
 export interface SpotifyArtistSuggestion {

@@ -3,7 +3,7 @@ import { gsap } from 'gsap';
 import { ArrowRight, Check, Globe2, Headphones, Mic2, Play, Sparkles, Tags, Trophy, Users } from 'lucide-react';
 import { PublicRuntimeConfig, RequestedArtist } from '../adminTypes';
 import { COUNTRIES } from '../data/countries';
-import { baseArtistSlug, getArtistChallenges, getGenreChallenges, orderArtistsByFeaturedPriority } from '../utils/challengeCatalog';
+import { TOP_US_FEATURED_ARTIST_SLUGS, baseArtistSlug, getArtistChallenges, getGenreChallenges, orderArtistsByFeaturedPriority } from '../utils/challengeCatalog';
 import { createDefaultRouteConfig, getArtistPath, getCountryPath, getGenrePath } from '../utils/runtimeConfig';
 
 interface HomePageProps {
@@ -40,6 +40,7 @@ export const HomePage: React.FC<HomePageProps> = ({ publicConfig, requestedArtis
   const heroRef = useRef<HTMLDivElement | null>(null);
   const carouselRef = useRef<HTMLDivElement | null>(null);
   const tweenRef = useRef<gsap.core.Tween | null>(null);
+  const dragRef = useRef({ dragging: false, startX: 0, startOffset: 0, offset: 0, moved: false });
   const homeSeo = publicConfig.routeConfigs['system:home'] || createDefaultRouteConfig('system:home', publicConfig.appUrl);
 
   const artists = useMemo(() => {
@@ -62,7 +63,12 @@ export const HomePage: React.FC<HomePageProps> = ({ publicConfig, requestedArtis
       ...requested,
       ...staticArtists.filter((artist) => !rebuiltBaseSlugs.has(artist.slug))
     ].map((artist) => [artist.slug, artist]));
-    return orderArtistsByFeaturedPriority(Array.from(bySlug.values())).slice(0, 24);
+    const sorted = orderArtistsByFeaturedPriority(Array.from(bySlug.values()));
+    const featured = TOP_US_FEATURED_ARTIST_SLUGS.flatMap((slug) => {
+      const match = sorted.find((artist) => baseArtistSlug(artist.slug) === slug || artist.slug === slug);
+      return match ? [match] : [];
+    });
+    return featured;
   }, [requestedArtists]);
 
   const topArtists = artists.slice(0, 12);
@@ -99,6 +105,34 @@ export const HomePage: React.FC<HomePageProps> = ({ publicConfig, requestedArtis
 
   const pauseCarousel = () => tweenRef.current?.pause();
   const resumeCarousel = () => tweenRef.current?.resume();
+  const handleCarouselPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    dragRef.current = {
+      dragging: true,
+      startX: event.clientX,
+      startOffset: dragRef.current.offset,
+      offset: dragRef.current.offset,
+      moved: false
+    };
+    tweenRef.current?.pause();
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const handleCarouselPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag.dragging || !carouselRef.current) return;
+    const delta = event.clientX - drag.startX;
+    drag.moved = drag.moved || Math.abs(delta) > 8;
+    drag.offset = drag.startOffset + delta;
+    gsap.set(carouselRef.current, { x: drag.offset });
+  };
+  const handleCarouselPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (dragRef.current.dragging) {
+      dragRef.current.dragging = false;
+      event.currentTarget.releasePointerCapture(event.pointerId);
+      window.setTimeout(() => {
+        if (!dragRef.current.dragging) tweenRef.current?.resume();
+      }, 900);
+    }
+  };
 
   return (
     <main ref={heroRef} className="relative z-10 mx-auto flex w-full max-w-7xl flex-col gap-20 px-4 pb-20 pt-8 text-white sm:px-8">
@@ -152,6 +186,10 @@ export const HomePage: React.FC<HomePageProps> = ({ publicConfig, requestedArtis
           className="relative overflow-hidden py-10 [perspective:1100px]"
           onMouseEnter={pauseCarousel}
           onMouseLeave={resumeCarousel}
+          onPointerDown={handleCarouselPointerDown}
+          onPointerMove={handleCarouselPointerMove}
+          onPointerUp={handleCarouselPointerUp}
+          onPointerCancel={handleCarouselPointerUp}
         >
           <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-16 bg-gradient-to-r from-[#080c0a] to-transparent" />
           <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-16 bg-gradient-to-l from-[#080c0a] to-transparent" />
@@ -161,14 +199,20 @@ export const HomePage: React.FC<HomePageProps> = ({ publicConfig, requestedArtis
                 key={`${artist.slug}-${index}`}
                 href={getArtistPath(artist.slug)}
                 onClick={(event) => {
+                  if (dragRef.current.moved) {
+                    event.preventDefault();
+                    dragRef.current.moved = false;
+                    return;
+                  }
                   event.preventDefault();
                   onNavigate(getArtistPath(artist.slug));
                 }}
+                draggable={false}
                 className={`group relative h-[360px] w-[250px] shrink-0 overflow-hidden rounded-lg border border-white/12 bg-[#111814] shadow-2xl transition-transform hover:-translate-y-2 ${
                   index % 3 === 1 ? 'scale-105' : 'scale-95 opacity-85'
                 }`}
               >
-                <img src={artist.coverImage} alt={artist.name} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                <img src={artist.coverImage} alt={artist.name} className="h-full w-full object-cover" referrerPolicy="no-referrer" draggable={false} />
                 <div className="absolute inset-0 bg-gradient-to-t from-black via-black/25 to-transparent" />
                 <div className="absolute inset-x-0 bottom-0 p-5">
                   <div className="inline-flex rounded-full bg-[#00e676] px-2 py-1 text-[10px] font-black uppercase text-black">

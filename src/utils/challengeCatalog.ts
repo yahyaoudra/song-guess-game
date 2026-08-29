@@ -29,7 +29,13 @@ export const TOP_US_FEATURED_ARTIST_NAMES = [
   'The Weeknd',
   'Billie Eilish',
   'Ariana Grande',
-  'Sabrina Carpenter'
+  'Sabrina Carpenter',
+  'Justin Bieber',
+  'Bruno Mars',
+  'Post Malone',
+  'Kendrick Lamar',
+  'Dua Lipa',
+  'Miley Cyrus'
 ];
 
 export const TOP_US_FEATURED_ARTIST_SLUGS = TOP_US_FEATURED_ARTIST_NAMES.map(slugifyChallenge);

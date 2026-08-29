@@ -117,7 +117,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
       if (!bySlug.has(baseSlug)) bySlug.set(baseSlug, artist);
     });
     const configured = (featuredArtistSlugs || []).flatMap((slug) => {
-      const artist = bySlug.get(slug);
+      const artist = bySlug.get(slug) || bySlug.get(baseArtistSlug(slug));
       return artist ? [artist] : [];
     });
     const selected = configured.length > 0 ? configured : allArtists.slice(0, 24);

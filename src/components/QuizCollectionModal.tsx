@@ -4,11 +4,13 @@ import { QuizCollection, Song } from '../types';
 import { QUIZ_COLLECTIONS } from '../data/quizCollections';
 import { ALL_SONGS, DIFFICULTY_COLORS } from '../data/moroccanSongs';
 import { COUNTRIES } from '../data/countries';
+import { getArtistPath } from '../utils/runtimeConfig';
 
 interface QuizCollectionModalProps {
   selectedCountryCode: string;
   onSelectCountryCode?: (code: string) => void;
   onSelectCollection: (collection: QuizCollection) => void;
+  onOpenArtist?: (slug: string) => void;
   onClose: () => void;
 }
 
@@ -47,10 +49,16 @@ function getDisplayTitle(collection: QuizCollection, tab: LibraryTab): string {
   return collection.title;
 }
 
+function getArtistSlugFromCollection(collection: QuizCollection): string | null {
+  const match = collection.id.match(/^artist-(.+)-artist-profile$/);
+  return match?.[1] || null;
+}
+
 export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
   selectedCountryCode,
   onSelectCountryCode,
   onSelectCollection,
+  onOpenArtist,
   onClose
 }) => {
   const [activeTab, setActiveTab] = useState<LibraryTab>('countries');
@@ -183,6 +191,34 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
 
   const handleSelectPack = (collection: QuizCollection) => {
     onSelectCollection(collection);
+  };
+
+  const handleOpenArtist = (collection: QuizCollection) => {
+    const slug = getArtistSlugFromCollection(collection);
+    if (!slug || !onOpenArtist) {
+      handleSelectPack(collection);
+      return;
+    }
+    onClose();
+    onOpenArtist(slug);
+  };
+
+  const renderCoverStrip = (songs: Song[]) => {
+    const uniqueCovers = Array.from(new Map(songs.map((song) => [song.artworkUrl, song])).values()).slice(0, 5);
+    if (uniqueCovers.length === 0) return null;
+    return (
+      <div className="mt-2 flex items-center gap-1.5">
+        {uniqueCovers.map((song) => (
+          <img
+            key={`${song.id}-${song.artworkUrl}`}
+            src={song.artworkUrl}
+            alt=""
+            className="h-7 w-7 rounded-md border border-white/10 object-cover"
+            referrerPolicy="no-referrer"
+          />
+        ))}
+      </div>
+    );
   };
 
   return (
@@ -404,7 +440,7 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
                   >
                     {/* Left: Thumbnail with badge */}
                     <div
-                      onClick={() => handleSelectPack(col)}
+                      onClick={() => activeTab === 'artists' ? handleOpenArtist(col) : handleSelectPack(col)}
                       className="w-20 h-20 sm:w-28 sm:h-28 rounded-lg overflow-hidden bg-black/60 shrink-0 relative cursor-pointer border border-white/10 group-hover:border-[#00e676]/40 transition-colors my-auto"
                     >
                       <img
@@ -437,7 +473,7 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
                       <div>
                         <div className="flex items-start justify-between gap-1">
                           <h3
-                            onClick={() => handleSelectPack(col)}
+                            onClick={() => activeTab === 'artists' ? handleOpenArtist(col) : handleSelectPack(col)}
                             className="text-xs sm:text-base font-black text-white group-hover:text-[#00e676] transition-colors leading-tight cursor-pointer line-clamp-1"
                           >
                             {displayTitle}
@@ -452,6 +488,7 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
                           {col.description}
                         </p>
                         <div className="hidden sm:block">{renderSongPreview(songs, 4)}</div>
+                        {activeTab === 'artists' && renderCoverStrip(songs)}
                       </div>
 
                       {/* Card Footer: Metadata & Buttons */}
@@ -491,6 +528,19 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
                               <ExternalLink className="w-2.5 h-2.5 opacity-70" />
                             </a>
                           )}
+                          {activeTab === 'artists' && getArtistSlugFromCollection(col) && (
+                            <a
+                              href={getArtistPath(getArtistSlugFromCollection(col) || '')}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                handleOpenArtist(col);
+                              }}
+                              className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[11px] font-bold text-white/65 transition-colors cursor-pointer"
+                            >
+                              Artist page
+                            </a>
+                          )}
                           <button
                             onClick={() => handleSelectPack(col)}
                             className="flex items-center gap-1 px-2.5 sm:px-3 py-1 bg-[#00e676] hover:bg-[#1de980] text-black font-black rounded-lg text-[11px] transition-all active:scale-95 cursor-pointer shadow-sm"
@@ -521,7 +571,7 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
                     className="group relative flex items-center justify-between gap-3 p-3 bg-[#121915] hover:bg-[#18221c] border border-white/10 hover:border-[#00e676]/50 rounded-xl transition-all"
                   >
                     <div
-                      onClick={() => handleSelectPack(col)}
+                      onClick={() => activeTab === 'artists' ? handleOpenArtist(col) : handleSelectPack(col)}
                       className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer"
                     >
                       <div className="w-12 h-12 rounded-lg overflow-hidden bg-black/60 shrink-0 relative border border-white/10">
@@ -557,6 +607,7 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
                             {songLine}{songs.length > 8 ? `, +${songs.length - 8} more` : ''}
                           </p>
                         )}
+                        {activeTab === 'artists' && renderCoverStrip(songs)}
                       </div>
                     </div>
 

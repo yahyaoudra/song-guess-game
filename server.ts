@@ -59,6 +59,8 @@ const ARCHIVE_PAGE_SIZE = 12;
 const USER_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const WEEKLY_UNLOCK_DAYS = 7;
 const WEEKLY_UNLOCK_AMOUNT_CENTS = 399;
+const ARTIST_PACK_REFRESH_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+const ARTIST_PACK_REFRESH_CHECK_MS = 60 * 60 * 1000;
 const MAILERSEND_EMAIL_API_URL = 'https://api.mailersend.com/v1/email';
 const SPOTIFY_TOKEN_URL = 'https://accounts.spotify.com/api/token';
 const SPOTIFY_API_URL = 'https://api.spotify.com/v1';
@@ -93,8 +95,24 @@ interface UserSession {
 interface MultiplayerRoom {
   code: string;
   hostName: string;
-  players: Array<{ id: string; name: string; score: number; connected: boolean }>;
+  players: Array<{
+    id: string;
+    name: string;
+    email?: string;
+    score: number;
+    correct: number;
+    turnsPlayed: number;
+    connected: boolean;
+  }>;
   createdAt: number;
+  settings?: {
+    challengeType?: string;
+    challengeSlug?: string;
+    challengeTitle?: string;
+    turnsPerPlayer?: number;
+  };
+  activity?: string;
+  status?: 'lobby' | 'playing' | 'finished';
 }
 
 interface UrlValidationSuccess {
@@ -116,6 +134,7 @@ let adminConfigCache: AdminConfigState | null = null;
 let dbPool: Pool | null = null;
 let dbUnavailableLogged = false;
 let spotifyAccessTokenCache: { token: string; expiresAt: number } | null = null;
+let artistRefreshTimer: NodeJS.Timeout | null = null;
 
 const AD_LOCATIONS = new Set<AdPlacementLocation>([
   'header',
@@ -927,6 +946,10 @@ function getArtistRequestsPath(): string {
   return path.resolve(process.env.ARTIST_REQUESTS_PATH || path.join(process.cwd(), 'data', 'artist-requests.json'));
 }
 
+function getNextArtistPackRefreshAt(from = Date.now()): string {
+  return new Date(from + ARTIST_PACK_REFRESH_INTERVAL_MS).toISOString();
+}
+
 async function readJsonFile<T>(filePath: string, fallback: T): Promise<T> {
   try {
     return JSON.parse(await readFile(filePath, 'utf8')) as T;
@@ -981,7 +1004,9 @@ async function getRequestedArtists(): Promise<RequestedArtist[]> {
         songsCount: songs.length,
         coverImage: hasSpotifyBuiltSongs ? safePublicImageUrl(artist.coverImage) || songs[0]?.artworkUrl || ALL_SONGS[0]?.artworkUrl || '' : '',
         status: hasSpotifyBuiltSongs ? 'ready' : 'pending',
-        createdAt: safeText(artist.createdAt, 40) || new Date().toISOString()
+        createdAt: safeText(artist.createdAt, 40) || new Date().toISOString(),
+        updatedAt: safeText(artist.updatedAt, 40),
+        nextRefreshAt: safeText(artist.nextRefreshAt, 40)
       };
     });
 }
@@ -1002,7 +1027,9 @@ function buildRequestedArtistPack(name: string): RequestedArtist {
     songsCount: songs.length,
     coverImage: songs[0]?.artworkUrl || '',
     status: 'ready',
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    nextRefreshAt: getNextArtistPackRefreshAt()
   };
 }
 
@@ -1169,8 +1196,46 @@ async function buildRequestedArtistPackFromSpotify(name: string, spotifyArtistId
     songsCount: songs.length,
     coverImage: safeHttpsUrl(spotifyArtist.images?.[0]?.url) || songs[0]?.artworkUrl || '',
     status: 'ready',
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    nextRefreshAt: getNextArtistPackRefreshAt()
   };
+}
+
+async function refreshDueArtistPacks(): Promise<void> {
+  if (!isSpotifyConfigured()) return;
+  const artists = await getRequestedArtists();
+  const now = Date.now();
+  const dueArtist = artists.find((artist) => {
+    if (artist.status !== 'ready' || !artist.spotifyArtistId) return false;
+    const nextRefresh = Date.parse(artist.nextRefreshAt || artist.updatedAt || artist.createdAt);
+    return !Number.isFinite(nextRefresh) || nextRefresh <= now;
+  });
+  if (!dueArtist) return;
+
+  try {
+    const refreshed = await buildRequestedArtistPackFromSpotify(dueArtist.name, dueArtist.spotifyArtistId);
+    refreshed.createdAt = dueArtist.createdAt;
+    refreshed.updatedAt = new Date().toISOString();
+    refreshed.nextRefreshAt = getNextArtistPackRefreshAt();
+    await saveRequestedArtists([
+      refreshed,
+      ...artists.filter((artist) => artist.spotifyArtistId !== dueArtist.spotifyArtistId && artist.slug !== dueArtist.slug)
+    ]);
+  } catch (error) {
+    console.warn('Scheduled artist pack refresh failed:', error instanceof Error ? error.message : error);
+    dueArtist.nextRefreshAt = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString();
+    await saveRequestedArtists(artists);
+  }
+}
+
+function startArtistPackRefreshScheduler(): void {
+  if (artistRefreshTimer) return;
+  artistRefreshTimer = setInterval(() => {
+    void refreshDueArtistPacks();
+  }, ARTIST_PACK_REFRESH_CHECK_MS);
+  artistRefreshTimer.unref?.();
+  void refreshDueArtistPacks();
 }
 
 async function getAdminConfig(req?: Request): Promise<AdminConfigState> {
@@ -2014,8 +2079,28 @@ function createRoomCode(): string {
   return multiplayerRooms.has(code) ? createRoomCode() : code;
 }
 
+function sanitizeMultiplayerSettings(source: unknown): MultiplayerRoom['settings'] {
+  if (!source || typeof source !== 'object') return undefined;
+  const raw = source as Record<string, unknown>;
+  return {
+    challengeType: safeText(raw.challengeType, 24),
+    challengeSlug: safeText(raw.challengeSlug, 120),
+    challengeTitle: safeText(raw.challengeTitle, 120),
+    turnsPerPlayer: Math.max(1, Math.min(25, Number(raw.turnsPerPlayer) || 1))
+  };
+}
+
 function broadcastRoom(room: MultiplayerRoom, wss: WebSocketServer): void {
   const payload = JSON.stringify({ type: 'room-state', room });
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN && (client as WebSocket & { roomCode?: string }).roomCode === room.code) {
+      client.send(payload);
+    }
+  });
+}
+
+function broadcastRoomEvent(room: MultiplayerRoom, wss: WebSocketServer, eventPayload: Record<string, unknown>): void {
+  const payload = JSON.stringify({ type: 'room-event', payload: eventPayload });
   wss.clients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN && (client as WebSocket & { roomCode?: string }).roomCode === room.code) {
       client.send(payload);
@@ -2035,6 +2120,7 @@ function attachMultiplayerServer(server: http.Server): void {
         const type = String(message.type || '');
         const roomCode = safeText(message.roomCode, 12).toUpperCase();
         const playerName = safeText(message.name, 40) || 'Player';
+        const playerEmail = safeText(message.email, 254).toLowerCase();
 
         if (type === 'create-room') {
           const code = createRoomCode();
@@ -2042,8 +2128,11 @@ function attachMultiplayerServer(server: http.Server): void {
           const room: MultiplayerRoom = {
             code,
             hostName: playerName,
-            players: [{ id: playerId, name: playerName, score: 0, connected: true }],
-            createdAt: Date.now()
+            players: [{ id: playerId, name: playerName, email: playerEmail || undefined, score: 0, correct: 0, turnsPlayed: 0, connected: true }],
+            createdAt: Date.now(),
+            settings: sanitizeMultiplayerSettings(message.settings),
+            activity: 'Room created',
+            status: 'lobby'
           };
           multiplayerRooms.set(code, room);
           typedSocket.roomCode = code;
@@ -2058,8 +2147,13 @@ function attachMultiplayerServer(server: http.Server): void {
             socket.send(JSON.stringify({ type: 'error', error: 'Room not found' }));
             return;
           }
+          if (room.players.length >= 10) {
+            socket.send(JSON.stringify({ type: 'error', error: 'Room is full' }));
+            return;
+          }
           const playerId = randomUUID();
-          room.players.push({ id: playerId, name: playerName, score: 0, connected: true });
+          room.players.push({ id: playerId, name: playerName, email: playerEmail || undefined, score: 0, correct: 0, turnsPlayed: 0, connected: true });
+          room.activity = `${playerName} joined`;
           typedSocket.roomCode = room.code;
           typedSocket.playerId = playerId;
           socket.send(JSON.stringify({ type: 'room-joined', room, playerId }));
@@ -2075,6 +2169,41 @@ function attachMultiplayerServer(server: http.Server): void {
             player.score = Math.max(0, Math.min(100_000, Number(message.score) || 0));
             broadcastRoom(room, wss);
           }
+        }
+
+        if (type === 'room-event' && roomCode) {
+          const room = multiplayerRooms.get(roomCode);
+          if (!room) {
+            socket.send(JSON.stringify({ type: 'error', error: 'Room not found' }));
+            return;
+          }
+          if (!room.players.some((player) => player.id === typedSocket.playerId)) {
+            socket.send(JSON.stringify({ type: 'error', error: 'Not joined to this room' }));
+            return;
+          }
+          const payload = message.payload && typeof message.payload === 'object'
+            ? (message.payload as Record<string, unknown>)
+            : {};
+          const payloadType = safeText(payload.type, 40);
+          if (payloadType === 'start-game') room.status = 'playing';
+          if (payloadType === 'finish') room.status = 'finished';
+          if (payloadType === 'activity') room.activity = safeText(payload.message, 160);
+          if (Array.isArray(payload.players)) {
+            room.players = payload.players.slice(0, 10).map((player) => {
+              const row = player && typeof player === 'object' ? player as Record<string, unknown> : {};
+              return {
+                id: safeText(row.id, 80) || randomUUID(),
+                name: safeText(row.name, 40) || 'Player',
+                email: safeText(row.email, 254) || undefined,
+                score: Math.max(0, Math.min(100_000, Number(row.score) || 0)),
+                correct: Math.max(0, Math.min(1000, Number(row.correct) || 0)),
+                turnsPlayed: Math.max(0, Math.min(1000, Number(row.turnsPlayed) || 0)),
+                connected: row.connected !== false
+              };
+            });
+          }
+          broadcastRoomEvent(room, wss, payload);
+          broadcastRoom(room, wss);
         }
       } catch {
         socket.send(JSON.stringify({ type: 'error', error: 'Invalid multiplayer message' }));
@@ -3632,6 +3761,7 @@ async function startServer() {
 
   const server = http.createServer(app);
   attachMultiplayerServer(server);
+  startArtistPackRefreshScheduler();
 
   server.listen(PORT, HOST, () => {
     console.log(`Moroccan Heardle server running on http://${HOST}:${PORT}`);
