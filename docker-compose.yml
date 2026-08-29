@@ -1,0 +1,85 @@
+# ==============================================================================
+# Docker Compose for EasyPanel & Self-Hosted Production Deployments
+# App: Song Guess Game - International Music Quiz & Song Trivia Platform
+# ==============================================================================
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: song-guess-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-song_guess}
+      - POSTGRES_USER=${POSTGRES_USER:-song_guess}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-song_guess_dev}
+    ports:
+      - "${POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-song_guess} -d $${POSTGRES_DB:-song_guess}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: song-guess-game
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOST=0.0.0.0
+      - APP_URL=${APP_URL:?set APP_URL}
+      - TRUST_PROXY=${TRUST_PROXY:-true}
+      - ADMIN_ACCESS_PATH=${ADMIN_ACCESS_PATH:?set ADMIN_ACCESS_PATH}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:?set ADMIN_USERNAME}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?set ADMIN_PASSWORD}
+      - ADMIN_SESSION_SECRET=${ADMIN_SESSION_SECRET:?set ADMIN_SESSION_SECRET}
+      - ADMIN_CONFIG_PATH=/app/data/admin-config.json
+      - ADMIN_ACTIVITY_PATH=/app/data/activity-log.json
+      - ARTIST_REQUESTS_PATH=/app/data/artist-requests.json
+      - DATABASE_URL=${DOCKER_DATABASE_URL:-postgres://song_guess:song_guess_dev@postgres:5432/song_guess}
+      - DATABASE_SSL=${DATABASE_SSL:-false}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+      - VITE_STRIPE_PUBLISHABLE_KEY=${VITE_STRIPE_PUBLISHABLE_KEY:-}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID:-}
+      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET:-}
+      - MAILERSEND_API_KEY=${MAILERSEND_API_KEY:-}
+      - MAILERSEND_FROM_EMAIL=${MAILERSEND_FROM_EMAIL:-}
+      - MAILERSEND_FROM_NAME=${MAILERSEND_FROM_NAME:-Song Guess Game}
+      - GOOGLE_ANALYTICS_MEASUREMENT_ID=${GOOGLE_ANALYTICS_MEASUREMENT_ID:-}
+      - GOOGLE_ADSENSE_CLIENT=${GOOGLE_ADSENSE_CLIENT:-}
+      - GOOGLE_SEARCH_CONSOLE_VERIFICATION=${GOOGLE_SEARCH_CONSOLE_VERIFICATION:-}
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1024M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    labels:
+      - "easypanel.io/service-type=app"
+      - "easypanel.io/domain=${DOMAIN:-songguessgame.online}"
+
+volumes:
+  postgres-data:
