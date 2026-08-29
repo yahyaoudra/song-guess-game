@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Shield, ArrowLeft, Lock, FileText, Globe, CheckCircle2, Mail, ExternalLink } from 'lucide-react';
-import { getPublicAppUrl, getPublicHost } from '../utils/domain';
 import { getLegalPath } from '../utils/runtimeConfig';
 
 export type LegalSectionKey = 'privacy' | 'gdpr' | 'california' | 'terms' | 'cookies';
+
+const LEGAL_DISPLAY_HOST = 'songguessgame.online';
+const LEGAL_DISPLAY_URL = `https://${LEGAL_DISPLAY_HOST}`;
+const LEGAL_PRIVACY_EMAIL = `privacy@${LEGAL_DISPLAY_HOST}`;
 
 interface LegalPageProps {
   initialSection?: LegalSectionKey;
@@ -17,8 +20,8 @@ export const LegalPage: React.FC<LegalPageProps> = ({
   onSectionChange
 }) => {
   const [activeSection, setActiveSection] = useState<LegalSectionKey>(initialSection);
-  const domainHost = getPublicHost();
-  const domainUrl = getPublicAppUrl();
+  const domainHost = LEGAL_DISPLAY_HOST;
+  const domainUrl = LEGAL_DISPLAY_URL;
 
   useEffect(() => {
     setActiveSection(initialSection);
@@ -218,7 +221,7 @@ export const LegalPage: React.FC<LegalPageProps> = ({
 
               <h3 className="text-base sm:text-lg font-bold text-white pt-2">3. Data Retention & Deletion</h3>
               <p>
-                Local progress can be removed by clearing browser site data. Server activity logs, account records, email verification tokens, daily free-play records, entitlement dates, and payment references are kept for account access, fraud prevention, support, refunds, and operational review. Stripe processes card details directly; Song Guess Game stores payment identifiers and status, not full card numbers. To request deletion of server-side data tied to your email or nickname, contact <code className="text-[#00e676]">privacy@{domainHost}</code>.
+                Local progress can be removed by clearing browser site data. Server activity logs, account records, email verification tokens, daily free-play records, entitlement dates, and payment references are kept for account access, fraud prevention, support, refunds, and operational review. Stripe processes card details directly; Song Guess Game stores payment identifiers and status, not full card numbers. To request deletion of server-side data tied to your email or nickname, contact <code className="text-[#00e676]">{LEGAL_PRIVACY_EMAIL}</code>.
               </p>
             </div>
           )}
@@ -272,7 +275,7 @@ export const LegalPage: React.FC<LegalPageProps> = ({
               <div className="p-4 bg-[#16221c] border border-[#00e676]/25 rounded-2xl">
                 <span className="font-bold text-white block mb-1">Data Controller Information</span>
                 <p className="text-xs text-white/60">
-                  For privacy questions, data requests, or compliance inquiries, contact: <code className="text-[#00e676]">privacy@{domainHost}</code>.
+                  For privacy questions, data requests, or compliance inquiries, contact: <code className="text-[#00e676]">{LEGAL_PRIVACY_EMAIL}</code>.
                 </p>
               </div>
             </div>

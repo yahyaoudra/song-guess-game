@@ -13,7 +13,7 @@ interface HomePageProps {
 }
 
 const comparisonRows = [
-  ['Unlimited 7-day access', 'Daily-only or limited modes', '$3.99 weekly pass unlocks the whole game'],
+  ['Unlimited Heardle', 'Daily-only or limited modes', 'Available*'],
   ['Artist challenges', 'Small fixed song pools', 'Spotify-built packs by exact artist'],
   ['Genre and era games', 'Few broad playlists', 'K-Pop, Bollywood, rap, country, 80s, 90s, 2000s, and more'],
   ['Multiplayer options', 'Mostly solo play', 'Friend-code rooms plus same-device party mode'],
@@ -121,15 +121,15 @@ export const HomePage: React.FC<HomePageProps> = ({ publicConfig, requestedArtis
               onClick={() => onNavigate('/artist')}
               className="inline-flex h-14 items-center justify-center gap-2 rounded-lg border border-white/12 bg-white/[0.055] px-7 text-base font-black text-white hover:bg-white/10"
             >
-              Browse Artists
+              Play by Artist
               <ArrowRight className="h-5 w-5" />
             </button>
           </div>
           <div data-home-reveal className="mt-8 grid gap-3 sm:grid-cols-3">
             {[
-              ['1', 'Pick a pack'],
-              ['2', 'Play a snippet'],
-              ['3', 'Guess and share']
+              ['1', 'Listen'],
+              ['2', 'Guess'],
+              ['3', 'Win and share']
             ].map(([step, label]) => (
               <div key={step} className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
                 <div className="text-xs font-black text-[#00e676]">STEP {step}</div>
@@ -277,11 +277,19 @@ export const HomePage: React.FC<HomePageProps> = ({ publicConfig, requestedArtis
         </div>
       </section>
 
-      <section className="grid gap-8 lg:grid-cols-[1fr_0.9fr]">
+      <section className="grid gap-8">
         <div>
-          <p className="text-xs font-black uppercase tracking-wide text-[#00e676]">Comparison</p>
+          <p className="text-xs font-black uppercase tracking-wide text-[#00e676]">Why Song Guess Game</p>
           <h2 className="mt-2 text-3xl font-black sm:text-4xl">Built beyond one daily song</h2>
           <div className="mt-6 overflow-hidden rounded-lg border border-white/10">
+            <div className="grid gap-0 border-b border-white/10 bg-white/[0.06] md:grid-cols-[0.8fr_1fr_1fr]">
+              <div className="p-4 text-xs font-black uppercase tracking-wide text-white/45">Feature</div>
+              <div className="p-4 text-xs font-black uppercase tracking-wide text-white">The other</div>
+              <div className="flex items-center gap-2 p-4 text-xs font-black uppercase tracking-wide text-white">
+                <img src="/favicon.png" alt="" className="h-6 w-6 rounded-md" />
+                Song Guess Game
+              </div>
+            </div>
             {comparisonRows.map(([feature, others, us]) => (
               <div key={feature} className="grid gap-0 border-b border-white/10 last:border-b-0 md:grid-cols-[0.8fr_1fr_1fr]">
                 <div className="bg-white/[0.03] p-4 text-sm font-black">{feature}</div>
@@ -329,7 +337,7 @@ const BrowseBlock: React.FC<{ title: string; cta: string; onClick: () => void; c
   <section>
     <div className="mb-5 flex items-end justify-between gap-4">
       <div>
-        <p className="text-xs font-black uppercase tracking-wide text-[#00e676]">Browse</p>
+        <p className="text-xs font-black uppercase tracking-wide text-[#00e676]">Play by</p>
         <h2 className="mt-2 text-3xl font-black">{title}</h2>
       </div>
       <button onClick={onClick} className="rounded-lg border border-white/12 px-4 py-2 text-sm font-black text-white/75 hover:bg-white/10">
