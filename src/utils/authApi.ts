@@ -106,3 +106,10 @@ export async function requestArtist(artistName: string, spotifyArtistId?: string
   });
   return body.artist;
 }
+
+export async function sendContactRequest(name: string, email: string, message: string): Promise<void> {
+  await requestJson<{ ok: true }>('/api/contact', {
+    method: 'POST',
+    body: JSON.stringify({ name, email, message })
+  });
+}

@@ -16,7 +16,7 @@ declare global {
   }
 }
 
-const DEFAULT_APP_URL = 'https://songguess.example.com';
+const DEFAULT_APP_URL = 'https://songguessgame.online';
 const LEGAL_PATHS = new Set(['privacy', 'gdpr', 'california-privacy', 'california', 'terms', 'cookies']);
 
 export function normalizePublicAppUrl(rawUrl?: string): string {
@@ -111,6 +111,40 @@ export function createDefaultPublicRuntimeConfig(): PublicRuntimeConfig {
 export function createDefaultRouteConfig(routeKey: string, appUrl = DEFAULT_APP_URL): AdminPageConfig {
   const cleanAppUrl = normalizePublicAppUrl(appUrl);
   const now = new Date().toISOString();
+
+  if (routeKey === 'system:home') {
+    return {
+      countryCode: 'GLOBAL',
+      slug: '',
+      pageTitle: 'Song Guess Game - Music Trivia by Artist, Genre & Country',
+      metaDescription: 'Play Song Guess Game online. Guess songs from tiny snippets, explore artist discographies, country packs, genres, multiplayer modes, and unlimited play.',
+      keywords: 'song guess game, heardle, music quiz, song trivia, artist heardle, genre heardle, country music quiz',
+      canonicalUrl: `${cleanAppUrl}/`,
+      customHeading: 'Song Guess Game',
+      customIntroText: 'Guess songs by artist, genre, country, and era.',
+      socialTitle: 'Song Guess Game - Music Trivia by Artist, Genre & Country',
+      socialDescription: 'A Heardle-style song guessing game with artists, genres, countries, multiplayer, and unlimited play.',
+      socialImageUrl: '',
+      updatedAt: now
+    };
+  }
+
+  if (routeKey === 'system:contact') {
+    return {
+      countryCode: 'GLOBAL',
+      slug: 'contact',
+      pageTitle: 'Contact Song Guess Game',
+      metaDescription: 'Contact Song Guess Game for support, artist requests, partnerships, advertising, and product feedback.',
+      keywords: 'contact song guess game, song guess support, music quiz contact',
+      canonicalUrl: `${cleanAppUrl}/contact`,
+      customHeading: 'Contact Song Guess Game',
+      customIntroText: 'Send a message to the Song Guess Game team.',
+      socialTitle: 'Contact Song Guess Game',
+      socialDescription: 'Send a message to the Song Guess Game team.',
+      socialImageUrl: '',
+      updatedAt: now
+    };
+  }
 
   if (routeKey === 'system:artist-index') {
     return {

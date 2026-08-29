@@ -2,6 +2,15 @@
 
 Production domain: `https://songguessgame.online`
 
+Public routes:
+
+- `/` is the marketing home page.
+- `/play` is the game app.
+- `/artist` is the artist archive/search page.
+- `/play/country` is the country archive.
+- `/play/genre` is the genre archive.
+- `/contact` sends contact requests to `info@songguessgame.online`.
+
 ## Preflight
 
 Run locally before every deploy:
@@ -158,6 +167,7 @@ The app serves:
 3. Create an API token with email sending permission.
 4. Set `MAILERSEND_API_KEY`, `MAILERSEND_FROM_EMAIL`, and `MAILERSEND_FROM_NAME`.
 5. Register a test user and verify that the email verification message arrives.
+6. Submit the `/contact` form and verify the message arrives at `info@songguessgame.online`.
 
 ## Smoke Test Checklist
 
@@ -165,6 +175,8 @@ Run after deployment:
 
 ```bash
 curl -I https://songguessgame.online
+curl -I https://songguessgame.online/play
+curl -I https://songguessgame.online/contact
 curl https://songguessgame.online/api/health
 curl https://songguessgame.online/robots.txt
 curl https://songguessgame.online/sitemap.xml

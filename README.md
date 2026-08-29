@@ -2,6 +2,15 @@
 
 International song guessing game with country routes, shareable score cards, server-side admin authentication, configurable SEO metadata, advertising placements, Google integrations, and activity logging.
 
+Routes:
+
+- `/` public home page
+- `/play` game app
+- `/artist` artist archive and Spotify artist pack search
+- `/play/country` country archive
+- `/play/genre` genre archive
+- `/contact` contact form
+
 ## Local Development
 
 1. Install dependencies:

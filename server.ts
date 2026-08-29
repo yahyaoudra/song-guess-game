@@ -305,6 +305,23 @@ async function sendVerificationEmail(email: string, name: string, verificationUr
   return true;
 }
 
+async function sendContactEmail(name: string, email: string, message: string): Promise<boolean> {
+  if (!isMailerSendConfigured()) return false;
+  await sendTransactionalEmail(
+    'info@songguessgame.online',
+    'Song Guess Game',
+    `Song Guess contact request from ${name}`,
+    `Name: ${name}\nEmail: ${email}\n\n${message}`,
+    [
+      '<h2>Song Guess contact request</h2>',
+      `<p><strong>Name:</strong> ${escapeHtml(name)}</p>`,
+      `<p><strong>Email:</strong> ${escapeHtml(email)}</p>`,
+      `<p>${escapeHtml(message).replace(/\n/g, '<br>')}</p>`
+    ].join('')
+  );
+  return true;
+}
+
 function isSpotifyConfigured(): boolean {
   return Boolean(process.env.SPOTIFY_CLIENT_ID?.trim() && process.env.SPOTIFY_CLIENT_SECRET?.trim());
 }
@@ -638,6 +655,40 @@ function sanitizePageConfigs(raw: unknown, appUrl: string): Record<string, Admin
 function createDefaultRouteConfig(routeKey: string, appUrl: string): AdminPageConfig {
   const now = new Date().toISOString();
 
+  if (routeKey === 'system:home') {
+    return {
+      countryCode: 'GLOBAL',
+      slug: '',
+      pageTitle: 'Song Guess Game - Music Trivia by Artist, Genre & Country',
+      metaDescription: 'Play Song Guess Game online. Guess songs from tiny snippets, explore artist discographies, country packs, genres, multiplayer modes, and unlimited play.',
+      keywords: 'song guess game, heardle, music quiz, song trivia, artist heardle, genre heardle, country music quiz',
+      canonicalUrl: `${appUrl}/`,
+      customHeading: 'Song Guess Game',
+      customIntroText: 'Guess songs by artist, genre, country, and era.',
+      socialTitle: 'Song Guess Game - Music Trivia by Artist, Genre & Country',
+      socialDescription: 'A Heardle-style song guessing game with artists, genres, countries, multiplayer, and unlimited play.',
+      socialImageUrl: '',
+      updatedAt: now
+    };
+  }
+
+  if (routeKey === 'system:contact') {
+    return {
+      countryCode: 'GLOBAL',
+      slug: 'contact',
+      pageTitle: 'Contact Song Guess Game',
+      metaDescription: 'Contact Song Guess Game for support, artist requests, partnerships, advertising, and product feedback.',
+      keywords: 'contact song guess game, song guess support, music quiz contact',
+      canonicalUrl: `${appUrl}/contact`,
+      customHeading: 'Contact Song Guess Game',
+      customIntroText: 'Send a message to the Song Guess Game team.',
+      socialTitle: 'Contact Song Guess Game',
+      socialDescription: 'Send a message to the Song Guess Game team.',
+      socialImageUrl: '',
+      updatedAt: now
+    };
+  }
+
   if (routeKey === 'system:artist-index') {
     return {
       countryCode: 'GLOBAL',
@@ -748,7 +799,7 @@ function createDefaultRouteConfig(routeKey: string, appUrl: string): AdminPageCo
 function sanitizeRouteConfigs(raw: unknown, appUrl: string): Record<string, AdminPageConfig> {
   const source = raw && typeof raw === 'object' ? raw as Record<string, Record<string, unknown>> : {};
   const routeConfigs: Record<string, AdminPageConfig> = {};
-  const validRouteKey = /^(system:(play|artist-index|genre-index|country-index)|artist:[a-z0-9-]{1,80}|genre:[a-z0-9-]{1,80})$/;
+  const validRouteKey = /^(system:(home|play|contact|artist-index|genre-index|country-index)|artist:[a-z0-9-]{1,80}|genre:[a-z0-9-]{1,80})$/;
 
   for (const [routeKey, incoming] of Object.entries(source).slice(0, 400)) {
     if (!validRouteKey.test(routeKey)) continue;
@@ -1636,6 +1687,8 @@ function resolveCountryCodeFromRequest(req: Request, publicConfig: PublicRuntime
 
 function getRouteOverrideKey(req: Request): string | null {
   const pathSegments = req.path.split('/').filter(Boolean).map((segment) => decodeURIComponent(segment).toLowerCase());
+  if (!pathSegments[0]) return 'system:home';
+  if (pathSegments[0] === 'contact' && !pathSegments[1]) return 'system:contact';
   if (pathSegments[0] === 'artist' && !pathSegments[1]) return 'system:artist-index';
   if (pathSegments[0] === 'artist' && pathSegments[1]) return `artist:${slugifyChallenge(pathSegments[1])}`;
   if (pathSegments[0] === 'play' && pathSegments[1] === 'country' && !pathSegments[2]) return 'system:country-index';
@@ -1815,10 +1868,12 @@ function addArchivePagePaths(paths: Set<string>, basePath: string, itemCount: nu
 function buildSitemapXml(publicConfig: PublicRuntimeConfig, requestedArtists: RequestedArtist[] = []): string {
   const today = new Date().toISOString().slice(0, 10);
   const paths = new Set<string>([
+    '/',
     '/play',
     '/play/country',
     '/artist',
     '/play/genre',
+    '/contact',
     '/privacy',
     '/gdpr',
     '/california-privacy',
@@ -1866,10 +1921,6 @@ function buildRedirectTarget(req: Request, publicConfig: PublicRuntimeConfig): s
     cleanPath = cleanPath.replace(/\/+$/, '');
   }
 
-  if (cleanPath === '/') {
-    cleanPath = '/play';
-  }
-
   const cleanSegments = cleanPath.split('/').filter(Boolean).map((segment) => decodeURIComponent(segment).toLowerCase());
   if (cleanSegments[0] === 'play' && cleanSegments[1] && cleanSegments[1] !== 'genre') {
     const playSegment = cleanSegments[1];
@@ -1898,7 +1949,7 @@ function buildRedirectTarget(req: Request, publicConfig: PublicRuntimeConfig): s
     firstSegment &&
     firstSegment !== 'play' &&
     firstSegment !== 'artist' &&
-    !['privacy', 'gdpr', 'california', 'california-privacy', 'terms', 'cookies'].includes(firstSegment)
+    !['contact', 'privacy', 'gdpr', 'california', 'california-privacy', 'terms', 'cookies'].includes(firstSegment)
       ? COUNTRIES.find((country) => country.code.toLowerCase() === firstSegment) ||
         Object.values(publicConfig.pageConfigs).find((page) => page.slug.toLowerCase() === firstSegment)
       : null;
@@ -2578,6 +2629,26 @@ async function startServer() {
     } catch (error) {
       console.error('Public config error:', error);
       res.status(500).json({ error: 'Failed to load public config' });
+    }
+  });
+
+  app.post('/api/contact', createRateLimit(5, 10 * 60_000), async (req, res) => {
+    const name = safeText(req.body?.name, 80);
+    const email = safeText(req.body?.email, 254).toLowerCase();
+    const message = safeMultilineText(req.body?.message, 3000);
+    if (!name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || message.length < 10) {
+      res.status(400).json({ error: 'Name, valid email, and a message are required.' });
+      return;
+    }
+    try {
+      const emailSent = await sendContactEmail(name, email, message);
+      if (!emailSent) {
+        res.status(503).json({ error: 'Contact email is not configured yet.' });
+        return;
+      }
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(502).json({ error: error instanceof Error ? error.message : 'Could not send contact request.' });
     }
   });
 

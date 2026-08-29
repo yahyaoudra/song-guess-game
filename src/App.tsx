@@ -27,6 +27,8 @@ import { AdInterstitialModal } from './components/AdInterstitialModal';
 import { AuthModal } from './components/AuthModal';
 import { MultiplayerModal } from './components/MultiplayerModal';
 import { PaywallModal } from './components/PaywallModal';
+import { HomePage } from './components/HomePage';
+import { ContactPage } from './components/ContactPage';
 import {
   getStoredSettings,
   saveStoredSettings,
@@ -69,7 +71,7 @@ function baseArtistSlug(slug: string): string {
   return slug.replace(SPOTIFY_ARTIST_SUFFIX_PATTERN, '');
 }
 
-type ActiveView = 'game' | 'legal' | 'artists' | 'genres' | 'countries';
+type ActiveView = 'home' | 'game' | 'legal' | 'artists' | 'genres' | 'countries' | 'contact';
 type ActiveChallenge =
   | { type: 'artist'; slug: string; title: string; songIds?: string[]; songs?: Song[] }
   | { type: 'genre'; slug: string; title: string }
@@ -307,6 +309,20 @@ export default function App() {
           }
         };
 
+        if (pathname === '/') {
+          audioEngine.stop();
+          setActiveChallenge(null);
+          setActiveView('home');
+          return;
+        }
+
+        if (segments[0] === 'contact') {
+          audioEngine.stop();
+          setActiveChallenge(null);
+          setActiveView('contact');
+          return;
+        }
+
         if (segments[0] === 'artist' && !segments[1]) {
           audioEngine.stop();
           clearCountrySelectionForChallenge();
@@ -433,13 +449,13 @@ export default function App() {
         const matchedCountry =
           (countryParam && COUNTRIES.find((c) => c.code.toLowerCase() === countryParam.toLowerCase())) ||
           (routeCountryCode ? COUNTRIES.find((c) => c.code === routeCountryCode) : null) ||
-          (pathname === '/' || pathname === '/play' ? COUNTRIES.find((c) => c.code === 'GLOBAL') : null);
+          (pathname === '/play' ? COUNTRIES.find((c) => c.code === 'GLOBAL') : null);
 
         if (matchedCountry && matchedCountry.code !== settings.selectedCountry) {
           handleSelectCountry(matchedCountry.code, false);
         }
 
-        if (matchedCountry && (countryParam || pathname === '/')) {
+        if (matchedCountry && countryParam) {
           window.history.replaceState({}, document.title, getCountryPath(matchedCountry.code, publicConfig));
         }
       } catch {
@@ -758,6 +774,30 @@ export default function App() {
       : activeView === 'countries'
       ? getRouteConfig('system:country-index', publicConfig)
       : null;
+  const homeSeo: AdminPageConfig = {
+    countryCode: 'GLOBAL',
+    slug: '',
+    pageTitle: 'Song Guess Game - Music Trivia by Artist, Genre & Country',
+    metaDescription: 'Play Song Guess Game online. Guess songs from tiny snippets, explore artist discographies, country packs, genres, multiplayer modes, and unlimited play.',
+    keywords: 'song guess game, heardle, music quiz, song trivia, artist heardle, genre heardle, country music quiz',
+    canonicalUrl: `${publicConfig.appUrl}/`,
+    customHeading: 'Song Guess Game',
+    customIntroText: 'Guess songs by artist, genre, country, and era.',
+    socialTitle: 'Song Guess Game - Music Trivia by Artist, Genre & Country',
+    socialDescription: 'A Heardle-style song guessing game with artists, genres, countries, multiplayer, and unlimited play.',
+    socialImageUrl: '',
+    updatedAt: ''
+  };
+  const contactSeo: AdminPageConfig = {
+    ...homeSeo,
+    pageTitle: 'Contact Song Guess Game',
+    metaDescription: 'Contact Song Guess Game for support, artist requests, partnerships, advertising, and product feedback.',
+    keywords: 'contact song guess game, song guess support, music quiz contact',
+    canonicalUrl: `${publicConfig.appUrl}/contact`,
+    customHeading: 'Contact Song Guess Game',
+    socialTitle: 'Contact Song Guess Game',
+    socialDescription: 'Send a message to the Song Guess Game team.'
+  };
   const playSeo =
     settings.selectedCountry === 'GLOBAL'
       ? getRouteConfig('system:play', publicConfig)
@@ -802,7 +842,11 @@ export default function App() {
     return getArchivePageHref(basePath, parseArchivePage(window.location.search));
   };
   const pagePath =
-    activeView === 'legal'
+    activeView === 'home'
+      ? '/'
+      : activeView === 'contact'
+      ? '/contact'
+      : activeView === 'legal'
       ? getLegalPath(legalSection)
       : activeView === 'artists'
       ? archivePagePath('/artist')
@@ -815,11 +859,11 @@ export default function App() {
       : activeChallenge?.type === 'genre'
       ? getGenrePath(activeChallenge.slug)
       : getCountryPath(settings.selectedCountry, publicConfig);
-  const pageTitle = activeView === 'legal' ? legalSeo[legalSection].title : activeSeo.pageTitle;
-  const pageDescription = activeView === 'legal' ? legalSeo[legalSection].description : activeSeo.metaDescription;
-  const pageKeywords = activeView === 'legal' ? 'song guess game privacy, music quiz terms' : activeSeo.keywords;
-  const socialTitle = activeView === 'legal' ? pageTitle : activeSeo.socialTitle || pageTitle;
-  const socialDescription = activeView === 'legal' ? pageDescription : activeSeo.socialDescription || pageDescription;
+  const pageTitle = activeView === 'home' ? homeSeo.pageTitle : activeView === 'contact' ? contactSeo.pageTitle : activeView === 'legal' ? legalSeo[legalSection].title : activeSeo.pageTitle;
+  const pageDescription = activeView === 'home' ? homeSeo.metaDescription : activeView === 'contact' ? contactSeo.metaDescription : activeView === 'legal' ? legalSeo[legalSection].description : activeSeo.metaDescription;
+  const pageKeywords = activeView === 'home' ? homeSeo.keywords : activeView === 'contact' ? contactSeo.keywords : activeView === 'legal' ? 'song guess game privacy, music quiz terms' : activeSeo.keywords;
+  const socialTitle = activeView === 'home' ? homeSeo.socialTitle : activeView === 'contact' ? contactSeo.socialTitle : activeView === 'legal' ? pageTitle : activeSeo.socialTitle || pageTitle;
+  const socialDescription = activeView === 'home' ? homeSeo.socialDescription : activeView === 'contact' ? contactSeo.socialDescription : activeView === 'legal' ? pageDescription : activeSeo.socialDescription || pageDescription;
   const shouldShowAds = !authSession.entitlement.active;
 
   useEffect(() => {
@@ -1128,6 +1172,54 @@ export default function App() {
     setActiveView('legal');
     navigateToPage(getLegalPath(section));
   };
+
+  if (activeView === 'home') {
+    return (
+      <div className="relative min-h-screen w-full bg-[#080c0a] text-white flex flex-col overflow-x-hidden font-sans selection:bg-[#00e676] selection:text-black">
+        <GoogleIntegrations config={publicConfig} pageTitle={pageTitle} pagePath={pagePath} />
+        <StageLighting
+          difficulty={currentDifficulty}
+          themeOverride={settings.accentColorOverride}
+          isComplete={false}
+        />
+        {renderAppHeader()}
+        <HomePage
+          publicConfig={publicConfig}
+          requestedArtists={requestedArtists}
+          onNavigate={(path) => navigateToPage(path)}
+        />
+        <footer className="relative z-10 border-t border-white/10 px-4 py-8 text-sm text-white/50">
+          <div className="mx-auto flex max-w-7xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="font-bold">Song Guess Game</div>
+            <div className="flex flex-wrap gap-4">
+              <button onClick={() => openLegalSection('privacy')} className="hover:text-white">Privacy</button>
+              <button onClick={() => openLegalSection('terms')} className="hover:text-white">Terms</button>
+              <button onClick={() => openLegalSection('cookies')} className="hover:text-white">Cookies</button>
+              <button onClick={() => navigateToPage('/contact')} className="hover:text-white">Contact</button>
+              <button onClick={() => navigateToPage('/play')} className="hover:text-white">Play</button>
+            </div>
+          </div>
+        </footer>
+        {renderNavigationModals()}
+      </div>
+    );
+  }
+
+  if (activeView === 'contact') {
+    return (
+      <div className="relative min-h-screen w-full bg-[#080c0a] text-white flex flex-col overflow-x-hidden font-sans selection:bg-[#00e676] selection:text-black">
+        <GoogleIntegrations config={publicConfig} pageTitle={pageTitle} pagePath={pagePath} />
+        <StageLighting
+          difficulty={currentDifficulty}
+          themeOverride={settings.accentColorOverride}
+          isComplete={false}
+        />
+        {renderAppHeader()}
+        <ContactPage onBack={() => navigateToPage('/')} />
+        {renderNavigationModals()}
+      </div>
+    );
+  }
 
   // If user opened the dedicated full-page Legal & Privacy page
   if (activeView === 'legal') {
