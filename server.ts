@@ -3588,6 +3588,7 @@ async function startServer() {
       const publicConfig = buildPublicConfig(adminConfig, req, false);
       const target = buildRedirectTarget(req, publicConfig);
       if (target) {
+        res.setHeader('Cache-Control', 'no-store, max-age=0');
         res.redirect(301, target);
         return;
       }
@@ -3612,6 +3613,9 @@ async function startServer() {
         const config = await getAdminConfig(req);
         const publicConfig = buildPublicConfig(config, req, isAdminEntryRequest(req));
         const html = await readFile(indexPath, 'utf8');
+        if (req.hostname === 'localhost' || req.hostname === '127.0.0.1') {
+          res.setHeader('Cache-Control', 'no-store, max-age=0');
+        }
         res.type('html').send(injectRuntimeHtml(html, req, publicConfig, res.locals.cspNonce as string | undefined));
       } catch (error) {
         next(error);
