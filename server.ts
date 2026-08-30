@@ -62,6 +62,7 @@ const WEEKLY_UNLOCK_AMOUNT_CENTS = 399;
 const ARTIST_PACK_REFRESH_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 const ARTIST_PACK_REFRESH_CHECK_MS = 60 * 60 * 1000;
 const ARTIST_PACK_REFRESH_START_DELAY_MS = 15 * 60 * 1000;
+const SPOTIFY_ARTIST_ALBUM_LIMIT = Math.max(10, Math.min(50, Number(process.env.SPOTIFY_ARTIST_ALBUM_LIMIT || '20') || 20));
 const MAILERSEND_EMAIL_API_URL = 'https://api.mailersend.com/v1/email';
 const SPOTIFY_TOKEN_URL = 'https://accounts.spotify.com/api/token';
 const SPOTIFY_API_URL = 'https://api.spotify.com/v1';
@@ -136,6 +137,18 @@ let adminConfigCache: AdminConfigState | null = null;
 let dbPool: Pool | null = null;
 let dbUnavailableLogged = false;
 let spotifyAccessTokenCache: { token: string; expiresAt: number } | null = null;
+
+class SpotifyApiError extends Error {
+  status: number;
+  retryAfterSeconds?: number;
+
+  constructor(status: number, message: string, retryAfterSeconds?: number) {
+    super(message);
+    this.name = 'SpotifyApiError';
+    this.status = status;
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
 let artistRefreshTimer: NodeJS.Timeout | null = null;
 
 const AD_LOCATIONS = new Set<AdPlacementLocation>([
@@ -378,14 +391,22 @@ async function getSpotifyAccessToken(): Promise<string> {
 async function fetchSpotifyJson<T>(pathOrUrl: string): Promise<T> {
   const token = await getSpotifyAccessToken();
   const url = pathOrUrl.startsWith('https://') ? pathOrUrl : `${SPOTIFY_API_URL}${pathOrUrl}`;
-  const response = await fetch(url, {
+  const request = () => fetch(url, {
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: 'application/json'
     }
   });
+  let response = await request();
+  const retryAfterSeconds = Number(response.headers.get('retry-after') || '');
+  if (response.status === 429 && Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0 && retryAfterSeconds <= 3) {
+    await new Promise((resolve) => setTimeout(resolve, retryAfterSeconds * 1000));
+    response = await request();
+  }
   if (!response.ok) {
-    throw new Error(`Spotify API returned ${response.status}`);
+    const retryAfter = Number(response.headers.get('retry-after') || '');
+    const retryMessage = Number.isFinite(retryAfter) && retryAfter > 0 ? ` Retry after ${retryAfter} seconds.` : '';
+    throw new SpotifyApiError(response.status, `Spotify API returned ${response.status}.${retryMessage}`, retryAfter);
   }
   return await response.json() as T;
 }
@@ -455,6 +476,28 @@ function getRecaptchaMinScore(): number {
   const parsed = Number(process.env.RECAPTCHA_MIN_SCORE || '0.5');
   if (!Number.isFinite(parsed)) return 0.5;
   return Math.min(1, Math.max(0, parsed));
+}
+
+function sendSpotifyError(res: ExpressResponse, error: unknown, fallback: string): void {
+  if (error instanceof SpotifyApiError) {
+    if (error.status === 429) {
+      res.status(429).json({
+        error: error.retryAfterSeconds
+          ? `Spotify is rate-limiting artist updates. Try again in ${error.retryAfterSeconds} seconds.`
+          : 'Spotify is rate-limiting artist updates. Try again later.',
+        retryAfterSeconds: error.retryAfterSeconds
+      });
+      return;
+    }
+    if (error.status === 401 || error.status === 403) {
+      res.status(502).json({ error: 'Spotify credentials are not allowed to access this catalog endpoint. Check the Spotify app credentials.' });
+      return;
+    }
+  }
+
+  res.status(isSpotifyConfigured() ? 502 : 503).json({
+    error: error instanceof Error ? error.message : fallback
+  });
 }
 
 async function verifyRecaptcha(req: Request, action: string): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -1195,7 +1238,7 @@ async function buildRequestedArtistPackFromSpotify(name: string, spotifyArtistId
     external_urls?: { spotify?: string };
   };
   const albums: SpotifyAlbumSummary[] = [];
-  for (let offset = 0; offset < 50; offset += 10) {
+  for (let offset = 0; offset < SPOTIFY_ARTIST_ALBUM_LIMIT; offset += 10) {
     const albumsResponse = await fetchSpotifyJson<{
       items?: SpotifyAlbumSummary[];
       total?: number;
@@ -1208,7 +1251,7 @@ async function buildRequestedArtistPackFromSpotify(name: string, spotifyArtistId
       }).toString()}`
     );
     albums.push(...(albumsResponse.items || []));
-    if (!albumsResponse.items?.length || albums.length >= (albumsResponse.total || albums.length)) break;
+    if (!albumsResponse.items?.length || albums.length >= SPOTIFY_ARTIST_ALBUM_LIMIT || albums.length >= (albumsResponse.total || albums.length)) break;
   }
 
   const albumTracks: Array<{ track: any; album: any }> = [];
@@ -1308,7 +1351,7 @@ async function refreshDueArtistPacks(): Promise<void> {
     ]);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const backoffMs = message.includes('429') ? 24 * 60 * 60 * 1000 : 6 * 60 * 60 * 1000;
+    const backoffMs = error instanceof SpotifyApiError && error.status === 429 ? 24 * 60 * 60 * 1000 : 6 * 60 * 60 * 1000;
     console.warn(`Scheduled artist pack refresh deferred for ${dueArtist.name}: ${message}`);
     dueArtist.nextRefreshAt = new Date(Date.now() + backoffMs).toISOString();
     await saveRequestedArtists(artists);
@@ -2981,9 +3024,7 @@ async function startServer() {
         res.json({ artist: rebuilt });
         return;
       } catch (error) {
-        res.status(isSpotifyConfigured() ? 502 : 503).json({
-          error: error instanceof Error ? error.message : 'Could not rebuild artist pack from Spotify'
-        });
+        sendSpotifyError(res, error, 'Could not rebuild artist pack from Spotify');
         return;
       }
     }
@@ -3007,9 +3048,7 @@ async function startServer() {
         });
         return;
       }
-      res.status(isSpotifyConfigured() ? 502 : 503).json({
-        error: error instanceof Error ? error.message : 'Could not build artist pack from Spotify'
-      });
+      sendSpotifyError(res, error, 'Could not build artist pack from Spotify');
     }
   });
 
@@ -3049,9 +3088,7 @@ async function startServer() {
       await saveRequestedArtists(nextArtists);
       res.json({ artist: refreshed, artists: nextArtists });
     } catch (error) {
-      res.status(isSpotifyConfigured() ? 502 : 503).json({
-        error: error instanceof Error ? error.message : 'Could not refresh artist pack from Spotify'
-      });
+      sendSpotifyError(res, error, 'Could not refresh artist pack from Spotify');
     }
   });
 

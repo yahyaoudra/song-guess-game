@@ -55,6 +55,7 @@ VITE_STRIPE_PUBLISHABLE_KEY=pk_live_or_test_value
 SPOTIFY_CLIENT_ID=your_spotify_client_id
 SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
 SPOTIFY_AUTO_REFRESH_ENABLED=true
+SPOTIFY_ARTIST_ALBUM_LIMIT=20
 
 MAILERSEND_API_KEY=your_mailersend_api_key
 MAILERSEND_FROM_EMAIL=noreply@songguessgame.online
