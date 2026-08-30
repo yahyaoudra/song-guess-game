@@ -2361,7 +2361,10 @@ function applySecurityHeaders(req: Request, res: ExpressResponse, next: NextFunc
       "'self'",
       `'nonce-${nonce}'`,
       'https://www.googletagmanager.com',
-      'https://pagead2.googlesyndication.com'
+      'https://pagead2.googlesyndication.com',
+      'https://www.google.com',
+      'https://www.gstatic.com',
+      'https://www.recaptcha.net'
     ].join(' ');
     res.setHeader(
       'Content-Security-Policy',
@@ -2373,7 +2376,7 @@ function applySecurityHeaders(req: Request, res: ExpressResponse, next: NextFunc
         "media-src 'self' blob: https:",
         "connect-src 'self' https:",
         "font-src 'self' data:",
-        "frame-src https://googleads.g.doubleclick.net https://tpc.googlesyndication.com https://www.instagram.com",
+        "frame-src https://googleads.g.doubleclick.net https://tpc.googlesyndication.com https://www.instagram.com https://www.google.com https://www.recaptcha.net",
         "object-src 'none'",
         "base-uri 'self'",
         "form-action 'self'",
