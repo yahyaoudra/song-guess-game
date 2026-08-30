@@ -37,8 +37,6 @@ services:
       - ADMIN_CONFIG_PATH=/app/data/admin-config.json
       - ADMIN_ACTIVITY_PATH=/app/data/activity-log.json
       - ARTIST_REQUESTS_PATH=/app/data/artist-requests.json
-      - OVERWRITE_SEEDED_DATA=${OVERWRITE_SEEDED_DATA:-false}
-      - OVERWRITE_ADMIN_CONFIG=${OVERWRITE_ADMIN_CONFIG:-false}
       - DATABASE_URL=${DOCKER_DATABASE_URL:-postgres://song_guess:song_guess_dev@postgres:5432/song_guess}
       - DATABASE_SSL=${DATABASE_SSL:-false}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}

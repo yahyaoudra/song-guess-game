@@ -705,14 +705,21 @@ function sanitizeIntegrations(raw: unknown): IntegrationSettings {
   const envGa = sanitizeGoogleAnalyticsId(process.env.GOOGLE_ANALYTICS_MEASUREMENT_ID);
   const envAdsense = sanitizeAdsenseClientId(process.env.GOOGLE_ADSENSE_CLIENT);
   const envSearchConsole = sanitizeSearchConsoleVerification(process.env.GOOGLE_SEARCH_CONSOLE_VERIFICATION);
+  const sourceGa = sanitizeGoogleAnalyticsId(source.googleAnalyticsMeasurementId);
+  const sourceAdsense = sanitizeAdsenseClientId(source.googleAdsenseClientId);
+  const sourceSearchConsole = sanitizeSearchConsoleVerification(source.searchConsoleVerification);
 
-  const googleAnalyticsMeasurementId = envGa || sanitizeGoogleAnalyticsId(source.googleAnalyticsMeasurementId);
-  const googleAdsenseClientId = envAdsense || sanitizeAdsenseClientId(source.googleAdsenseClientId);
-  const searchConsoleVerification = envSearchConsole || sanitizeSearchConsoleVerification(source.searchConsoleVerification);
+  const googleAnalyticsMeasurementId = sourceGa || envGa;
+  const googleAdsenseClientId = sourceAdsense || envAdsense;
+  const searchConsoleVerification = sourceSearchConsole || envSearchConsole;
   const analyticsEnabled =
-    Boolean(envGa) || (typeof source.analyticsEnabled === 'boolean' ? source.analyticsEnabled : false);
+    sourceGa
+      ? (typeof source.analyticsEnabled === 'boolean' ? source.analyticsEnabled : true)
+      : Boolean(envGa);
   const adsenseEnabled =
-    Boolean(envAdsense) || (typeof source.adsenseEnabled === 'boolean' ? source.adsenseEnabled : false);
+    sourceAdsense
+      ? (typeof source.adsenseEnabled === 'boolean' ? source.adsenseEnabled : true)
+      : Boolean(envAdsense);
 
   return {
     analyticsEnabled: Boolean(analyticsEnabled && googleAnalyticsMeasurementId),

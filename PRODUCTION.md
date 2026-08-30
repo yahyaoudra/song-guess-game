@@ -44,8 +44,6 @@ ADMIN_SESSION_SECRET=your-long-random-secret
 ADMIN_CONFIG_PATH=/app/data/admin-config.json
 ADMIN_ACTIVITY_PATH=/app/data/activity-log.json
 ARTIST_REQUESTS_PATH=/app/data/artist-requests.json
-OVERWRITE_SEEDED_DATA=false
-OVERWRITE_ADMIN_CONFIG=false
 
 DATABASE_URL=postgres://USER:PASSWORD@HOST:5432/DB
 DATABASE_SSL=false
@@ -109,12 +107,7 @@ The included Compose file avoids fixed `container_name`, public `ports` bindings
 
 Admin changes made in the back office are stored in `/app/data/admin-config.json`, including page SEO metadata, home page SEO controls, ad settings, and the editable `robots.txt` value. That path must be a persistent Docker volume, not the repository `./data` folder. If it is mounted from the Git checkout, every deployment can replace your SEO metadata and `robots.txt` edits with the committed seed file.
 
-Use these overwrite switches carefully:
-
-- `OVERWRITE_SEEDED_DATA=true` refreshes the seeded artist request/catalog file only.
-- `OVERWRITE_ADMIN_CONFIG=true` resets admin SEO/ad/homepage settings from the repository seed. Leave this `false` unless you intentionally want to wipe back-office edits.
-
-For normal production deploys, both should be `false`.
+Deploys only copy seed files when `/app/data` is empty. After the first boot, production data is runtime-owned: admin SEO settings, robots.txt, Google IDs, activity logs, uploaded banners, requested artists, and generated packs should be changed through the app or database, not by redeploying Git commits.
 
 ## reCAPTCHA v3
 
