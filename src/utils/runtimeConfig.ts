@@ -91,6 +91,7 @@ export function createDefaultPublicRuntimeConfig(): PublicRuntimeConfig {
   return {
     appUrl,
     host: new URL(appUrl).host,
+    recaptchaSiteKey: import.meta.env.VITE_RECAPTCHA_SITE_KEY || '',
     integrations: {
       analyticsEnabled: false,
       googleAnalyticsMeasurementId: '',

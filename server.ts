@@ -64,6 +64,7 @@ const ARTIST_PACK_REFRESH_CHECK_MS = 60 * 60 * 1000;
 const MAILERSEND_EMAIL_API_URL = 'https://api.mailersend.com/v1/email';
 const SPOTIFY_TOKEN_URL = 'https://accounts.spotify.com/api/token';
 const SPOTIFY_API_URL = 'https://api.spotify.com/v1';
+const RECAPTCHA_VERIFY_URL = 'https://www.google.com/recaptcha/api/siteverify';
 
 const ALLOWED_AUDIO_HOST_PATTERNS = [
   /^cdns-preview(?:-[a-z0-9-]+)?\.dzcdn\.net$/i,
@@ -438,6 +439,55 @@ function getEffectiveHost(appUrl: string): string {
     return new URL(appUrl).host;
   } catch {
     return appUrl.replace(/^https?:\/\//i, '').split('/')[0];
+  }
+}
+
+function getRecaptchaSiteKey(): string {
+  return safeText(process.env.VITE_RECAPTCHA_SITE_KEY || process.env.RECAPTCHA_SITE_KEY, 200);
+}
+
+function getRecaptchaSecretKey(): string {
+  return safeText(process.env.RECAPTCHA_SECRET_KEY, 200);
+}
+
+function getRecaptchaMinScore(): number {
+  const parsed = Number(process.env.RECAPTCHA_MIN_SCORE || '0.5');
+  if (!Number.isFinite(parsed)) return 0.5;
+  return Math.min(1, Math.max(0, parsed));
+}
+
+async function verifyRecaptcha(req: Request, action: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const secret = getRecaptchaSecretKey();
+  if (!secret) return { ok: true };
+
+  const token = safeText(req.body?.recaptchaToken, 5000);
+  if (!token) {
+    return { ok: false, error: 'Spam protection check is required. Please refresh and try again.' };
+  }
+
+  try {
+    const params = new URLSearchParams({
+      secret,
+      response: token
+    });
+    const response = await fetch(RECAPTCHA_VERIFY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params
+    });
+    const result = await response.json() as {
+      success?: boolean;
+      score?: number;
+      action?: string;
+    };
+    const score = typeof result.score === 'number' ? result.score : 0;
+    if (!result.success || result.action !== action || score < getRecaptchaMinScore()) {
+      return { ok: false, error: 'Spam protection failed. Please try again.' };
+    }
+    return { ok: true };
+  } catch (error) {
+    console.warn('reCAPTCHA verification failed:', error instanceof Error ? error.message : error);
+    return { ok: false, error: 'Spam protection is temporarily unavailable. Please try again.' };
   }
 }
 
@@ -1300,6 +1350,7 @@ function buildPublicConfig(
   return {
     appUrl,
     host: getEffectiveHost(appUrl),
+    recaptchaSiteKey: getRecaptchaSiteKey(),
     integrations: sanitizeIntegrations(config.integrations),
     pageConfigs: sanitizePageConfigs(config.pageConfigs, appUrl),
     routeConfigs: sanitizeRouteConfigs(config.routeConfigs, appUrl),
@@ -2832,6 +2883,11 @@ async function startServer() {
       res.status(400).json({ error: 'Name, valid email, and a message are required.' });
       return;
     }
+    const recaptcha = await verifyRecaptcha(req, 'contact');
+    if (recaptcha.ok === false) {
+      res.status(403).json({ error: recaptcha.error });
+      return;
+    }
     try {
       const emailSent = await sendContactEmail(name, email, message);
       if (!emailSent) {
@@ -2889,6 +2945,11 @@ async function startServer() {
     const slug = slugifyChallenge(name);
     if ((!slug || name.length < 2) && !spotifyArtistId) {
       res.status(400).json({ error: 'Artist name is required' });
+      return;
+    }
+    const recaptcha = await verifyRecaptcha(req, 'artist_request');
+    if (recaptcha.ok === false) {
+      res.status(403).json({ error: recaptcha.error });
       return;
     }
 
@@ -3018,6 +3079,11 @@ async function startServer() {
     }
 
     try {
+      const recaptcha = await verifyRecaptcha(req, 'register');
+      if (recaptcha.ok === false) {
+        res.status(403).json({ error: recaptcha.error });
+        return;
+      }
       const email = safeText(req.body?.email, 254).toLowerCase();
       const name = safeText(req.body?.name, 80) || email.split('@')[0] || 'Player';
       const password = typeof req.body?.password === 'string' ? req.body.password : '';
@@ -3071,6 +3137,11 @@ async function startServer() {
     }
 
     try {
+      const recaptcha = await verifyRecaptcha(req, 'login');
+      if (recaptcha.ok === false) {
+        res.status(403).json({ error: recaptcha.error });
+        return;
+      }
       const email = safeText(req.body?.email, 254).toLowerCase();
       const password = typeof req.body?.password === 'string' ? req.body.password : '';
       const rows = await queryDb<Record<string, unknown>>(
@@ -3140,6 +3211,11 @@ async function startServer() {
     const nextEmail = safeText(req.body?.email, 254).toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
       res.status(400).json({ error: 'A valid email address is required' });
+      return;
+    }
+    const recaptcha = await verifyRecaptcha(req, 'change_email');
+    if (recaptcha.ok === false) {
+      res.status(403).json({ error: recaptcha.error });
       return;
     }
     const rawVerifyToken = randomBytes(32).toString('base64url');

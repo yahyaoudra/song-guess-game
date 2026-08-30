@@ -43,8 +43,13 @@ ADMIN_SESSION_SECRET="use-at-least-32-random-characters"
 GOOGLE_ANALYTICS_MEASUREMENT_ID="G-XXXXXXXXXX"
 GOOGLE_ADSENSE_CLIENT="ca-pub-0000000000000000"
 GOOGLE_SEARCH_CONSOLE_VERIFICATION=""
+VITE_RECAPTCHA_SITE_KEY=""
+RECAPTCHA_SECRET_KEY=""
+RECAPTCHA_MIN_SCORE="0.5"
 ```
 
 Admin config and activity logs persist under `./data` by default, or through `ADMIN_CONFIG_PATH` and `ADMIN_ACTIVITY_PATH`.
+
+Create the reCAPTCHA keys as reCAPTCHA v3 keys in Google Cloud/Google reCAPTCHA and add `songguessgame.online`, `localhost`, and `127.0.0.1` as allowed domains.
 
 For Hetzner/EasyPanel, Stripe, Spotify, Google Search Console, Analytics, AdSense, and MailerSend setup, see [PRODUCTION.md](./PRODUCTION.md).

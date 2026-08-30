@@ -1745,11 +1745,6 @@ export default function App() {
             {activeSeo.customIntroText && (
               <p className="text-[11px] text-white/50">{activeSeo.customIntroText}</p>
             )}
-            {activeChallenge?.type === 'artist' && (
-              <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wide text-[#00e676]/70">
-                Artist pack refreshes automatically once a week
-              </p>
-            )}
           </div>
         )}
 

@@ -58,6 +58,7 @@ export interface AdminConfigState {
 export interface PublicRuntimeConfig {
   appUrl: string;
   host: string;
+  recaptchaSiteKey?: string;
   integrations: IntegrationSettings;
   pageConfigs: Record<string, AdminPageConfig>;
   routeConfigs: Record<string, AdminPageConfig>;

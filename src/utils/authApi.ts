@@ -1,4 +1,5 @@
 import { AuthSessionResponse, DailyAccessState, PaymentRecord, RequestedArtist, SpotifyArtistSuggestion } from '../adminTypes';
+import { executeRecaptcha } from './recaptcha';
 
 async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
@@ -31,16 +32,18 @@ export async function getAuthSession(): Promise<AuthSessionResponse> {
 }
 
 export async function registerUser(email: string, password: string, name: string): Promise<AuthSessionResponse & { verificationUrl?: string; emailSent?: boolean }> {
+  const recaptchaToken = await executeRecaptcha('register');
   return requestJson<AuthSessionResponse & { verificationUrl?: string; emailSent?: boolean }>('/api/auth/register', {
     method: 'POST',
-    body: JSON.stringify({ email, password, name })
+    body: JSON.stringify({ email, password, name, recaptchaToken })
   });
 }
 
 export async function loginUser(email: string, password: string): Promise<AuthSessionResponse> {
+  const recaptchaToken = await executeRecaptcha('login');
   return requestJson<AuthSessionResponse>('/api/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ email, password })
+    body: JSON.stringify({ email, password, recaptchaToken })
   });
 }
 
@@ -56,9 +59,10 @@ export async function updateUserProfile(name: string, countryCode: string): Prom
 }
 
 export async function startEmailChange(email: string): Promise<{ ok: true; verificationUrl: string; emailSent?: boolean }> {
+  const recaptchaToken = await executeRecaptcha('change_email');
   return requestJson<{ ok: true; verificationUrl: string; emailSent?: boolean }>('/api/auth/change-email', {
     method: 'POST',
-    body: JSON.stringify({ email })
+    body: JSON.stringify({ email, recaptchaToken })
   });
 }
 
@@ -100,16 +104,18 @@ export async function searchSpotifyArtists(query: string): Promise<SpotifyArtist
 }
 
 export async function requestArtist(artistName: string, spotifyArtistId?: string): Promise<RequestedArtist> {
+  const recaptchaToken = await executeRecaptcha('artist_request');
   const body = await requestJson<{ artist: RequestedArtist }>('/api/artist-requests', {
     method: 'POST',
-    body: JSON.stringify({ artistName, spotifyArtistId })
+    body: JSON.stringify({ artistName, spotifyArtistId, recaptchaToken })
   });
   return body.artist;
 }
 
 export async function sendContactRequest(name: string, email: string, message: string): Promise<void> {
+  const recaptchaToken = await executeRecaptcha('contact');
   await requestJson<{ ok: true }>('/api/contact', {
     method: 'POST',
-    body: JSON.stringify({ name, email, message })
+    body: JSON.stringify({ name, email, message, recaptchaToken })
   });
 }
