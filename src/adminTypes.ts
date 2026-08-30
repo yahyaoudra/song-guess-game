@@ -153,6 +153,7 @@ export interface RequestedArtist {
   createdAt: string;
   updatedAt?: string;
   nextRefreshAt?: string;
+  lastRefreshType?: 'manual' | 'automatic' | 'request';
 }
 
 export interface SpotifyArtistSuggestion {

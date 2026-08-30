@@ -1,4 +1,4 @@
-import { ActivityLogEntry, AdminConfigState, AdminSessionResponse, AdminUserRecord, PaymentRecord } from '../adminTypes';
+import { ActivityLogEntry, AdminConfigState, AdminSessionResponse, AdminUserRecord, PaymentRecord, RequestedArtist } from '../adminTypes';
 
 let csrfToken = '';
 
@@ -116,5 +116,15 @@ export async function fetchAdminPayments(): Promise<{
 export async function refundAdminPayment(paymentId: string): Promise<void> {
   await requestJson<{ ok: true }>(`/api/admin/payments/${encodeURIComponent(paymentId)}/refund`, {
     method: 'POST'
+  });
+}
+
+export async function refreshAdminArtistPack(slug: string, artistName: string, spotifyArtistId?: string): Promise<{
+  artist: RequestedArtist;
+  artists: RequestedArtist[];
+}> {
+  return requestJson<{ artist: RequestedArtist; artists: RequestedArtist[] }>(`/api/admin/artist-packs/${encodeURIComponent(slug)}/refresh`, {
+    method: 'POST',
+    body: JSON.stringify({ artistName, spotifyArtistId })
   });
 }

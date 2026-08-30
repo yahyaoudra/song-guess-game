@@ -1006,7 +1006,10 @@ async function getRequestedArtists(): Promise<RequestedArtist[]> {
         status: hasSpotifyBuiltSongs ? 'ready' : 'pending',
         createdAt: safeText(artist.createdAt, 40) || new Date().toISOString(),
         updatedAt: safeText(artist.updatedAt, 40),
-        nextRefreshAt: safeText(artist.nextRefreshAt, 40)
+        nextRefreshAt: safeText(artist.nextRefreshAt, 40),
+        lastRefreshType: artist.lastRefreshType === 'manual' || artist.lastRefreshType === 'automatic' || artist.lastRefreshType === 'request'
+          ? artist.lastRefreshType
+          : undefined
       };
     });
 }
@@ -1029,7 +1032,8 @@ function buildRequestedArtistPack(name: string): RequestedArtist {
     status: 'ready',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    nextRefreshAt: getNextArtistPackRefreshAt()
+    nextRefreshAt: getNextArtistPackRefreshAt(),
+    lastRefreshType: 'request'
   };
 }
 
@@ -1198,7 +1202,8 @@ async function buildRequestedArtistPackFromSpotify(name: string, spotifyArtistId
     status: 'ready',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    nextRefreshAt: getNextArtistPackRefreshAt()
+    nextRefreshAt: getNextArtistPackRefreshAt(),
+    lastRefreshType: 'request'
   };
 }
 
@@ -1218,6 +1223,7 @@ async function refreshDueArtistPacks(): Promise<void> {
     refreshed.createdAt = dueArtist.createdAt;
     refreshed.updatedAt = new Date().toISOString();
     refreshed.nextRefreshAt = getNextArtistPackRefreshAt();
+    refreshed.lastRefreshType = 'automatic';
     await saveRequestedArtists([
       refreshed,
       ...artists.filter((artist) => artist.spotifyArtistId !== dueArtist.spotifyArtistId && artist.slug !== dueArtist.slug)
@@ -2906,6 +2912,48 @@ async function startServer() {
       }
       res.status(isSpotifyConfigured() ? 502 : 503).json({
         error: error instanceof Error ? error.message : 'Could not build artist pack from Spotify'
+      });
+    }
+  });
+
+  app.post('/api/admin/artist-packs/:slug/refresh', requireAdmin, requireAdminCsrf, async (req, res) => {
+    const slug = slugifyChallenge(req.params.slug);
+    const requestedName = safeText(req.body?.artistName, 100);
+    const requestedSpotifyArtistId = safeText(req.body?.spotifyArtistId, 80);
+    if (!slug && !requestedName && !requestedSpotifyArtistId) {
+      res.status(400).json({ error: 'Artist name or slug is required' });
+      return;
+    }
+
+    const artists = await getRequestedArtists();
+    const existingRequested = artists.find((artist) =>
+      (requestedSpotifyArtistId && artist.spotifyArtistId === requestedSpotifyArtistId) ||
+      artist.slug === slug ||
+      slugifyChallenge(artist.name) === slug
+    );
+    const catalogArtist = getArtistChallenge(slug);
+    const artistName = requestedName || existingRequested?.name || catalogArtist?.name || slug.replace(/-/g, ' ');
+    const spotifyArtistId = requestedSpotifyArtistId || existingRequested?.spotifyArtistId || '';
+
+    try {
+      const refreshed = await buildRequestedArtistPackFromSpotify(artistName, spotifyArtistId);
+      refreshed.createdAt = existingRequested?.createdAt || new Date().toISOString();
+      refreshed.updatedAt = new Date().toISOString();
+      refreshed.nextRefreshAt = getNextArtistPackRefreshAt();
+      refreshed.lastRefreshType = 'manual';
+      const nextArtists = [
+        refreshed,
+        ...artists.filter((artist) =>
+          artist.slug !== refreshed.slug &&
+          artist.slug !== existingRequested?.slug &&
+          (!refreshed.spotifyArtistId || artist.spotifyArtistId !== refreshed.spotifyArtistId)
+        )
+      ];
+      await saveRequestedArtists(nextArtists);
+      res.json({ artist: refreshed, artists: nextArtists });
+    } catch (error) {
+      res.status(isSpotifyConfigured() ? 502 : 503).json({
+        error: error instanceof Error ? error.message : 'Could not refresh artist pack from Spotify'
       });
     }
   });

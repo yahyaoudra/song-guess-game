@@ -1040,6 +1040,11 @@ export default function App() {
     });
   }, []);
 
+  const handleRequestedArtistsChanged = useCallback((artists: RequestedArtist[]) => {
+    setRequestedArtists(artists);
+    setRequestedArtistsLoaded(true);
+  }, []);
+
   const navigateToPage = useCallback((path: string, replace = false) => {
     const cleanPath = path.length > 1 ? path.replace(/\/+$/, '') : path;
     try {
@@ -1433,6 +1438,7 @@ export default function App() {
         <AdminBackOfficeModal
           onClose={() => setIsAdminOpen(false)}
           onConfigChanged={handleRuntimeConfigChanged}
+          onRequestedArtistsChanged={handleRequestedArtistsChanged}
         />
       )}
 
@@ -1603,6 +1609,7 @@ export default function App() {
           <AdminBackOfficeModal
             onClose={() => setIsAdminOpen(false)}
             onConfigChanged={handleRuntimeConfigChanged}
+            onRequestedArtistsChanged={handleRequestedArtistsChanged}
           />
         )}
         {isInterstitialOpen && shouldShowAds && (
@@ -1956,6 +1963,7 @@ export default function App() {
         <AdminBackOfficeModal
           onClose={() => setIsAdminOpen(false)}
           onConfigChanged={handleRuntimeConfigChanged}
+          onRequestedArtistsChanged={handleRequestedArtistsChanged}
         />
       )}
 

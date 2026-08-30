@@ -11,6 +11,7 @@ import {
   Link2,
   Lock,
   LogOut,
+  Music2,
   RefreshCw,
   Save,
   Search,
@@ -31,6 +32,7 @@ import {
   loginAdmin,
   logoutAdmin,
   refundAdminPayment,
+  refreshAdminArtistPack,
   saveAdminConfig,
   uploadBannerAsset
 } from '../utils/adminApi';
@@ -39,12 +41,13 @@ import { baseArtistSlug, getArtistChallenges, getGenreChallenges, orderArtistsBy
 import { createDefaultRouteConfig } from '../utils/runtimeConfig';
 import { getSafeImageUrl } from '../utils/safeUrl';
 
-type AdminTab = 'overview' | 'seo' | 'ads' | 'integrations' | 'monetization' | 'activity' | 'robots' | 'security';
+type AdminTab = 'overview' | 'seo' | 'ads' | 'integrations' | 'packs' | 'monetization' | 'activity' | 'robots' | 'security';
 type SeoTargetType = 'home' | 'country' | 'genre' | 'artist';
 
 interface AdminBackOfficeModalProps {
   onClose: () => void;
   onConfigChanged?: (config: AdminConfigState) => void;
+  onRequestedArtistsChanged?: (artists: RequestedArtist[]) => void;
 }
 
 const TABS: Array<{ id: AdminTab; label: string; icon: React.ElementType }> = [
@@ -52,6 +55,7 @@ const TABS: Array<{ id: AdminTab; label: string; icon: React.ElementType }> = [
   { id: 'seo', label: 'SEO Pages', icon: Globe },
   { id: 'ads', label: 'Ads', icon: Layout },
   { id: 'integrations', label: 'Google', icon: Search },
+  { id: 'packs', label: 'Artist Packs', icon: Music2 },
   { id: 'monetization', label: 'Monetization', icon: CreditCard },
   { id: 'activity', label: 'Activity', icon: Activity },
   { id: 'robots', label: 'Robots', icon: FileText },
@@ -81,6 +85,13 @@ function formatDate(timestamp: number): string {
   }).format(new Date(timestamp));
 }
 
+function formatIsoDate(value?: string): string {
+  if (!value) return 'Never';
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return 'Unknown';
+  return formatDate(timestamp);
+}
+
 function FieldLabel({ children }: { children: React.ReactNode }) {
   return <label className="block text-[11px] font-bold uppercase tracking-wide text-white/55 mb-1">{children}</label>;
 }
@@ -100,7 +111,8 @@ function getBannerSizeAdvice(location: AdPlacementLocation): string {
 
 export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
   onClose,
-  onConfigChanged
+  onConfigChanged,
+  onRequestedArtistsChanged
 }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isConfigured, setIsConfigured] = useState(true);
@@ -121,6 +133,8 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
   const [seoTargetType, setSeoTargetType] = useState<SeoTargetType>('country');
   const [selectedGenreSlug, setSelectedGenreSlug] = useState('k-pop');
   const [selectedArtistSlug, setSelectedArtistSlug] = useState('');
+  const [artistPackSearch, setArtistPackSearch] = useState('');
+  const [refreshingArtistSlug, setRefreshingArtistSlug] = useState('');
 
   const genreChallenges = useMemo(() => getGenreChallenges(), []);
   const artistChallenges = useMemo(() => getArtistChallenges(), []);
@@ -154,6 +168,29 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
     const configured = config?.featuredArtistSlugs || [];
     return configured.length > 0 ? configured : defaultFeaturedArtistSlugs;
   }, [config?.featuredArtistSlugs, defaultFeaturedArtistSlugs]);
+  const requestedArtistByBaseSlug = useMemo(() => {
+    const map = new Map<string, RequestedArtist>();
+    requestedArtists.forEach((artist) => {
+      map.set(baseArtistSlug(artist.slug), artist);
+      map.set(artist.slug, artist);
+    });
+    return map;
+  }, [requestedArtists]);
+  const artistPackRows = useMemo(() => {
+    const query = artistPackSearch.trim().toLowerCase();
+    return artistChoices
+      .map((artist) => {
+        const requested = requestedArtistByBaseSlug.get(artist.slug) || requestedArtistByBaseSlug.get(baseArtistSlug(artist.slug));
+        return {
+          ...artist,
+          requested,
+          songsCount: requested?.songsCount || artist.songsCount || 0,
+          coverImage: requested?.coverImage || artist.coverImage
+        };
+      })
+      .filter((artist) => !query || artist.name.toLowerCase().includes(query))
+      .slice(0, 80);
+  }, [artistChoices, artistPackSearch, requestedArtistByBaseSlug]);
 
   useEffect(() => {
     if (!selectedArtistSlug && artistChoices[0]) {
@@ -206,6 +243,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
     setAdminUsers(usersBody.users);
     setAdminPayments(paymentsBody.payments);
     setRequestedArtists(requestedBody);
+    onRequestedArtistsChanged?.(requestedBody);
     setPaymentMeta({
       databaseConfigured: usersBody.databaseConfigured && paymentsBody.databaseConfigured,
       stripeConfigured: paymentsBody.stripeConfigured
@@ -331,6 +369,21 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
       showToast('Refund requested');
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : 'Refund failed');
+    }
+  };
+
+  const handleManualArtistPackRefresh = async (artist: { slug: string; name: string; requested?: RequestedArtist }) => {
+    setRefreshingArtistSlug(artist.slug);
+    setAuthError(null);
+    try {
+      const result = await refreshAdminArtistPack(artist.slug, artist.name, artist.requested?.spotifyArtistId);
+      setRequestedArtists(result.artists);
+      onRequestedArtistsChanged?.(result.artists);
+      showToast(`${result.artist.name} pack updated manually`);
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Artist pack update failed');
+    } finally {
+      setRefreshingArtistSlug('');
     }
   };
 
@@ -1073,6 +1126,101 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                   )}
                 </div>
               ))}
+            </div>
+          )}
+
+          {activeTab === 'packs' && (
+            <div className="space-y-4 text-left">
+              <div className="rounded-2xl border border-[#00e676]/20 bg-[#0d1a13] p-4">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <h3 className="flex items-center gap-2 text-sm font-black text-white">
+                      <Music2 className="h-4 w-4 text-[#00e676]" />
+                      Manual artist pack updates
+                    </h3>
+                    <p className="mt-1 text-xs leading-5 text-white/55">
+                      Refresh an artist from Spotify when the pack has too few songs. Manual updates replace the stored pack and become the latest update date used across menus, archives, popups, artist pages, and sitemap.
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-white/55">
+                    {requestedArtists.filter((artist) => artist.status === 'ready').length} Spotify-built packs
+                  </div>
+                </div>
+              </div>
+
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/35" />
+                <input
+                  value={artistPackSearch}
+                  onChange={(event) => setArtistPackSearch(event.target.value)}
+                  placeholder="Search artist packs..."
+                  className="h-11 w-full rounded-xl border border-white/10 bg-[#0b100d] pl-10 pr-3 text-sm text-white outline-none focus:border-[#00e676]"
+                />
+              </div>
+
+              <div className="grid gap-3 xl:grid-cols-2">
+                {artistPackRows.map((artist) => {
+                  const isRefreshing = refreshingArtistSlug === artist.slug;
+                  const sourceLabel = artist.requested
+                    ? artist.requested.lastRefreshType === 'manual'
+                      ? 'Manual'
+                      : artist.requested.lastRefreshType === 'automatic'
+                      ? 'Automatic'
+                      : 'Spotify'
+                    : 'Catalog';
+                  return (
+                    <div key={artist.slug} className="rounded-2xl border border-white/10 bg-[#0b100d] p-3">
+                      <div className="grid grid-cols-[64px_minmax(0,1fr)] gap-3">
+                        <img
+                          src={getSafeImageUrl(artist.coverImage) || ''}
+                          alt=""
+                          className="h-16 w-16 rounded-xl bg-black/30 object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                        <div className="min-w-0">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <h4 className="truncate text-sm font-black text-white">{artist.name}</h4>
+                              <p className="mt-1 text-xs text-white/45">
+                                {artist.songsCount} songs • {sourceLabel} update
+                              </p>
+                            </div>
+                            <button
+                              onClick={() => void handleManualArtistPackRefresh(artist)}
+                              disabled={Boolean(refreshingArtistSlug)}
+                              className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-[#00e676] px-3 text-xs font-black text-black hover:bg-[#1fe682] disabled:cursor-wait disabled:opacity-50"
+                            >
+                              <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                              {isRefreshing ? 'Updating' : 'Update'}
+                            </button>
+                          </div>
+                          <div className="mt-3 grid gap-2 text-[11px] text-white/55 sm:grid-cols-2">
+                            <div className="rounded-lg bg-white/[0.04] px-2.5 py-2">
+                              <span className="block text-white/30">Last update</span>
+                              <strong className="font-bold text-white/75">{formatIsoDate(artist.requested?.updatedAt || artist.requested?.createdAt)}</strong>
+                            </div>
+                            <div className="rounded-lg bg-white/[0.04] px-2.5 py-2">
+                              <span className="block text-white/30">Next automatic</span>
+                              <strong className="font-bold text-white/75">{formatIsoDate(artist.requested?.nextRefreshAt)}</strong>
+                            </div>
+                          </div>
+                          {artist.requested?.songs && artist.requested.songs.length > 0 && (
+                            <p className="mt-2 truncate text-[11px] text-white/40">
+                              {artist.requested.songs.slice(0, 4).map((song) => song.title).join(' • ')}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {artistPackRows.length === 0 && (
+                <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-8 text-center text-xs text-white/45">
+                  No artist packs match that search.
+                </div>
+              )}
             </div>
           )}
 
