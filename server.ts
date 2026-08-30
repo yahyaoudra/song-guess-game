@@ -2000,6 +2000,12 @@ function injectRuntimeHtml(html: string, req: Request, publicConfig: PublicRunti
         `<script${nonce ? ` nonce="${escapeHtml(nonce)}"` : ''}>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','${escapeHtml(googleAnalyticsId)}',{send_page_view:false});</script>`
       ].join('\n    ')
     : '';
+  const adsenseClientId = publicConfig.integrations.adsenseEnabled
+    ? sanitizeAdsenseClientId(publicConfig.integrations.googleAdsenseClientId)
+    : '';
+  const adsenseScript = adsenseClientId
+    ? `<script id="song-guess-adsense" async crossorigin="anonymous" src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${encodeURIComponent(adsenseClientId)}"></script>`
+    : '';
   const searchConsoleMeta = publicConfig.integrations.searchConsoleVerification
     ? `<meta name="google-site-verification" content="${escapeHtml(publicConfig.integrations.searchConsoleVerification)}" />`
     : '';
@@ -2028,6 +2034,7 @@ function injectRuntimeHtml(html: string, req: Request, publicConfig: PublicRunti
     socialImageMeta,
     searchConsoleMeta,
     googleTagScript,
+    adsenseScript,
     runtimeScript
   ].filter(Boolean).join('\n    ');
 
