@@ -44,6 +44,7 @@ ADMIN_SESSION_SECRET=your-long-random-secret
 ADMIN_CONFIG_PATH=/app/data/admin-config.json
 ADMIN_ACTIVITY_PATH=/app/data/activity-log.json
 ARTIST_REQUESTS_PATH=/app/data/artist-requests.json
+OVERWRITE_SEEDED_DATA=false
 
 DATABASE_URL=postgres://USER:PASSWORD@HOST:5432/DB
 DATABASE_SSL=false
