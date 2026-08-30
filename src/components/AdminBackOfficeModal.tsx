@@ -149,13 +149,20 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
         source: 'requested' as const
       }));
     const requestedSlugs = new Set(requestedReady.map((artist) => artist.slug));
+    const requestedBaseSlugs = new Set(requestedReady.map((artist) => baseArtistSlug(artist.slug)));
     const catalog = artistChallenges
-      .filter((artist) => !requestedSlugs.has(artist.slug))
+      .filter((artist) => !requestedSlugs.has(artist.slug) && !requestedBaseSlugs.has(baseArtistSlug(artist.slug)))
       .map((artist) => ({
         ...artist,
         source: 'catalog' as const
       }));
-    return orderArtistsByFeaturedPriority([...requestedReady, ...catalog]);
+    const seen = new Set<string>();
+    return orderArtistsByFeaturedPriority([...requestedReady, ...catalog]).filter((artist) => {
+      const key = baseArtistSlug(artist.slug);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }, [artistChallenges, requestedArtists]);
   const defaultFeaturedArtistSlugs = useMemo(
     () => [

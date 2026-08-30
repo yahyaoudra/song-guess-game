@@ -970,9 +970,9 @@ async function writeJsonFile(filePath: string, data: unknown): Promise<void> {
 
 async function getRequestedArtists(): Promise<RequestedArtist[]> {
   const rows = await readJsonFile<RequestedArtist[]>(getArtistRequestsPath(), []);
-  return rows
+  const normalized = rows
     .filter((artist) => artist.slug && artist.name && Array.isArray(artist.songIds))
-    .map((artist) => {
+    .map((artist): RequestedArtist => {
       const songs = Array.isArray(artist.songs)
         ? artist.songs
             .filter((song) => song && song.id && song.title && song.artist && song.previewUrl)
@@ -1012,10 +1012,37 @@ async function getRequestedArtists(): Promise<RequestedArtist[]> {
           : undefined
       };
     });
+  return dedupeRequestedArtists(normalized);
+}
+
+function getRequestedArtistDedupeKey(artist: RequestedArtist): string {
+  const baseSlug = slugifyChallenge(artist.slug.replace(/-[a-z0-9]{8}$/i, '')) || slugifyChallenge(artist.name);
+  return baseSlug || artist.spotifyArtistId || artist.slug;
+}
+
+function requestedArtistRank(artist: RequestedArtist): number {
+  const statusScore = artist.status === 'ready' ? 1_000_000 : 0;
+  const spotifyScore = artist.spotifyArtistId ? 100_000 : 0;
+  const songScore = Math.max(0, Math.min(10_000, artist.songsCount || artist.songs?.length || 0));
+  const date = Date.parse(artist.updatedAt || artist.createdAt || '');
+  const dateScore = Number.isFinite(date) ? Math.floor(date / 86_400_000) : 0;
+  return statusScore + spotifyScore + songScore + dateScore;
+}
+
+function dedupeRequestedArtists(artists: RequestedArtist[]): RequestedArtist[] {
+  const byBaseSlug = new Map<string, RequestedArtist>();
+  artists.forEach((artist) => {
+    const key = getRequestedArtistDedupeKey(artist);
+    const existing = byBaseSlug.get(key);
+    if (!existing || requestedArtistRank(artist) > requestedArtistRank(existing)) {
+      byBaseSlug.set(key, artist);
+    }
+  });
+  return Array.from(byBaseSlug.values());
 }
 
 async function saveRequestedArtists(artists: RequestedArtist[]): Promise<void> {
-  await writeJsonFile(getArtistRequestsPath(), artists);
+  await writeJsonFile(getArtistRequestsPath(), dedupeRequestedArtists(artists));
 }
 
 function buildRequestedArtistPack(name: string): RequestedArtist {
