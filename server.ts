@@ -667,9 +667,9 @@ function sanitizeIntegrations(raw: unknown): IntegrationSettings {
   const googleAdsenseClientId = envAdsense || sanitizeAdsenseClientId(source.googleAdsenseClientId);
   const searchConsoleVerification = envSearchConsole || sanitizeSearchConsoleVerification(source.searchConsoleVerification);
   const analyticsEnabled =
-    Boolean(envGa) || (typeof source.analyticsEnabled === 'boolean' ? source.analyticsEnabled : false);
+    typeof source.analyticsEnabled === 'boolean' ? source.analyticsEnabled : Boolean(envGa);
   const adsenseEnabled =
-    Boolean(envAdsense) || (typeof source.adsenseEnabled === 'boolean' ? source.adsenseEnabled : false);
+    typeof source.adsenseEnabled === 'boolean' ? source.adsenseEnabled : Boolean(envAdsense);
 
   return {
     analyticsEnabled: Boolean(analyticsEnabled && googleAnalyticsMeasurementId),
@@ -1948,15 +1948,6 @@ function injectRuntimeHtml(html: string, req: Request, publicConfig: PublicRunti
   const canonicalUrl = paginationSeo?.canonicalUrl || seo.canonicalUrl;
   const noindexMeta = req.query.room ? '<meta name="robots" content="noindex,follow" />' : '';
   const runtimeScript = `<script${nonce ? ` nonce="${escapeHtml(nonce)}"` : ''}>window.__SONG_GUESS_PUBLIC_CONFIG__=${serializeJsonForInlineScript(publicConfig)};</script>`;
-  const googleAnalyticsId = publicConfig.integrations.analyticsEnabled
-    ? sanitizeGoogleAnalyticsId(publicConfig.integrations.googleAnalyticsMeasurementId)
-    : '';
-  const googleTagScript = googleAnalyticsId
-    ? [
-        `<script id="song-guess-google-tag" async src="https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(googleAnalyticsId)}"></script>`,
-        `<script${nonce ? ` nonce="${escapeHtml(nonce)}"` : ''}>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','${escapeHtml(googleAnalyticsId)}');</script>`
-      ].join('\n    ')
-    : '';
   const searchConsoleMeta = publicConfig.integrations.searchConsoleVerification
     ? `<meta name="google-site-verification" content="${escapeHtml(publicConfig.integrations.searchConsoleVerification)}" />`
     : '';
@@ -1984,7 +1975,6 @@ function injectRuntimeHtml(html: string, req: Request, publicConfig: PublicRunti
     `<meta name="twitter:description" content="${escapeHtml(description)}" />`,
     socialImageMeta,
     searchConsoleMeta,
-    googleTagScript,
     runtimeScript
   ].filter(Boolean).join('\n    ');
 

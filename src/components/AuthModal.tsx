@@ -10,12 +10,6 @@ interface AuthModalProps {
   initialMode?: 'login' | 'register';
 }
 
-function hasLocalVerificationUrl(
-  session: AuthSessionResponse
-): session is AuthSessionResponse & { verificationUrl: string; emailSent?: boolean } {
-  return 'verificationUrl' in session && typeof session.verificationUrl === 'string' && session.verificationUrl.length > 0;
-}
-
 export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
   onAuthenticated,
@@ -41,7 +35,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         ? await registerUser(email.trim(), password, name.trim())
         : await loginUser(email.trim(), password);
       onAuthenticated(session);
-      if (hasLocalVerificationUrl(session) && session.emailSent === false) {
+      if ('verificationUrl' in session && session.verificationUrl && session.emailSent === false) {
         setVerificationUrl(session.verificationUrl);
       } else {
         onClose();
