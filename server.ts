@@ -61,6 +61,7 @@ const WEEKLY_UNLOCK_DAYS = 7;
 const WEEKLY_UNLOCK_AMOUNT_CENTS = 399;
 const ARTIST_PACK_REFRESH_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 const ARTIST_PACK_REFRESH_CHECK_MS = 60 * 60 * 1000;
+const ARTIST_PACK_REFRESH_START_DELAY_MS = 15 * 60 * 1000;
 const MAILERSEND_EMAIL_API_URL = 'https://api.mailersend.com/v1/email';
 const SPOTIFY_TOKEN_URL = 'https://accounts.spotify.com/api/token';
 const SPOTIFY_API_URL = 'https://api.spotify.com/v1';
@@ -1285,7 +1286,7 @@ async function buildRequestedArtistPackFromSpotify(name: string, spotifyArtistId
 }
 
 async function refreshDueArtistPacks(): Promise<void> {
-  if (!isSpotifyConfigured()) return;
+  if (!isSpotifyConfigured() || process.env.SPOTIFY_AUTO_REFRESH_ENABLED === 'false') return;
   const artists = await getRequestedArtists();
   const now = Date.now();
   const dueArtist = artists.find((artist) => {
@@ -1306,19 +1307,24 @@ async function refreshDueArtistPacks(): Promise<void> {
       ...artists.filter((artist) => artist.spotifyArtistId !== dueArtist.spotifyArtistId && artist.slug !== dueArtist.slug)
     ]);
   } catch (error) {
-    console.warn('Scheduled artist pack refresh failed:', error instanceof Error ? error.message : error);
-    dueArtist.nextRefreshAt = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString();
+    const message = error instanceof Error ? error.message : String(error);
+    const backoffMs = message.includes('429') ? 24 * 60 * 60 * 1000 : 6 * 60 * 60 * 1000;
+    console.warn(`Scheduled artist pack refresh deferred for ${dueArtist.name}: ${message}`);
+    dueArtist.nextRefreshAt = new Date(Date.now() + backoffMs).toISOString();
     await saveRequestedArtists(artists);
   }
 }
 
 function startArtistPackRefreshScheduler(): void {
   if (artistRefreshTimer) return;
-  artistRefreshTimer = setInterval(() => {
+  artistRefreshTimer = setTimeout(() => {
     void refreshDueArtistPacks();
-  }, ARTIST_PACK_REFRESH_CHECK_MS);
+    artistRefreshTimer = setInterval(() => {
+      void refreshDueArtistPacks();
+    }, ARTIST_PACK_REFRESH_CHECK_MS);
+    artistRefreshTimer.unref?.();
+  }, ARTIST_PACK_REFRESH_START_DELAY_MS);
   artistRefreshTimer.unref?.();
-  void refreshDueArtistPacks();
 }
 
 async function getAdminConfig(req?: Request): Promise<AdminConfigState> {
