@@ -45,6 +45,7 @@ ADMIN_CONFIG_PATH=/app/data/admin-config.json
 ADMIN_ACTIVITY_PATH=/app/data/activity-log.json
 ARTIST_REQUESTS_PATH=/app/data/artist-requests.json
 OVERWRITE_SEEDED_DATA=false
+OVERWRITE_ADMIN_CONFIG=false
 
 DATABASE_URL=postgres://USER:PASSWORD@HOST:5432/DB
 DATABASE_SSL=false
@@ -96,13 +97,24 @@ RECAPTCHA_MIN_SCORE=0.5
 4. Add a Postgres service, or use the `postgres` service from `docker-compose.yml`.
 5. Add the app service from the GitHub repository.
 6. Set build method to Dockerfile, port `3000`.
-7. Add a persistent volume mounted at `/app/data`.
+7. Keep the Compose `app-data` volume mounted at `/app/data`. This stores admin SEO settings, ad settings, uploads, activity logs, and requested artist packs outside the Git checkout so deployments do not reset them.
 8. Add all required environment variables above.
 9. Attach domain `songguessgame.online` to the app service and enable HTTPS.
 10. Visit `https://songguessgame.online/api/health`; it should return JSON with `"ok": true`.
 11. Visit your hidden admin path and sign in with the admin env credentials.
 
 The included Compose file avoids fixed `container_name`, public `ports` bindings, and custom Docker healthchecks so EasyPanel can assign service names, track the running processes, and route traffic through its own proxy. The app listens internally on port `3000`; Postgres stays internal on `5432`.
+
+## Persistent Admin Settings
+
+Admin changes made in the back office are stored in `/app/data/admin-config.json`. That path must be a persistent Docker volume, not the repository `./data` folder. If it is mounted from the Git checkout, every deployment can replace your SEO metadata with the committed seed file.
+
+Use these overwrite switches carefully:
+
+- `OVERWRITE_SEEDED_DATA=true` refreshes the seeded artist request/catalog file only.
+- `OVERWRITE_ADMIN_CONFIG=true` resets admin SEO/ad/homepage settings from the repository seed. Leave this `false` unless you intentionally want to wipe back-office edits.
+
+For normal production deploys, both should be `false`.
 
 ## reCAPTCHA v3
 
