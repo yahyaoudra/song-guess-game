@@ -710,9 +710,9 @@ function sanitizeIntegrations(raw: unknown): IntegrationSettings {
   const googleAdsenseClientId = envAdsense || sanitizeAdsenseClientId(source.googleAdsenseClientId);
   const searchConsoleVerification = envSearchConsole || sanitizeSearchConsoleVerification(source.searchConsoleVerification);
   const analyticsEnabled =
-    typeof source.analyticsEnabled === 'boolean' ? source.analyticsEnabled : Boolean(envGa);
+    Boolean(envGa) || (typeof source.analyticsEnabled === 'boolean' ? source.analyticsEnabled : false);
   const adsenseEnabled =
-    typeof source.adsenseEnabled === 'boolean' ? source.adsenseEnabled : Boolean(envAdsense);
+    Boolean(envAdsense) || (typeof source.adsenseEnabled === 'boolean' ? source.adsenseEnabled : false);
 
   return {
     analyticsEnabled: Boolean(analyticsEnabled && googleAnalyticsMeasurementId),
