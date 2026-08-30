@@ -35,7 +35,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         ? await registerUser(email.trim(), password, name.trim())
         : await loginUser(email.trim(), password);
       onAuthenticated(session);
-      if ('verificationUrl' in session && session.verificationUrl) {
+      if ('verificationUrl' in session && session.verificationUrl && session.emailSent === false) {
         setVerificationUrl(session.verificationUrl);
       } else {
         onClose();
