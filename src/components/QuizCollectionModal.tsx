@@ -5,12 +5,14 @@ import { QUIZ_COLLECTIONS } from '../data/quizCollections';
 import { ALL_SONGS, DIFFICULTY_COLORS } from '../data/moroccanSongs';
 import { COUNTRIES } from '../data/countries';
 import { getArtistPath } from '../utils/runtimeConfig';
+import { RequestedArtist } from '../adminTypes';
 
 interface QuizCollectionModalProps {
   selectedCountryCode: string;
   onSelectCountryCode?: (code: string) => void;
   onSelectCollection: (collection: QuizCollection) => void;
   onOpenArtist?: (slug: string) => void;
+  requestedArtists?: RequestedArtist[];
   onClose: () => void;
 }
 
@@ -54,11 +56,39 @@ function getArtistSlugFromCollection(collection: QuizCollection): string | null 
   return match?.[1] || null;
 }
 
+const spotifySuffixPattern = /-[a-z0-9]{8}$/;
+
+function baseArtistSlug(slug: string): string {
+  return slug.replace(spotifySuffixPattern, '');
+}
+
+function requestedArtistToCollection(artist: RequestedArtist): QuizCollection {
+  const songs = artist.songs || [];
+  return {
+    id: `artist-${artist.slug}-artist-profile`,
+    title: `${artist.name} Discography & Singles`,
+    description: `Artist catalog updated from Spotify with ${artist.songsCount} playable songs.`,
+    category: 'Artist Discography',
+    countryCode: 'GLOBAL',
+    coverImage: artist.coverImage || songs[0]?.artworkUrl,
+    difficulty: artist.songsCount >= 30 ? 'MEDIUM' : 'EASY',
+    songsCount: artist.songsCount,
+    songIds: artist.songIds,
+    songs,
+    isHot: artist.songsCount >= 25,
+    isOfficialSpotify: true,
+    spotifyPlaylistUrl: artist.spotifyUrl,
+    spotifyPlaylistName: `Spotify • ${artist.name}`,
+    tags: ['Artist', 'Spotify', 'Discography']
+  };
+}
+
 export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
   selectedCountryCode,
   onSelectCountryCode,
   onSelectCollection,
   onOpenArtist,
+  requestedArtists = [],
   onClose
 }) => {
   const [activeTab, setActiveTab] = useState<LibraryTab>('countries');
@@ -68,15 +98,34 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [currentPage, setCurrentPage] = useState(1);
   const songById = useMemo(() => new Map(ALL_SONGS.map((song) => [song.id, song])), []);
+  const libraryCollections = useMemo(() => {
+    const requestedCollections = requestedArtists
+      .filter((artist) => artist.status === 'ready' && artist.songsCount > 0)
+      .map(requestedArtistToCollection);
+    const refreshedBaseSlugs = new Set(
+      requestedCollections
+        .map((collection) => getArtistSlugFromCollection(collection))
+        .filter((slug): slug is string => Boolean(slug))
+        .map(baseArtistSlug)
+    );
+    const staticCollections = QUIZ_COLLECTIONS.filter((collection) => {
+      if (!isCanonicalLibraryCollection(collection)) return false;
+      if (getCollectionLibraryTab(collection) !== 'artists') return true;
+      const slug = getArtistSlugFromCollection(collection);
+      return !slug || !refreshedBaseSlugs.has(baseArtistSlug(slug));
+    });
+    return [...requestedCollections, ...staticCollections];
+  }, [requestedArtists]);
+
   const tabCounts = useMemo(() => {
-    return QUIZ_COLLECTIONS.filter(isCanonicalLibraryCollection).reduce<Record<LibraryTab, number>>(
+    return libraryCollections.reduce<Record<LibraryTab, number>>(
       (counts, collection) => {
         counts[getCollectionLibraryTab(collection)] += 1;
         return counts;
       },
       { countries: 0, artists: 0, genres: 0 }
     );
-  }, []);
+  }, [libraryCollections]);
 
   useEffect(() => {
     if (selectedCountryCode) {
@@ -85,12 +134,12 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
   }, [selectedCountryCode]);
 
   const categories = useMemo(() => {
-    const baseCategories = QUIZ_COLLECTIONS
-      .filter((collection) => getCollectionLibraryTab(collection) === activeTab && isCanonicalLibraryCollection(collection))
+    const baseCategories = libraryCollections
+      .filter((collection) => getCollectionLibraryTab(collection) === activeTab)
       .map((collection) => collection.category)
       .filter((category) => Boolean(category) && category !== 'Spotify Official');
     return ['All', 'Spotify Official', ...Array.from(new Set(baseCategories)).sort()];
-  }, [activeTab]);
+  }, [activeTab, libraryCollections]);
 
   useEffect(() => {
     if (!categories.includes(selectedCategory)) {
@@ -99,15 +148,16 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
   }, [categories, selectedCategory]);
 
   const getCollectionSongs = (collection: QuizCollection): Song[] => (
-    collection.songIds
+    collection.songs?.length
+      ? collection.songs
+      : collection.songIds
       .map((songId) => songById.get(songId))
       .filter((song): song is Song => Boolean(song))
   );
 
   const filteredCollections = useMemo(() => {
-    return QUIZ_COLLECTIONS.filter((col) => {
+    return libraryCollections.filter((col) => {
       const matchesTab = getCollectionLibraryTab(col) === activeTab;
-      const matchesCanonical = isCanonicalLibraryCollection(col);
 
       const matchesCountry =
         activeTab !== 'countries'
@@ -141,9 +191,9 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
           song.genre.toLowerCase().includes(q)
         ));
 
-      return matchesTab && matchesCanonical && matchesCountry && matchesCategory && matchesSearch;
+      return matchesTab && matchesCountry && matchesCategory && matchesSearch;
     });
-  }, [activeTab, filterCountry, selectedCategory, searchQuery, songById]);
+  }, [activeTab, filterCountry, selectedCategory, searchQuery, libraryCollections, songById]);
 
   useEffect(() => {
     setCurrentPage(1);

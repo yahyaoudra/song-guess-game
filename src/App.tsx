@@ -1424,6 +1424,7 @@ export default function App() {
           onSelectCountryCode={handleCollectionCountrySelect}
           onSelectCollection={handleCollectionSelect}
           onOpenArtist={(slug) => navigateToPage(getArtistPath(slug))}
+          requestedArtists={requestedArtists}
           onClose={() => setIsCollectionsOpen(false)}
         />
       )}
@@ -1946,6 +1947,7 @@ export default function App() {
           selectedCountryCode={settings.selectedCountry || 'GLOBAL'}
           onSelectCountryCode={handleCollectionCountrySelect}
           onSelectCollection={handleCollectionSelect}
+          requestedArtists={requestedArtists}
           onClose={() => setIsCollectionsOpen(false)}
         />
       )}

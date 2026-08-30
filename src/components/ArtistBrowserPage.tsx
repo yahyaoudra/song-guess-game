@@ -4,6 +4,8 @@ import { getArtistChallenges, orderArtistsByFeaturedPriority } from '../utils/ch
 import { getArtistPath } from '../utils/runtimeConfig';
 import { RequestedArtist, SpotifyArtistSuggestion } from '../adminTypes';
 import { searchSpotifyArtists } from '../utils/authApi';
+import { ALL_SONGS } from '../data/moroccanSongs';
+import { Song } from '../types';
 import {
   ARCHIVE_PAGE_SIZE,
   getArchivePageFromLocation,
@@ -24,6 +26,16 @@ interface ArtistBrowserPageProps {
   onRequestArtist?: (artistName: string, spotifyArtistId?: string) => Promise<RequestedArtist>;
 }
 
+interface ArtistBrowserCard {
+  slug: string;
+  name: string;
+  songIds: string[];
+  songs?: Song[];
+  songsCount: number;
+  countryCodes: string[];
+  coverImage: string;
+}
+
 export const ArtistBrowserPage: React.FC<ArtistBrowserPageProps> = ({
   onOpenArtist,
   requestedArtists = [],
@@ -37,6 +49,7 @@ export const ArtistBrowserPage: React.FC<ArtistBrowserPageProps> = ({
   const [selectedSpotifyArtist, setSelectedSpotifyArtist] = useState<SpotifyArtistSuggestion | null>(null);
   const didMountRef = useRef(false);
   const [currentPage, setCurrentPage] = useState(() => getArchivePageFromLocation(basePath));
+  const songById = useMemo(() => new Map(ALL_SONGS.map((song) => [song.id, song])), []);
   const artists = useMemo(() => {
     const baseArtists = getArtistChallenges();
     const persistedArtists = requestedArtists
@@ -45,16 +58,42 @@ export const ArtistBrowserPage: React.FC<ArtistBrowserPageProps> = ({
         slug: artist.slug,
         name: artist.name,
         songIds: artist.songIds,
+        songs: artist.songs || [],
         songsCount: artist.songsCount,
         countryCodes: ['GLOBAL'],
         coverImage: artist.coverImage
-      }));
+      } satisfies ArtistBrowserCard));
     const rebuiltBaseSlugs = new Set(persistedArtists.map((artist) => baseArtistSlug(artist.slug)));
     return orderArtistsByFeaturedPriority([
       ...persistedArtists,
       ...baseArtists.filter((artist) => !rebuiltBaseSlugs.has(artist.slug))
-    ]);
+    ]) as ArtistBrowserCard[];
   }, [requestedArtists]);
+
+  const getArtistSongs = (artist: ArtistBrowserCard): Song[] => {
+    if (artist.songs?.length) return artist.songs;
+    return artist.songIds
+      .map((songId) => songById.get(songId))
+      .filter((song): song is Song => Boolean(song));
+  };
+
+  const renderCoverStrip = (songs: Song[]) => {
+    const covers = Array.from(new Map(songs.map((song) => [song.artworkUrl, song])).values()).slice(0, 6);
+    if (covers.length === 0) return null;
+    return (
+      <div className="mt-4 flex items-center gap-1.5">
+        {covers.map((song) => (
+          <img
+            key={`${song.id}-${song.artworkUrl}`}
+            src={song.artworkUrl}
+            alt=""
+            className="h-8 w-8 rounded-md border border-white/10 object-cover"
+            referrerPolicy="no-referrer"
+          />
+        ))}
+      </div>
+    );
+  };
   const filteredArtists = useMemo(() => {
     const cleanQuery = query.trim().toLowerCase();
     if (!cleanQuery) return artists;
@@ -266,50 +305,67 @@ export const ArtistBrowserPage: React.FC<ArtistBrowserPageProps> = ({
         )}
 
         <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-          {visibleArtists.map((artist, index) => (
-            <article
-              key={artist.slug}
-              className="overflow-hidden rounded-lg border border-yellow-500/65 bg-[#252318] shadow-[0_18px_55px_rgba(245,180,0,0.14)]"
-            >
-              <div className="relative h-60 bg-[#171717]">
-                <img
-                  src={artist.coverImage}
-                  alt={artist.name}
-                  className="w-full h-full object-cover"
-                  referrerPolicy="no-referrer"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-[#252318] via-transparent to-transparent" />
-                {pageStart + index < 9 && (
-                  <div className="absolute left-5 top-5 w-11 h-11 rounded-lg bg-yellow-300 text-black flex items-center justify-center shadow-xl">
-                    <Star className="w-5 h-5 fill-black" />
-                  </div>
-                )}
-              </div>
+          {visibleArtists.map((artist, index) => {
+            const songs = getArtistSongs(artist);
+            const songCount = songs.length || artist.songsCount || artist.songIds.length;
+            const previewLine = songs.slice(0, 4).map((song) => song.title).join(' • ');
 
-              <div className="p-7">
-                <h2 className="text-3xl font-black text-yellow-200 drop-shadow-sm truncate">
-                  {artist.name}
-                </h2>
-                <a
-                  href={getArtistPath(artist.slug)}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    onOpenArtist(artist.slug);
-                  }}
-                  className="mt-6 flex w-full h-14 items-center justify-center rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-400 hover:to-cyan-400 text-white font-black text-base cursor-pointer"
-                >
-                  Play Heardle
-                </a>
-                <div className="mt-5 text-center text-white/35">
-                  <p className="text-sm">Choose your mode on the next page</p>
-                  <div className="mt-2 flex items-center justify-center gap-2 text-xs">
-                    <span className="px-3 py-1 rounded-full border border-white/10 bg-white/5">Daily Challenge</span>
-                    <span className="px-3 py-1 rounded-full border border-white/10 bg-white/5">Practice Mode</span>
+            return (
+              <article
+                key={artist.slug}
+                className="overflow-hidden rounded-lg border border-yellow-500/65 bg-[#252318] shadow-[0_18px_55px_rgba(245,180,0,0.14)]"
+              >
+                <div className="relative h-60 bg-[#171717]">
+                  <img
+                    src={artist.coverImage || songs[0]?.artworkUrl}
+                    alt={artist.name}
+                    className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-[#252318] via-transparent to-transparent" />
+                  {pageStart + index < 9 && (
+                    <div className="absolute left-5 top-5 w-11 h-11 rounded-lg bg-yellow-300 text-black flex items-center justify-center shadow-xl">
+                      <Star className="w-5 h-5 fill-black" />
+                    </div>
+                  )}
+                  <div className="absolute bottom-4 right-4 rounded-lg border border-white/10 bg-black/55 px-3 py-1.5 text-xs font-black text-white backdrop-blur">
+                    {songCount} songs
                   </div>
                 </div>
-              </div>
-            </article>
-          ))}
+
+                <div className="p-7">
+                  <div className="flex min-w-0 items-start justify-between gap-3">
+                    <h2 className="text-3xl font-black text-yellow-200 drop-shadow-sm truncate">
+                      {artist.name}
+                    </h2>
+                  </div>
+                  {renderCoverStrip(songs)}
+                  {previewLine && (
+                    <p className="mt-3 min-h-[2.25rem] text-xs leading-relaxed text-white/45 line-clamp-2">
+                      {previewLine}{songs.length > 4 ? ` • +${songs.length - 4} more` : ''}
+                    </p>
+                  )}
+                  <a
+                    href={getArtistPath(artist.slug)}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      onOpenArtist(artist.slug);
+                    }}
+                    className="mt-6 flex w-full h-14 items-center justify-center rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-400 hover:to-cyan-400 text-white font-black text-base cursor-pointer"
+                  >
+                    Play Heardle
+                  </a>
+                  <div className="mt-5 text-center text-white/35">
+                    <p className="text-sm">Choose your mode on the next page</p>
+                    <div className="mt-2 flex items-center justify-center gap-2 text-xs">
+                      <span className="px-3 py-1 rounded-full border border-white/10 bg-white/5">Daily Challenge</span>
+                      <span className="px-3 py-1 rounded-full border border-white/10 bg-white/5">Practice Mode</span>
+                    </div>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
         </section>
 
         {totalPages > 1 && (

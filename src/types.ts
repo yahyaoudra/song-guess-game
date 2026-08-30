@@ -138,6 +138,7 @@ export interface QuizCollection {
   difficulty: Difficulty;
   songsCount?: number;
   songIds: string[];
+  songs?: Song[];
   isHot?: boolean;
   isOfficialSpotify?: boolean;
   spotifyPlaylistUrl?: string;
