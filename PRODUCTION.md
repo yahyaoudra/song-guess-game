@@ -100,7 +100,7 @@ RECAPTCHA_MIN_SCORE=0.5
 10. Visit `https://songguessgame.online/api/health`; it should return JSON with `"ok": true`.
 11. Visit your hidden admin path and sign in with the admin env credentials.
 
-The included Compose file avoids fixed `container_name` and public `ports` bindings so EasyPanel can assign service names and route traffic through its own proxy. The app listens internally on port `3000`; Postgres stays internal on `5432`.
+The included Compose file avoids fixed `container_name`, public `ports` bindings, and custom Docker healthchecks so EasyPanel can assign service names, track the running processes, and route traffic through its own proxy. The app listens internally on port `3000`; Postgres stays internal on `5432`.
 
 ## reCAPTCHA v3
 
