@@ -2055,18 +2055,29 @@ function createDefaultRobotsTxt(appUrl: string): string {
     'User-agent: *',
     'Allow: /',
     'Disallow: /api/',
+    'Disallow: /uploads/',
+    'Disallow: /admin/',
+    'Disallow: /auth/',
+    'Disallow: /checkout/',
+    'Disallow: /room/',
     'Disallow: /*?room=',
     '',
     `Sitemap: ${appUrl}/sitemap.xml`
   ].join('\n');
 }
 
-function ensureRobotsRoomExclusion(robots: string): string {
+function ensureRobotsSecurityExclusions(robots: string): string {
   const trimmed = robots.trim();
-  if (/Disallow:\s*\/\*\?room=/i.test(trimmed)) return trimmed;
   const lines = trimmed ? trimmed.split(/\r?\n/) : ['User-agent: *'];
+  const requiredDisallows = ['/api/', '/uploads/', '/admin/', '/auth/', '/checkout/', '/room/', '/*?room='];
   const sitemapIndex = lines.findIndex((line) => /^Sitemap:/i.test(line.trim()));
-  lines.splice(sitemapIndex >= 0 ? sitemapIndex : lines.length, 0, 'Disallow: /*?room=');
+  let insertIndex = sitemapIndex >= 0 ? sitemapIndex : lines.length;
+  for (const path of requiredDisallows) {
+    const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (lines.some((line) => new RegExp(`^Disallow:\\s*${escaped}\\s*$`, 'i').test(line.trim()))) continue;
+    lines.splice(insertIndex, 0, `Disallow: ${path}`);
+    insertIndex += 1;
+  }
   return lines.join('\n').trim();
 }
 
@@ -2887,6 +2898,11 @@ async function startServer() {
     }
   });
   app.use(express.json({ limit: '512kb' }));
+  app.use('/uploads', (_req, res, next) => {
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow, nosnippet');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self'; style-src 'none'; script-src 'none'; object-src 'none'; frame-ancestors 'none'");
+    next();
+  });
   app.use('/uploads', express.static(getUploadDir(), {
     dotfiles: 'deny',
     index: false,
@@ -2898,6 +2914,7 @@ async function startServer() {
   });
   const generalApiRateLimit = createRateLimit(API_RATE_LIMIT_MAX, API_RATE_LIMIT_WINDOW_MS);
   app.use('/api', (req, res, next) => {
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow, nosnippet');
     if (
       req.path.startsWith('/auth') ||
       req.path.startsWith('/payments') ||
@@ -2966,11 +2983,11 @@ async function startServer() {
     try {
       const adminConfig = await getAdminConfig(req);
       const publicConfig = buildPublicConfig(adminConfig, req, false);
-      const robots = ensureRobotsRoomExclusion(safeMultilineText(adminConfig.robotsTxt, 8000) || createDefaultRobotsTxt(publicConfig.appUrl));
+      const robots = ensureRobotsSecurityExclusions(safeMultilineText(adminConfig.robotsTxt, 8000) || createDefaultRobotsTxt(publicConfig.appUrl));
       res.type('text/plain').send(`${robots.trim()}\n`);
     } catch (error) {
       console.error('Robots error:', error);
-      res.type('text/plain').send(createDefaultRobotsTxt(getEnvPublicAppUrl(req)));
+      res.type('text/plain').send(`${ensureRobotsSecurityExclusions(createDefaultRobotsTxt(getEnvPublicAppUrl(req))).trim()}\n`);
     }
   });
 
