@@ -97,7 +97,7 @@ RECAPTCHA_MIN_SCORE=0.5
 4. Add a Postgres service, or use the `postgres` service from `docker-compose.yml`.
 5. Add the app service from the GitHub repository.
 6. Set build method to Dockerfile, port `3000`.
-7. Keep the Compose `app-data` volume mounted at `/app/data`. This stores admin SEO settings, ad settings, uploads, activity logs, and requested artist packs outside the Git checkout so deployments do not reset them.
+7. Keep the Compose `app-data` volume mounted at `/app/data`. This stores admin SEO settings, the robots.txt editor value, ad settings, uploads, activity logs, and requested artist packs outside the Git checkout so deployments do not reset them.
 8. Add all required environment variables above.
 9. Attach domain `songguessgame.online` to the app service and enable HTTPS.
 10. Visit `https://songguessgame.online/api/health`; it should return JSON with `"ok": true`.
@@ -107,7 +107,7 @@ The included Compose file avoids fixed `container_name`, public `ports` bindings
 
 ## Persistent Admin Settings
 
-Admin changes made in the back office are stored in `/app/data/admin-config.json`. That path must be a persistent Docker volume, not the repository `./data` folder. If it is mounted from the Git checkout, every deployment can replace your SEO metadata with the committed seed file.
+Admin changes made in the back office are stored in `/app/data/admin-config.json`, including page SEO metadata, home page SEO controls, ad settings, and the editable `robots.txt` value. That path must be a persistent Docker volume, not the repository `./data` folder. If it is mounted from the Git checkout, every deployment can replace your SEO metadata and `robots.txt` edits with the committed seed file.
 
 Use these overwrite switches carefully:
 
