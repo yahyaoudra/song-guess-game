@@ -184,7 +184,7 @@ export const GuessAutocomplete: React.FC<GuessAutocompleteProps> = ({
       {isOpen && suggestions.length > 0 && (
         <div
           id="search-suggestions-dropdown"
-          className="absolute left-0 right-0 top-full mt-2 bg-[#121815] border border-white/15 rounded-2xl shadow-2xl overflow-hidden z-50 max-h-72 overflow-y-auto backdrop-blur-xl"
+          className="absolute left-0 right-0 top-0 -translate-y-[calc(100%+0.5rem)] bg-[#121815] border border-white/15 rounded-2xl shadow-2xl overflow-hidden z-50 max-h-72 overflow-y-auto backdrop-blur-xl sm:top-full sm:mt-2 sm:translate-y-0"
         >
           {suggestions.map((song, idx) => {
             const isSelected = idx === selectedIndex;
