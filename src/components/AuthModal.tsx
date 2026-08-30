@@ -2,18 +2,13 @@ import React, { useState } from 'react';
 import { Lock, Mail, X } from 'lucide-react';
 import { AuthSessionResponse } from '../adminTypes';
 import { loginUser, registerUser } from '../utils/authApi';
+import { setAnalyticsUser, trackEvent } from '../utils/analytics';
 
 interface AuthModalProps {
   onClose: () => void;
   onAuthenticated: (session: AuthSessionResponse) => void;
   databaseConfigured: boolean;
   initialMode?: 'login' | 'register';
-}
-
-function hasLocalVerificationUrl(
-  session: AuthSessionResponse
-): session is AuthSessionResponse & { verificationUrl: string; emailSent?: boolean } {
-  return 'verificationUrl' in session && typeof session.verificationUrl === 'string' && session.verificationUrl.length > 0;
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({
@@ -28,24 +23,42 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [verificationUrl, setVerificationUrl] = useState<string | null>(null);
+  const [verificationNotice, setVerificationNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError(null);
     setVerificationUrl(null);
+    setVerificationNotice(null);
     setLoading(true);
 
     try {
-      const session = mode === 'register'
-        ? await registerUser(email.trim(), password, name.trim())
-        : await loginUser(email.trim(), password);
-      onAuthenticated(session);
-      if (hasLocalVerificationUrl(session) && session.emailSent === false) {
-        setVerificationUrl(session.verificationUrl);
-      } else {
-        onClose();
+      if (mode === 'register') {
+        const result = await registerUser(email.trim(), password, name.trim());
+        trackEvent('sign_up', {
+          method: 'email',
+          email_sent: Boolean(result.emailSent)
+        });
+        setVerificationNotice(
+          result.emailSent
+            ? 'Check your email to verify your account. After verification, sign in to play with your account benefits.'
+            : 'Account created. Email sending is not configured, so use the local verification link below.'
+        );
+        if (result.verificationUrl && result.emailSent === false) {
+          setVerificationUrl(result.verificationUrl);
+        }
+        return;
       }
+
+      const session = await loginUser(email.trim(), password);
+      setAnalyticsUser(session.user?.id);
+      trackEvent('login', {
+        method: 'email',
+        user_id: session.user?.id
+      });
+      onAuthenticated(session);
+      onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Authentication failed');
     } finally {
@@ -135,6 +148,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </label>
 
           {error && <p className="rounded-lg border border-red-400/30 bg-red-400/10 p-2 text-xs text-red-100">{error}</p>}
+
+          {verificationNotice && (
+            <div className="rounded-lg border border-[#00e676]/30 bg-[#00e676]/10 p-3 text-xs leading-5 text-white/75">
+              {verificationNotice}
+            </div>
+          )}
 
           {verificationUrl && (
             <div className="rounded-lg border border-[#00e676]/30 bg-[#00e676]/10 p-3 text-xs text-white/70">

@@ -40,6 +40,7 @@ import {
 import { audioEngine } from './utils/audioPlayer';
 import { cacheSongsMetadata, preCacheGameAudioSnippets } from './utils/offlineCache';
 import { recordActivity } from './utils/adminApi';
+import { setAnalyticsUser, trackEvent, trackPurchaseOnce, trackReturningUser } from './utils/analytics';
 import { getArchivePageHref, parseArchivePage } from './utils/archivePagination';
 import { getPublicHost, getShareUrl } from './utils/domain';
 import {
@@ -249,7 +250,13 @@ export default function App() {
 
   useEffect(() => {
     getAuthSession()
-      .then(setAuthSession)
+      .then((session) => {
+        setAuthSession(session);
+        if (session.authenticated && session.user?.id) {
+          setAnalyticsUser(session.user.id);
+          trackReturningUser(session.user.id);
+        }
+      })
       .catch((error) => {
         console.debug('Player auth session unavailable', error);
       });
@@ -282,9 +289,44 @@ export default function App() {
 
         const authAction = urlParams.get('auth');
         if (authAction === 'verified' || authAction === 'login') {
+          if (authAction === 'verified') {
+            trackEvent('email_verified', {
+              method: 'email'
+            });
+          }
           setAuthInitialMode('login');
           setIsAuthOpen(true);
           urlParams.delete('auth');
+          urlParams.delete('email');
+          const nextQuery = urlParams.toString();
+          window.history.replaceState({}, document.title, `${pathname}${nextQuery ? `?${nextQuery}` : ''}${hash}`);
+        }
+
+        const loginMethod = urlParams.get('login');
+        if (loginMethod === 'google') {
+          trackEvent('login', {
+            method: 'google'
+          });
+          urlParams.delete('login');
+          const nextQuery = urlParams.toString();
+          window.history.replaceState({}, document.title, `${pathname}${nextQuery ? `?${nextQuery}` : ''}${hash}`);
+        }
+
+        const checkoutStatus = urlParams.get('checkout');
+        if (checkoutStatus === 'success') {
+          const checkoutSessionId = urlParams.get('session_id') || '';
+          trackPurchaseOnce(checkoutSessionId);
+          setAccessNotice('Unlimited access is active. Enjoy unlimited play and no ads.');
+          void refreshAccessState();
+          urlParams.delete('checkout');
+          urlParams.delete('session_id');
+          const nextQuery = urlParams.toString();
+          window.history.replaceState({}, document.title, `${pathname}${nextQuery ? `?${nextQuery}` : ''}${hash}`);
+        } else if (checkoutStatus === 'cancelled') {
+          trackEvent('checkout_cancelled', {
+            method: 'stripe'
+          });
+          urlParams.delete('checkout');
           const nextQuery = urlParams.toString();
           window.history.replaceState({}, document.title, `${pathname}${nextQuery ? `?${nextQuery}` : ''}${hash}`);
         }
@@ -618,10 +660,24 @@ export default function App() {
     }
     try {
       const url = await createCheckout();
+      trackEvent('begin_checkout', {
+        currency: 'USD',
+        value: 3.99,
+        items: [{
+          item_id: 'song_guess_unlimited_7_day_pass',
+          item_name: 'Song Guess Unlimited - 7 Day Pass',
+          price: 3.99,
+          quantity: 1
+        }]
+      });
       window.location.href = url;
     } catch (error) {
       setAccessNotice(error instanceof Error ? error.message : 'Stripe checkout is not available yet');
-      setIsAuthOpen(true);
+      if (authSession.authenticated) {
+        setIsPaywallOpen(true);
+      } else {
+        setIsAuthOpen(true);
+      }
     }
   }, [authSession.authenticated]);
 
@@ -1457,6 +1513,7 @@ export default function App() {
           onClose={() => setIsAuthOpen(false)}
           onAuthenticated={(session) => {
             setAuthSession(session);
+            setAnalyticsUser(session.user?.id);
             setAccessNotice(null);
             void refreshAccessState();
           }}
@@ -1986,6 +2043,7 @@ export default function App() {
           onClose={() => setIsAuthOpen(false)}
           onAuthenticated={(session) => {
             setAuthSession(session);
+            setAnalyticsUser(session.user?.id);
             setAccessNotice(null);
             void refreshAccessState();
           }}

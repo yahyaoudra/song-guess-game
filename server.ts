@@ -3192,7 +3192,6 @@ async function startServer() {
          VALUES ($1, $2, $3, $4, $5, now() + interval '24 hours')`,
         [userId, email, passwordHash, name, verifyHash]
       );
-      await createUserSession(req, res, userId);
       const appUrl = getEffectiveAppUrl(req);
       const verificationUrl = `${appUrl}/api/auth/verify?token=${encodeURIComponent(rawVerifyToken)}`;
       const emailSent = await sendVerificationEmail(email, name, verificationUrl, 'new-account').catch((error) => {
@@ -3200,12 +3199,8 @@ async function startServer() {
         return false;
       });
       res.json({
-        ...(await buildAuthSessionResponseForUser({
-          id: userId,
-          email,
-          name,
-          emailVerified: false
-        })),
+        registered: true,
+        email,
         verificationUrl,
         emailSent
       });
@@ -3239,6 +3234,10 @@ async function startServer() {
       const ok = row ? await bcrypt.compare(password, String(row.password_hash || '')) : false;
       if (!ok) {
         res.status(401).json({ error: 'Invalid email or password' });
+        return;
+      }
+      if (!row.email_verified) {
+        res.status(403).json({ error: 'Please verify your email before signing in. Check your inbox for the verification link.' });
         return;
       }
       await createUserSession(req, res, String(row.id));
@@ -3487,7 +3486,7 @@ async function startServer() {
           isSecureRequest(req) ? '; Secure' : ''
         }`
       );
-      res.redirect('/play');
+      res.redirect('/play?login=google');
     } catch (error) {
       res.status(500).type('html').send(error instanceof Error ? error.message : 'Google login failed');
     }
@@ -3551,6 +3550,10 @@ async function startServer() {
 
     try {
       const user = res.locals.user as UserSession;
+      if (!user.emailVerified) {
+        res.status(403).json({ error: 'Please verify your email before unlocking unlimited play.' });
+        return;
+      }
       const appUrl = getEffectiveAppUrl(req);
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
@@ -3568,7 +3571,7 @@ async function startServer() {
             }
           }
         ],
-        success_url: `${appUrl}/play?checkout=success`,
+        success_url: `${appUrl}/play?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${appUrl}/play?checkout=cancelled`,
         metadata: { userId: user.id }
       });

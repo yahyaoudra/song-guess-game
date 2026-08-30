@@ -1,6 +1,13 @@
 import { AuthSessionResponse, DailyAccessState, PaymentRecord, RequestedArtist, SpotifyArtistSuggestion } from '../adminTypes';
 import { executeRecaptcha } from './recaptcha';
 
+export interface RegisterUserResponse {
+  registered: true;
+  email: string;
+  emailSent?: boolean;
+  verificationUrl?: string;
+}
+
 async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set('Accept', 'application/json');
@@ -31,9 +38,9 @@ export async function getAuthSession(): Promise<AuthSessionResponse> {
   return requestJson<AuthSessionResponse>('/api/auth/me');
 }
 
-export async function registerUser(email: string, password: string, name: string): Promise<AuthSessionResponse & { verificationUrl?: string; emailSent?: boolean }> {
+export async function registerUser(email: string, password: string, name: string): Promise<RegisterUserResponse> {
   const recaptchaToken = await executeRecaptcha('register');
-  return requestJson<AuthSessionResponse & { verificationUrl?: string; emailSent?: boolean }>('/api/auth/register', {
+  return requestJson<RegisterUserResponse>('/api/auth/register', {
     method: 'POST',
     body: JSON.stringify({ email, password, name, recaptchaToken })
   });
