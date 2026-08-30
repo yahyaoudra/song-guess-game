@@ -1752,11 +1752,12 @@ function primaryCountryCode(songs: Song[]): string {
 }
 
 function genreMatchesSong(song: Song, keywords: string[], genreSlug?: string): boolean {
-  if (genreSlug === '80s') return typeof song.releaseYear === 'number' && song.releaseYear >= 1980 && song.releaseYear <= 1989;
-  if (genreSlug === '90s') return typeof song.releaseYear === 'number' && song.releaseYear >= 1990 && song.releaseYear <= 1999;
-  if (genreSlug === '2000s') return typeof song.releaseYear === 'number' && song.releaseYear >= 2000 && song.releaseYear <= 2009;
-  if (genreSlug === '2010s') return typeof song.releaseYear === 'number' && song.releaseYear >= 2010 && song.releaseYear <= 2019;
-  if (genreSlug === '2020s') return typeof song.releaseYear === 'number' && song.releaseYear >= 2020 && song.releaseYear <= 2029;
+  const isUsOrGlobal = song.countryCode === 'US' || song.countryCode === 'GLOBAL';
+  if (genreSlug === '80s') return isUsOrGlobal && typeof song.releaseYear === 'number' && song.releaseYear >= 1980 && song.releaseYear <= 1989;
+  if (genreSlug === '90s') return isUsOrGlobal && typeof song.releaseYear === 'number' && song.releaseYear >= 1990 && song.releaseYear <= 1999;
+  if (genreSlug === '2000s') return isUsOrGlobal && typeof song.releaseYear === 'number' && song.releaseYear >= 2000 && song.releaseYear <= 2009;
+  if (genreSlug === '2010s') return isUsOrGlobal && typeof song.releaseYear === 'number' && song.releaseYear >= 2010 && song.releaseYear <= 2019;
+  if (genreSlug === '2020s') return isUsOrGlobal && typeof song.releaseYear === 'number' && song.releaseYear >= 2020 && song.releaseYear <= 2029;
 
   const haystack = `${song.genre} ${song.artist} ${song.title}`.toLowerCase();
   if (genreSlug === 'american-rap') {

@@ -1856,6 +1856,7 @@ function injectRuntimeHtml(html: string, req: Request, publicConfig: PublicRunti
   const imageUrl = seo.socialImageUrl || '';
   const paginationSeo = getArchivePaginationSeo(req, publicConfig);
   const canonicalUrl = paginationSeo?.canonicalUrl || seo.canonicalUrl;
+  const noindexMeta = req.query.room ? '<meta name="robots" content="noindex,follow" />' : '';
   const runtimeScript = `<script${nonce ? ` nonce="${escapeHtml(nonce)}"` : ''}>window.__SONG_GUESS_PUBLIC_CONFIG__=${serializeJsonForInlineScript(publicConfig)};</script>`;
   const searchConsoleMeta = publicConfig.integrations.searchConsoleVerification
     ? `<meta name="google-site-verification" content="${escapeHtml(publicConfig.integrations.searchConsoleVerification)}" />`
@@ -1872,6 +1873,7 @@ function injectRuntimeHtml(html: string, req: Request, publicConfig: PublicRunti
     `<title>${escapeHtml(title)}</title>`,
     `<meta name="description" content="${escapeHtml(description)}" />`,
     `<meta name="keywords" content="${escapeHtml(seo.keywords)}" />`,
+    noindexMeta,
     `<link rel="canonical" href="${escapeHtml(canonicalUrl)}" />`,
     ...paginationMeta,
     `<meta property="og:title" content="${escapeHtml(title)}" />`,
@@ -1910,9 +1912,19 @@ function createDefaultRobotsTxt(appUrl: string): string {
     'User-agent: *',
     'Allow: /',
     'Disallow: /api/',
+    'Disallow: /*?room=',
     '',
     `Sitemap: ${appUrl}/sitemap.xml`
   ].join('\n');
+}
+
+function ensureRobotsRoomExclusion(robots: string): string {
+  const trimmed = robots.trim();
+  if (/Disallow:\s*\/\*\?room=/i.test(trimmed)) return trimmed;
+  const lines = trimmed ? trimmed.split(/\r?\n/) : ['User-agent: *'];
+  const sitemapIndex = lines.findIndex((line) => /^Sitemap:/i.test(line.trim()));
+  lines.splice(sitemapIndex >= 0 ? sitemapIndex : lines.length, 0, 'Disallow: /*?room=');
+  return lines.join('\n').trim();
 }
 
 function getCountryCanonicalPath(countryCode: string, publicConfig: PublicRuntimeConfig): string {
@@ -1930,8 +1942,20 @@ function addArchivePagePaths(paths: Set<string>, basePath: string, itemCount: nu
   }
 }
 
+function getRequestedArtistCanonicalMap(requestedArtists: RequestedArtist[]): Map<string, string> {
+  const map = new Map<string, string>();
+  requestedArtists.forEach((artist) => {
+    if (artist.status === 'ready' && artist.songsCount > 0 && artist.spotifyArtistId) {
+      map.set(slugifyChallenge(artist.name), artist.slug);
+      map.set(slugifyChallenge(artist.slug.replace(/-[a-z0-9]{8}$/i, '')), artist.slug);
+    }
+  });
+  return map;
+}
+
 function buildSitemapXml(publicConfig: PublicRuntimeConfig, requestedArtists: RequestedArtist[] = []): string {
   const today = new Date().toISOString().slice(0, 10);
+  const requestedArtistCanonicalMap = getRequestedArtistCanonicalMap(requestedArtists);
   const paths = new Set<string>([
     '/',
     '/play',
@@ -1948,9 +1972,12 @@ function buildSitemapXml(publicConfig: PublicRuntimeConfig, requestedArtists: Re
 
   COUNTRIES.forEach((country) => paths.add(getCountryCanonicalPath(country.code, publicConfig)));
   getGenreChallenges().forEach((genre) => paths.add(`/play/genre/${genre.slug}`));
-  getArtistChallenges().forEach((artist) => paths.add(`/artist/${artist.slug}`));
-  requestedArtists.forEach((artist) => paths.add(`/artist/${artist.slug}`));
-  addArchivePagePaths(paths, '/artist', getArtistChallenges().length + requestedArtists.length);
+  getArtistChallenges().forEach((artist) => {
+    if (!requestedArtistCanonicalMap.has(artist.slug)) paths.add(`/artist/${artist.slug}`);
+  });
+  const readyRequestedArtists = requestedArtists.filter((artist) => artist.status === 'ready' && artist.songsCount > 0);
+  readyRequestedArtists.forEach((artist) => paths.add(`/artist/${artist.slug}`));
+  addArchivePagePaths(paths, '/artist', getArtistChallenges().filter((artist) => !requestedArtistCanonicalMap.has(artist.slug)).length + readyRequestedArtists.length);
   addArchivePagePaths(paths, '/play/genre', getGenreChallenges().length);
   addArchivePagePaths(paths, '/play/country', COUNTRIES.length);
 
@@ -1974,7 +2001,7 @@ function buildSitemapXml(publicConfig: PublicRuntimeConfig, requestedArtists: Re
   ].join('\n');
 }
 
-function buildRedirectTarget(req: Request, publicConfig: PublicRuntimeConfig): string | null {
+function buildRedirectTarget(req: Request, publicConfig: PublicRuntimeConfig, requestedArtists: RequestedArtist[] = []): string | null {
   if (req.method !== 'GET' && req.method !== 'HEAD') return null;
   if (req.path.startsWith('/api') || req.path.startsWith('/assets') || req.path.startsWith('/uploads')) return null;
   if (req.path === '/robots.txt' || req.path === '/sitemap.xml' || req.path === '/favicon.ico') return null;
@@ -2000,7 +2027,10 @@ function buildRedirectTarget(req: Request, publicConfig: PublicRuntimeConfig): s
   }
 
   if (cleanSegments[0] === 'artist' && cleanSegments[1]) {
-    const canonicalArtistPath = `/artist/${slugifyChallenge(cleanSegments[1])}`;
+    const requestedArtistCanonicalMap = getRequestedArtistCanonicalMap(requestedArtists);
+    const cleanArtistSlug = slugifyChallenge(cleanSegments[1]);
+    const canonicalSlug = requestedArtistCanonicalMap.get(cleanArtistSlug) || cleanArtistSlug;
+    const canonicalArtistPath = `/artist/${canonicalSlug}`;
     if (canonicalArtistPath !== cleanPath) cleanPath = canonicalArtistPath;
   }
 
@@ -2785,7 +2815,7 @@ async function startServer() {
     try {
       const adminConfig = await getAdminConfig(req);
       const publicConfig = buildPublicConfig(adminConfig, req, false);
-      const robots = safeMultilineText(adminConfig.robotsTxt, 8000) || createDefaultRobotsTxt(publicConfig.appUrl);
+      const robots = ensureRobotsRoomExclusion(safeMultilineText(adminConfig.robotsTxt, 8000) || createDefaultRobotsTxt(publicConfig.appUrl));
       res.type('text/plain').send(`${robots.trim()}\n`);
     } catch (error) {
       console.error('Robots error:', error);
@@ -3715,7 +3745,8 @@ async function startServer() {
     try {
       const adminConfig = await getAdminConfig(req);
       const publicConfig = buildPublicConfig(adminConfig, req, false);
-      const target = buildRedirectTarget(req, publicConfig);
+      const requestedArtists = await getRequestedArtists();
+      const target = buildRedirectTarget(req, publicConfig, requestedArtists);
       if (target) {
         res.setHeader('Cache-Control', 'no-store, max-age=0');
         res.redirect(301, target);

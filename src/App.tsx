@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Song, Difficulty, GameMode, GameResult, QuizCollection, UserSettings, TitleDisplayMode, StreakData } from './types';
+import { Song, Difficulty, GameMode, GameResult, QuizCollection, UserSettings, TitleDisplayMode, StreakData, MultiplayerSession } from './types';
 import { ALL_SONGS, getSongsForCountry, SNIPPET_TIERS } from './data/moroccanSongs';
 import { QUIZ_COLLECTIONS, getDefaultCollectionForCountry } from './data/quizCollections';
 import { COUNTRIES } from './data/countries';
@@ -115,6 +115,9 @@ export default function App() {
   const [authInitialMode, setAuthInitialMode] = useState<'login' | 'register'>('register');
   const [isPaywallOpen, setIsPaywallOpen] = useState(false);
   const [isMultiplayerOpen, setIsMultiplayerOpen] = useState(false);
+  const [initialMultiplayerRoomCode, setInitialMultiplayerRoomCode] = useState('');
+  const [activeMultiplayerSession, setActiveMultiplayerSession] = useState<MultiplayerSession | null>(null);
+  const [isMultiplayerInfoOpen, setIsMultiplayerInfoOpen] = useState(false);
   const [authSession, setAuthSession] = useState<AuthSessionResponse>({
     authenticated: false,
     entitlement: { active: false },
@@ -158,6 +161,13 @@ export default function App() {
 
   // Generate freshly randomized songs for Daily (5), Collection (shuffled pack), or Practice (10)
   const gameSongs = useMemo(() => {
+    if (activeMultiplayerSession) {
+      const result = activeMultiplayerSession.rounds.map((round) => round.song);
+      cacheSongsMetadata(result, 'GLOBAL', activeMultiplayerSession.id);
+      preCacheGameAudioSnippets(result);
+      return result;
+    }
+
     const countryCode = settings.selectedCountry || 'GLOBAL';
     const challengePool =
       activeChallenge?.type === 'artist'
@@ -203,7 +213,7 @@ export default function App() {
     preCacheGameAudioSnippets(result);
 
     return result;
-  }, [activeChallenge, gameMode, activeCollection, settings.selectedCountry, gameSessionKey, shuffleArray]);
+  }, [activeMultiplayerSession, activeChallenge, gameMode, activeCollection, settings.selectedCountry, gameSessionKey, shuffleArray]);
 
   const totalRounds = gameSongs.length;
   const currentSong = gameSongs[roundIndex] || ALL_SONGS[0];
@@ -277,6 +287,12 @@ export default function App() {
           urlParams.delete('auth');
           const nextQuery = urlParams.toString();
           window.history.replaceState({}, document.title, `${pathname}${nextQuery ? `?${nextQuery}` : ''}${hash}`);
+        }
+
+        const roomCode = (urlParams.get('room') || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
+        if (roomCode) {
+          setInitialMultiplayerRoomCode(roomCode);
+          setIsMultiplayerOpen(true);
         }
 
         const legacyPage = urlParams.get('page');
@@ -355,6 +371,9 @@ export default function App() {
             : artist
             ? { slug: artist.slug, name: artist.name, songIds: undefined as string[] | undefined }
             : null;
+          if (requestedArtist && requestedArtist.slug !== segments[1]) {
+            window.history.replaceState({}, document.title, getArtistPath(requestedArtist.slug));
+          }
           if (
             requestedArtist &&
             (requestedArtist.status !== 'ready' || !requestedArtist.songs || requestedArtist.songs.length === 0)
@@ -505,6 +524,8 @@ export default function App() {
   };
 
   const startNewGame = useCallback((mode: GameMode, collection?: QuizCollection | null, options: StartGameOptions = {}) => {
+    setActiveMultiplayerSession(null);
+    setIsMultiplayerInfoOpen(false);
     setGameMode(mode);
     setActiveCollection(collection || null);
     if (options.clearChallenge) {
@@ -537,10 +558,11 @@ export default function App() {
   }, [authSession]);
 
   const getCurrentScope = useCallback(() => {
+    if (activeMultiplayerSession) return { type: 'multiplayer', slug: activeMultiplayerSession.roomCode || activeMultiplayerSession.id };
     if (activeChallenge) return { type: activeChallenge.type, slug: activeChallenge.slug };
     if (activeCollection) return { type: 'collection', slug: activeCollection.id };
     return { type: 'country', slug: settings.selectedCountry || 'GLOBAL' };
-  }, [activeChallenge, activeCollection, settings.selectedCountry]);
+  }, [activeMultiplayerSession, activeChallenge, activeCollection, settings.selectedCountry]);
 
   const ensurePlayAccess = useCallback(async () => {
     if (authSession.entitlement.active) return true;
@@ -615,6 +637,16 @@ export default function App() {
     saveStoredSettings(updated);
   };
 
+  const sendMultiplayerEvent = useCallback((payload: Record<string, unknown>) => {
+    const socket = activeMultiplayerSession?.socket;
+    if (!socket || !activeMultiplayerSession.roomCode || socket.readyState !== WebSocket.OPEN) return;
+    socket.send(JSON.stringify({
+      type: 'room-event',
+      roomCode: activeMultiplayerSession.roomCode,
+      payload
+    }));
+  }, [activeMultiplayerSession?.roomCode, activeMultiplayerSession?.socket]);
+
   const handleSelectCountry = (countryCode: string, updateRoute = true) => {
     const updated = { ...getStoredSettings(), selectedCountry: countryCode };
     setSettings(updated);
@@ -635,10 +667,24 @@ export default function App() {
 
   // Skip handler (unlock next snippet tier)
   const handleSkip = () => {
+    if (isMultiplayerGuestTurn) {
+      setWrongFeedback(`Only ${currentMultiplayerPlayer?.name || 'the current player'} can skip this round`);
+      setTimeout(() => setWrongFeedback(null), 1800);
+      return;
+    }
     if (settings.enableSfx) audioEngine.playSfx('skip');
 
     if (currentStepIndex < SNIPPET_TIERS.length - 1) {
       const nextStep = currentStepIndex + 1;
+      if (activeMultiplayerSession && currentMultiplayerPlayer) {
+        const message = `${currentMultiplayerPlayer.name} listened to ${SNIPPET_TIERS[nextStep].label}`;
+        setActiveMultiplayerSession((current) =>
+          current
+            ? { ...current, activity: message }
+            : current
+        );
+        sendMultiplayerEvent({ type: 'activity', message, stepIndex: nextStep, roundIndex });
+      }
       setCurrentStepIndex(nextStep);
       setWrongFeedback(`Revealed longer clip (${SNIPPET_TIERS[nextStep].label})`);
       setTimeout(() => setWrongFeedback(null), 1800);
@@ -650,6 +696,11 @@ export default function App() {
 
   // Guess submission handler
   const handleGuess = (guessedSong: Song) => {
+    if (isMultiplayerGuestTurn) {
+      setWrongFeedback(`Only ${currentMultiplayerPlayer?.name || 'the current player'} can guess this round`);
+      setTimeout(() => setWrongFeedback(null), 1800);
+      return;
+    }
     const cleanStr = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9\u0600-\u06FF\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/g, '');
     const cleanGuessedTitle = cleanStr(guessedSong.title);
     const cleanTargetTitle = cleanStr(currentSong.title);
@@ -679,6 +730,11 @@ export default function App() {
 
       if (currentStepIndex < SNIPPET_TIERS.length - 1) {
         const nextStep = currentStepIndex + 1;
+        if (activeMultiplayerSession && currentMultiplayerPlayer) {
+          const message = `${currentMultiplayerPlayer.name} missed and moved to ${SNIPPET_TIERS[nextStep].label}`;
+          setActiveMultiplayerSession((current) => current ? { ...current, activity: message } : current);
+          sendMultiplayerEvent({ type: 'activity', message, stepIndex: nextStep, roundIndex });
+        }
         setCurrentStepIndex(nextStep);
         setWrongFeedback(`Not "${guessedSong.title}" — Revealed ${SNIPPET_TIERS[nextStep].label}`);
         setTimeout(() => setWrongFeedback(null), 2200);
@@ -698,6 +754,30 @@ export default function App() {
     };
 
     setRoundHistory((prev) => [...prev, newHistoryItem]);
+    if (activeMultiplayerSession && currentMultiplayerPlayer) {
+      const message = `${currentMultiplayerPlayer.name} ${isCorrect ? 'guessed correctly' : 'missed'} for ${points} pts`;
+      const nextPlayers = activeMultiplayerSession.players.map((player) =>
+        player.id === currentMultiplayerPlayer.id
+          ? {
+              ...player,
+              score: player.score + points,
+              correct: player.correct + (isCorrect ? 1 : 0),
+              turnsPlayed: player.turnsPlayed + 1
+            }
+          : player
+      );
+      setActiveMultiplayerSession((current) => current ? { ...current, activity: message, players: nextPlayers } : current);
+      sendMultiplayerEvent({
+        type: 'round-result',
+        message,
+        roundIndex,
+        stepIndex: currentStepIndex,
+        isCorrect,
+        points,
+        song: currentSong,
+        players: nextPlayers
+      });
+    }
     setIsRevealed(true);
   };
 
@@ -706,12 +786,25 @@ export default function App() {
     audioEngine.stop();
 
     if (roundIndex < totalRounds - 1) {
-      setRoundIndex((prev) => prev + 1);
+      const nextIndex = roundIndex + 1;
+      setRoundIndex(nextIndex);
       setCurrentStepIndex(0);
       setIsRevealed(false);
       setWrongFeedback(null);
+      if (activeMultiplayerSession) {
+        const nextRound = activeMultiplayerSession.rounds[nextIndex];
+        const nextPlayer = activeMultiplayerSession.players.find((player) => player.id === nextRound?.playerId);
+        const message = `${nextPlayer?.name || 'Next player'} is up`;
+        setActiveMultiplayerSession((current) => current ? { ...current, activity: message } : current);
+        sendMultiplayerEvent({ type: 'next-round', roundIndex: nextIndex, message });
+      }
     } else {
       // All rounds complete!
+      if (activeMultiplayerSession) {
+        setActiveMultiplayerSession((current) => current ? { ...current, completed: true, activity: 'Final results are ready' } : current);
+        setIsMultiplayerInfoOpen(true);
+        sendMultiplayerEvent({ type: 'finish', players: activeMultiplayerSession.players, message: 'Final results are ready' });
+      }
       const totalElapsedSec = Math.max(15, Math.floor((Date.now() - gameStartTime) / 1000));
       const resultCountryCode = activeChallenge ? 'GLOBAL' : settings.selectedCountry || 'GLOBAL';
       const finalResult: GameResult = {
@@ -967,6 +1060,8 @@ export default function App() {
   };
 
   const handleCollectionCountrySelect = (code: string) => {
+    setActiveMultiplayerSession(null);
+    setIsMultiplayerInfoOpen(false);
     const updated = { ...getStoredSettings(), selectedCountry: code };
     setSettings(updated);
     saveStoredSettings(updated);
@@ -988,6 +1083,8 @@ export default function App() {
   };
 
   const handleCollectionSelect = (col: QuizCollection) => {
+    setActiveMultiplayerSession(null);
+    setIsMultiplayerInfoOpen(false);
     setActiveView('game');
     setActiveChallenge(null);
     const artistMatch = col.id.match(/^artist-(.+)-artist-profile$/);
@@ -1043,6 +1140,230 @@ export default function App() {
     }
     return artist;
   }, []);
+
+  const startMultiplayerSession = useCallback((session: MultiplayerSession) => {
+    audioEngine.stop();
+    setActiveMultiplayerSession(session);
+    setActiveView('game');
+    setActiveChallenge(null);
+    setActiveCollection(null);
+    setGameMode('practice');
+    setRoundIndex(0);
+    setCurrentStepIndex(0);
+    setIsRevealed(false);
+    setRoundHistory([]);
+    setGameStartTime(Date.now());
+    setIsCompleteModalOpen(false);
+    setSavedResult(null);
+    setWrongFeedback(null);
+    setGameSessionKey(Date.now());
+    const nextPath = session.roomCode ? `/play?room=${encodeURIComponent(session.roomCode)}` : '/play';
+    if (`${window.location.pathname}${window.location.search}` !== nextPath) {
+      window.history.pushState({}, document.title, nextPath);
+    }
+  }, []);
+
+  const currentMultiplayerRound = activeMultiplayerSession?.rounds[roundIndex];
+  const currentMultiplayerPlayer = activeMultiplayerSession?.players.find((player) => player.id === currentMultiplayerRound?.playerId);
+  const nextMultiplayerRound = activeMultiplayerSession?.rounds[roundIndex + 1];
+  const nextMultiplayerPlayer = activeMultiplayerSession?.players.find((player) => player.id === nextMultiplayerRound?.playerId);
+  const isMultiplayerGuestTurn =
+    activeMultiplayerSession?.mode === 'online' &&
+    Boolean(activeMultiplayerSession.onlinePlayerId) &&
+    activeMultiplayerSession.onlinePlayerId !== currentMultiplayerPlayer?.id;
+
+  useEffect(() => {
+    const socket = activeMultiplayerSession?.socket;
+    if (!socket) return;
+
+    const handleMultiplayerMessage = (event: MessageEvent) => {
+      try {
+        const message = JSON.parse(event.data) as {
+          type: string;
+          room?: { players?: MultiplayerSession['players']; activity?: string };
+          payload?: Record<string, unknown>;
+        };
+
+        if (message.type === 'room-state' && message.room) {
+          setActiveMultiplayerSession((current) => {
+            if (!current) return current;
+            const incomingPlayers = (message.room?.players || []).slice(0, 10);
+            const playersById = new Map(incomingPlayers.map((player) => [player.id, player]));
+            return {
+              ...current,
+              activity: message.room?.activity || current.activity,
+              players: current.players.map((player) => playersById.get(player.id) || player)
+            };
+          });
+          return;
+        }
+
+        if (message.type !== 'room-event' || !message.payload) return;
+        const payload = message.payload;
+        const eventType = String(payload.type || '');
+        const eventRoundIndex = Number(payload.roundIndex);
+
+        if (eventType === 'activity') {
+          const nextStep = Number(payload.stepIndex);
+          if (Number.isFinite(nextStep)) setCurrentStepIndex(Math.max(0, Math.min(SNIPPET_TIERS.length - 1, nextStep)));
+          setActiveMultiplayerSession((current) => current ? { ...current, activity: String(payload.message || current.activity) } : current);
+          return;
+        }
+
+        if (eventType === 'round-result') {
+          const song = payload.song as Song | undefined;
+          const nextPlayers = Array.isArray(payload.players) ? payload.players as MultiplayerSession['players'] : null;
+          const stepIndex = Number(payload.stepIndex);
+          if (Number.isFinite(stepIndex)) setCurrentStepIndex(Math.max(0, Math.min(SNIPPET_TIERS.length - 1, stepIndex)));
+          if (song && Number.isFinite(eventRoundIndex)) {
+            setRoundHistory((current) => {
+              if (current.length > eventRoundIndex) return current;
+              return [
+                ...current,
+                {
+                  song,
+                  isCorrect: Boolean(payload.isCorrect),
+                  pointsEarned: Math.max(0, Number(payload.points) || 0),
+                  stepIndex: Number.isFinite(stepIndex) ? stepIndex : currentStepIndex
+                }
+              ];
+            });
+          }
+          setIsRevealed(true);
+          setActiveMultiplayerSession((current) =>
+            current
+              ? {
+                  ...current,
+                  activity: String(payload.message || current.activity),
+                  players: nextPlayers || current.players
+                }
+              : current
+          );
+          return;
+        }
+
+        if (eventType === 'next-round') {
+          const nextIndex = Number(payload.roundIndex);
+          if (Number.isFinite(nextIndex)) setRoundIndex(Math.max(0, nextIndex));
+          setCurrentStepIndex(0);
+          setIsRevealed(false);
+          setWrongFeedback(null);
+          setActiveMultiplayerSession((current) => current ? { ...current, activity: String(payload.message || current.activity) } : current);
+          return;
+        }
+
+        if (eventType === 'finish') {
+          const nextPlayers = Array.isArray(payload.players) ? payload.players as MultiplayerSession['players'] : null;
+          setActiveMultiplayerSession((current) =>
+            current
+              ? {
+                  ...current,
+                  completed: true,
+                  activity: String(payload.message || 'Final results are ready'),
+                  players: nextPlayers || current.players
+                }
+              : current
+          );
+          setIsMultiplayerInfoOpen(true);
+          return;
+        }
+
+        if (eventType === 'quit') {
+          const playerId = String(payload.playerId || '');
+          setActiveMultiplayerSession((current) => {
+            if (!current) return current;
+            return {
+              ...current,
+              activity: String(payload.message || current.activity),
+              players: current.players.map((player) => player.id === playerId ? { ...player, connected: false } : player)
+            };
+          });
+        }
+      } catch {
+        setWrongFeedback('Multiplayer connection update failed');
+        window.setTimeout(() => setWrongFeedback(null), 1800);
+      }
+    };
+
+    socket.addEventListener('message', handleMultiplayerMessage);
+    return () => socket.removeEventListener('message', handleMultiplayerMessage);
+  }, [activeMultiplayerSession?.socket, currentStepIndex]);
+
+  useEffect(() => {
+    if (!activeMultiplayerSession || !currentMultiplayerPlayer || currentMultiplayerPlayer.connected !== false) return;
+    const nextPlayableIndex = activeMultiplayerSession.rounds.findIndex((round, index) => {
+      if (index <= roundIndex) return false;
+      const roundPlayer = activeMultiplayerSession.players.find((player) => player.id === round.playerId);
+      return roundPlayer?.connected !== false;
+    });
+    const message = `${currentMultiplayerPlayer.name} left. Skipping to the next player.`;
+    if (nextPlayableIndex >= 0) {
+      setRoundIndex(nextPlayableIndex);
+      setCurrentStepIndex(0);
+      setIsRevealed(false);
+      setWrongFeedback(null);
+      setActiveMultiplayerSession((current) => current ? { ...current, activity: message } : current);
+      sendMultiplayerEvent({ type: 'next-round', roundIndex: nextPlayableIndex, message });
+    } else {
+      setActiveMultiplayerSession((current) => current ? { ...current, completed: true, activity: 'Final results are ready' } : current);
+      setIsMultiplayerInfoOpen(true);
+      sendMultiplayerEvent({ type: 'finish', players: activeMultiplayerSession.players, message: 'Final results are ready' });
+    }
+  }, [activeMultiplayerSession, currentMultiplayerPlayer, roundIndex, sendMultiplayerEvent]);
+
+  const quitMultiplayerSession = useCallback(() => {
+    audioEngine.stop();
+    if (activeMultiplayerSession?.mode === 'online' && activeMultiplayerSession.socket && activeMultiplayerSession.roomCode && activeMultiplayerSession.onlinePlayerId) {
+      const player = activeMultiplayerSession.players.find((item) => item.id === activeMultiplayerSession.onlinePlayerId);
+      const message = `${player?.name || 'A player'} left the room`;
+      if (activeMultiplayerSession.socket.readyState === WebSocket.OPEN) {
+        activeMultiplayerSession.socket.send(JSON.stringify({
+          type: 'room-event',
+          roomCode: activeMultiplayerSession.roomCode,
+          payload: { type: 'quit', playerId: activeMultiplayerSession.onlinePlayerId, message }
+        }));
+      }
+      activeMultiplayerSession.socket.close();
+    }
+    setActiveMultiplayerSession(null);
+    setIsMultiplayerInfoOpen(false);
+    startNewGame('daily', getDefaultCollectionForCountry(settings.selectedCountry || 'GLOBAL'));
+    navigateToPage('/play');
+  }, [activeMultiplayerSession, navigateToPage, settings.selectedCountry, startNewGame]);
+
+  const renderMultiplayerStatusBar = () => {
+    if (!activeMultiplayerSession || !currentMultiplayerPlayer) return null;
+    return (
+      <div className="mb-3 w-full max-w-3xl rounded-lg border border-[#00e676]/25 bg-[#07120c]/90 p-2.5 shadow-[0_14px_45px_rgba(0,0,0,0.22)]">
+        <div className="flex flex-wrap items-center justify-center gap-2 text-[11px] font-black">
+          <span className="rounded-full bg-[#00e676] px-3 py-1 text-black">
+            Round {roundIndex + 1}/{totalRounds}
+          </span>
+          <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-white">
+            Current: {currentMultiplayerPlayer.name}
+          </span>
+          <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-white/65">
+            {activeMultiplayerSession.activity}
+          </span>
+          <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-white/65">
+            Next: {nextMultiplayerPlayer?.name || 'Results'}
+          </span>
+          <button
+            onClick={() => setIsMultiplayerInfoOpen(true)}
+            className="rounded-full border border-[#00e676]/35 bg-[#00e676]/10 px-3 py-1 text-[#00e676] hover:bg-[#00e676]/20"
+          >
+            Info
+          </button>
+          <button onClick={quitMultiplayerSession} className="rounded-full border border-red-400/25 bg-red-400/10 px-3 py-1 text-red-200 hover:bg-red-400/20">
+            Quit
+          </button>
+        </div>
+        {isMultiplayerGuestTurn && (
+          <p className="mt-2 text-center text-[11px] font-bold text-white/45">Listen along. Only {currentMultiplayerPlayer.name} can guess this round.</p>
+        )}
+      </div>
+    );
+  };
 
   const renderAppHeader = () => (
     <div className="relative z-[45] w-full shrink-0">
@@ -1143,7 +1464,56 @@ export default function App() {
           authSession={authSession}
           onOpenAuth={() => setIsAuthOpen(true)}
           onOpenPaywall={() => setIsPaywallOpen(true)}
+          onStartSession={startMultiplayerSession}
+          initialRoomCode={initialMultiplayerRoomCode}
         />
+      )}
+
+      {isMultiplayerInfoOpen && activeMultiplayerSession && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-3 backdrop-blur-md">
+          <div className="w-full max-w-lg rounded-lg border border-white/12 bg-[#0d1410] p-4 shadow-2xl">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-black text-white">Multiplayer info</h2>
+                <p className="mt-1 text-xs text-white/45">
+                  {activeMultiplayerSession.challengeTitle} · {activeMultiplayerSession.turnsPerPlayer} songs each
+                </p>
+              </div>
+              <button onClick={() => setIsMultiplayerInfoOpen(false)} className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-black text-white/60 hover:text-white">
+                Close
+              </button>
+            </div>
+            {activeMultiplayerSession.roomCode && (
+              <div className="mt-4 rounded-lg border border-[#00e676]/25 bg-[#00e676]/10 p-3">
+                <div className="text-[10px] font-black uppercase tracking-wide text-[#00e676]">Room</div>
+                <div className="mt-1 font-mono text-2xl font-black text-white">{activeMultiplayerSession.roomCode}</div>
+              </div>
+            )}
+            <div className="mt-4 space-y-2">
+              {[...activeMultiplayerSession.players]
+                .sort((left, right) => right.score - left.score || left.name.localeCompare(right.name))
+                .map((player, index) => (
+                  <div key={player.id} className="flex items-center justify-between rounded-lg border border-white/10 bg-white/[0.04] p-3">
+                    <div className="flex items-center gap-3">
+                      <span className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-black ${
+                        index === 0 ? 'bg-yellow-300 text-black' : index === 1 ? 'bg-slate-300 text-black' : index === 2 ? 'bg-amber-700 text-white' : 'bg-white/10 text-white/55'
+                      }`}>
+                        {index < 3 ? ['1', '2', '3'][index] : `#${index + 1}`}
+                      </span>
+                      <div>
+                        <div className="text-sm font-black text-white">{player.name}</div>
+                        <div className="text-[11px] text-white/45">{player.correct}/{player.turnsPlayed} correct</div>
+                      </div>
+                    </div>
+                    <div className="font-mono text-sm font-black text-[#00e676]">{player.score} pts</div>
+                  </div>
+                ))}
+            </div>
+            <button onClick={quitMultiplayerSession} className="mt-4 h-11 w-full rounded-lg border border-red-400/25 bg-red-400/10 text-sm font-black text-red-200 hover:bg-red-400/20">
+              Quit multiplayer
+            </button>
+          </div>
+        </div>
       )}
 
       {isPaywallOpen && (
@@ -1375,6 +1745,8 @@ export default function App() {
           </div>
         )}
 
+        {renderMultiplayerStatusBar()}
+
         {/* Top Header Banner Ad Slot */}
         {shouldShowAds && (
           <div className="w-full max-w-lg mb-1">
@@ -1407,6 +1779,7 @@ export default function App() {
               titleDisplayMode={settings.titleDisplayPreference || 'both'}
               isLastStep={currentStepIndex >= SNIPPET_TIERS.length - 1}
               nextStepLabel={currentStepIndex < SNIPPET_TIERS.length - 1 ? SNIPPET_TIERS[currentStepIndex + 1]?.label : undefined}
+              disabled={isMultiplayerGuestTurn}
             />
 
             {/* In-Game Ad Slot */}
@@ -1622,6 +1995,8 @@ export default function App() {
           authSession={authSession}
           onOpenAuth={() => setIsAuthOpen(true)}
           onOpenPaywall={() => setIsPaywallOpen(true)}
+          onStartSession={startMultiplayerSession}
+          initialRoomCode={initialMultiplayerRoomCode}
         />
       )}
 

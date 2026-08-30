@@ -94,6 +94,38 @@ export interface LeaderboardEntry {
   isCurrentUser?: boolean;
 }
 
+export interface MultiplayerPlayer {
+  id: string;
+  name: string;
+  email?: string;
+  score: number;
+  correct: number;
+  turnsPlayed: number;
+  connected?: boolean;
+}
+
+export interface MultiplayerRound {
+  playerId: string;
+  song: Song;
+}
+
+export interface MultiplayerSession {
+  id: string;
+  mode: 'party' | 'online';
+  roomCode?: string;
+  socket?: WebSocket;
+  onlinePlayerId?: string;
+  isHost?: boolean;
+  challengeTitle: string;
+  challengeType: 'country' | 'artist' | 'genre';
+  turnsPerPlayer: number;
+  players: MultiplayerPlayer[];
+  rounds: MultiplayerRound[];
+  activity: string;
+  startedAt: number;
+  completed?: boolean;
+}
+
 export interface QuizCollection {
   id: string;
   title: string;
