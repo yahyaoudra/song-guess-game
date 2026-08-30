@@ -65,6 +65,10 @@ GOOGLE_CLIENT_SECRET=optional_google_oauth_client_secret
 GOOGLE_ANALYTICS_MEASUREMENT_ID=G-XXXXXXXXXX
 GOOGLE_ADSENSE_CLIENT=ca-pub-XXXXXXXXXXXXXXXX
 GOOGLE_SEARCH_CONSOLE_VERIFICATION=google-site-verification-code
+
+VITE_RECAPTCHA_SITE_KEY=your_recaptcha_v3_site_key
+RECAPTCHA_SECRET_KEY=your_recaptcha_v3_secret_key
+RECAPTCHA_MIN_SCORE=0.5
 ```
 
 For Docker Compose with the included Postgres service, use:
@@ -76,6 +80,9 @@ POSTGRES_PASSWORD=long-random-db-password
 DOCKER_DATABASE_URL=postgres://song_guess:long-random-db-password@postgres:5432/song_guess
 DATABASE_SSL=false
 DOMAIN=songguessgame.online
+VITE_RECAPTCHA_SITE_KEY=your_recaptcha_v3_site_key
+RECAPTCHA_SECRET_KEY=your_recaptcha_v3_secret_key
+RECAPTCHA_MIN_SCORE=0.5
 ```
 
 ## EasyPanel On Hetzner
@@ -91,6 +98,26 @@ DOMAIN=songguessgame.online
 9. Attach domain `songguessgame.online` to the app service and enable HTTPS.
 10. Visit `https://songguessgame.online/api/health`; it should return JSON with `"ok": true`.
 11. Visit your hidden admin path and sign in with the admin env credentials.
+
+## reCAPTCHA v3
+
+1. Open Google reCAPTCHA or Google Cloud reCAPTCHA.
+2. Create a reCAPTCHA v3 key.
+3. Add allowed domains:
+   - `songguessgame.online`
+   - `localhost`
+   - `127.0.0.1`
+4. Add the site key to `VITE_RECAPTCHA_SITE_KEY`.
+5. Add the secret key to `RECAPTCHA_SECRET_KEY`.
+6. Start with `RECAPTCHA_MIN_SCORE=0.5`; raise it if spam still gets through, lower it only if real users are blocked.
+
+Protected actions:
+
+- account registration
+- login
+- email change
+- contact form
+- artist pack requests
 
 ## Spotify App
 
