@@ -15,7 +15,6 @@ RUN apk add --no-cache wget
 COPY package*.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
-COPY --from=build /app/assets ./assets
 COPY --from=build /app/resolved_extra.json ./resolved_extra.json
 COPY --from=build /app/resolved_moroccan_songs.json ./resolved_moroccan_songs.json
 COPY --from=build /app/data ./data-seed
