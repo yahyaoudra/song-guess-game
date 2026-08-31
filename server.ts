@@ -2488,7 +2488,8 @@ function applySecurityHeaders(req: Request, res: ExpressResponse, next: NextFunc
       'https://www.google.com',
       'https://www.gstatic.com',
       'https://www.recaptcha.net',
-      'https://www.clarity.ms'
+      'https://www.clarity.ms',
+      'https://scripts.clarity.ms'
     ].join(' ');
     res.setHeader(
       'Content-Security-Policy',
@@ -2498,9 +2499,9 @@ function applySecurityHeaders(req: Request, res: ExpressResponse, next: NextFunc
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data: blob: https:",
         "media-src 'self' blob: https:",
-        "connect-src 'self' https:",
+        "connect-src 'self' https: https://*.clarity.ms",
         "font-src 'self' data:",
-        "frame-src https://googleads.g.doubleclick.net https://tpc.googlesyndication.com https://www.instagram.com https://www.google.com https://www.recaptcha.net",
+        "frame-src https://googleads.g.doubleclick.net https://tpc.googlesyndication.com https://www.instagram.com https://www.google.com https://www.recaptcha.net https://www.clarity.ms",
         "object-src 'none'",
         "base-uri 'self'",
         "form-action 'self'",
