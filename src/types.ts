@@ -117,7 +117,7 @@ export interface MultiplayerSession {
   onlinePlayerId?: string;
   isHost?: boolean;
   challengeTitle: string;
-  challengeType: 'country' | 'artist' | 'genre';
+  challengeType: 'country' | 'artist' | 'genre' | 'collection';
   turnsPerPlayer: number;
   players: MultiplayerPlayer[];
   rounds: MultiplayerRound[];

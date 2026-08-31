@@ -1815,11 +1815,12 @@ function buildGeneratedCollection(countryCode: string, template: GeneratedCollec
   const songs = selectGeneratedSongs(countryCode, template, templateIndex);
   if (songs.length === 0) return null;
 
-  const countryName = country.code === 'GLOBAL' ? 'Global' : country.name;
+  const countryName = country.code === 'GLOBAL' ? 'Global' : country.code === 'US' ? 'USA' : country.name;
+  const displayCountryName = country.code === 'GLOBAL' && template.id === '70s-classics' ? 'Morocco' : countryName;
   return {
     id: `auto-${country.code.toLowerCase()}-${template.id}`,
-    title: `${countryName} ${template.title}`,
-    description: `${template.description} Built from the ${countryName} song catalog.`,
+    title: `${displayCountryName} ${template.title}`,
+    description: `${template.description} Built from the ${displayCountryName} song catalog.`,
     category: template.category,
     countryCode: country.code,
     coverImage: GENERATED_COVER_IMAGES[templateIndex % GENERATED_COVER_IMAGES.length],
@@ -1827,9 +1828,9 @@ function buildGeneratedCollection(countryCode: string, template: GeneratedCollec
     songsCount: songs.length,
     songIds: songs.map((song) => song.id),
     isHot: templateIndex <= 5,
-    spotifyPlaylistName: `${countryName} ${template.title}`,
-    spotifyPlaylistUrl: `https://open.spotify.com/search/${encodeURIComponent(`${countryName} ${template.title}`)}`,
-    tags: [countryName, ...template.tags]
+    spotifyPlaylistName: `${displayCountryName} ${template.title}`,
+    spotifyPlaylistUrl: `https://open.spotify.com/search/${encodeURIComponent(`${displayCountryName} ${template.title}`)}`,
+    tags: [displayCountryName, ...template.tags]
   };
 }
 
@@ -1920,7 +1921,10 @@ function buildGenreMatrixCollections(): QuizCollection[] {
 }
 
 function expandCuratedCollection(collection: QuizCollection): QuizCollection {
-  const baseSongs = ALL_SONGS.filter((song) => collection.songIds.includes(song.id));
+  const isRapCaviar = collection.id === 'spotify-rapcaviar';
+  const isRapSong = (song: Song) => /hip-hop|rap|trap/i.test(`${song.genre} ${song.artist} ${song.title}`);
+  const rawBaseSongs = ALL_SONGS.filter((song) => collection.songIds.includes(song.id));
+  const baseSongs = isRapCaviar ? rawBaseSongs.filter(isRapSong) : rawBaseSongs;
   const countryPool = collection.countryCode === 'GLOBAL'
     ? ALL_SONGS
     : ALL_SONGS.filter((song) => song.countryCode === collection.countryCode);
@@ -1933,12 +1937,13 @@ function expandCuratedCollection(collection: QuizCollection): QuizCollection {
     .filter((keyword) => keyword.length > 2 && !['top 50', 'hits', 'official spotify'].includes(keyword));
   const relatedSongs = countryPool.filter((song) => {
     const haystack = `${song.genre} ${song.artist} ${song.title}`.toLowerCase();
-    return keywords.some((keyword) => haystack.includes(keyword));
+    return isRapCaviar ? isRapSong(song) : keywords.some((keyword) => haystack.includes(keyword));
   });
+  const strictFallbackPool = isRapCaviar && relatedSongs.length > 0 ? relatedSongs : fallbackPool;
   const targetCount = collection.countryCode === 'GLOBAL'
     ? Math.min(60, Math.max(24, baseSongs.length, relatedSongs.length))
-    : Math.min(32, Math.max(12, baseSongs.length, relatedSongs.length, countryPool.length));
-  const packSongs = completePlayablePack([...baseSongs, ...relatedSongs], fallbackPool, stableSeed(collection.id), targetCount);
+    : Math.min(32, Math.max(12, baseSongs.length, relatedSongs.length, isRapCaviar ? 0 : countryPool.length));
+  const packSongs = completePlayablePack([...baseSongs, ...relatedSongs], strictFallbackPool, stableSeed(collection.id), targetCount);
 
   return {
     ...collection,

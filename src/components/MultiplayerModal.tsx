@@ -3,7 +3,8 @@ import { Check, Crown, Gamepad2, Globe2, Loader2, Lock, Mail, Mic2, Play, Plus, 
 import { AuthSessionResponse } from '../adminTypes';
 import { COUNTRIES } from '../data/countries';
 import { ALL_SONGS, getSongsForCountry } from '../data/moroccanSongs';
-import { MultiplayerPlayer, MultiplayerRound, MultiplayerSession, Song } from '../types';
+import { QUIZ_COLLECTIONS } from '../data/quizCollections';
+import { MultiplayerPlayer, MultiplayerRound, MultiplayerSession, QuizCollection, Song } from '../types';
 import {
   getArtistChallenges,
   getGenreChallenges,
@@ -22,11 +23,12 @@ interface MultiplayerModalProps {
   initialRoomCode?: string;
   initialMode?: MultiplayerMode;
   initialStep?: SetupStep;
+  activeCollection?: QuizCollection | null;
 }
 
 type MultiplayerMode = 'party' | 'online';
 type SetupStep = 'mode' | 'setup' | 'players' | 'lobby';
-type ChallengeType = 'country' | 'artist' | 'genre';
+type ChallengeType = 'country' | 'artist' | 'genre' | 'collection';
 
 interface ChallengeOption {
   type: ChallengeType;
@@ -89,12 +91,13 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
   onStartSession,
   initialRoomCode = '',
   initialMode = 'party',
-  initialStep
+  initialStep,
+  activeCollection = null
 }) => {
   const [mode, setMode] = useState<MultiplayerMode>(initialRoomCode ? 'online' : initialMode);
   const [step, setStep] = useState<SetupStep>(initialRoomCode ? 'lobby' : initialStep || 'mode');
-  const [challengeType, setChallengeType] = useState<ChallengeType>('country');
-  const [challengeSlug, setChallengeSlug] = useState('GLOBAL');
+  const [challengeType, setChallengeType] = useState<ChallengeType>(activeCollection ? 'collection' : 'country');
+  const [challengeSlug, setChallengeSlug] = useState(activeCollection?.id || 'GLOBAL');
   const [turnsPerPlayer, setTurnsPerPlayer] = useState(DEFAULT_TURNS);
   const [players, setPlayers] = useState<MultiplayerPlayer[]>([
     { id: createPlayerId(), name: 'Player 1', score: 0, correct: 0, turnsPlayed: 0 },
@@ -115,6 +118,19 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
   const handoffSocketRef = useRef(false);
 
   const challengeOptions = useMemo<ChallengeOption[]>(() => {
+    if (challengeType === 'collection') {
+      const collection = activeCollection || QUIZ_COLLECTIONS.find((item) => item.id === challengeSlug) || QUIZ_COLLECTIONS[0];
+      return collection
+        ? [{
+            type: 'collection',
+            slug: collection.id,
+            title: collection.title,
+            subtitle: `${collection.songIds.length || collection.songsCount || 0} songs`,
+            image: collection.coverImage,
+            songIds: collection.songIds
+          }]
+        : [];
+    }
     if (challengeType === 'country') {
       return COUNTRIES.slice(0, 24).map((country) => ({
         type: 'country',
@@ -141,7 +157,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
       image: genre.coverImage,
       songIds: genre.songIds
     }));
-  }, [challengeType]);
+  }, [activeCollection, challengeSlug, challengeType]);
 
   const selectedChallenge = useMemo(
     () => challengeOptions.find((item) => item.slug === challengeSlug) || challengeOptions[0],
@@ -153,6 +169,12 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
       setChallengeSlug(challengeOptions[0].slug);
     }
   }, [challengeOptions, challengeSlug]);
+
+  useEffect(() => {
+    if (!activeCollection || initialRoomCode) return;
+    setChallengeType('collection');
+    setChallengeSlug(activeCollection.id);
+  }, [activeCollection, initialRoomCode]);
 
   useEffect(() => {
     if (initialRoomCode) {
@@ -183,6 +205,11 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
   const getSongPool = (): Song[] => {
     if (!selectedChallenge) return ALL_SONGS;
     if (selectedChallenge.type === 'country') return getSongsForCountry(selectedChallenge.slug);
+    if (selectedChallenge.type === 'collection') {
+      const collection = activeCollection || QUIZ_COLLECTIONS.find((item) => item.id === selectedChallenge.slug);
+      const byIds = ALL_SONGS.filter((song) => collection?.songIds.includes(song.id));
+      return byIds.length > 0 ? byIds : collection?.songs || ALL_SONGS;
+    }
     if (selectedChallenge.type === 'artist') {
       const byArtist = getSongsByArtistSlug(selectedChallenge.slug);
       return byArtist.length > 0 ? byArtist : ALL_SONGS.filter((song) => selectedChallenge.songIds?.includes(song.id));
@@ -419,6 +446,26 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
           {step === 'setup' && (
             <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
               <section className="space-y-4">
+                {activeCollection && (
+                  <button
+                    onClick={() => {
+                      setChallengeType('collection');
+                      setChallengeSlug(activeCollection.id);
+                    }}
+                    className={`grid w-full grid-cols-[56px_minmax(0,1fr)_auto] items-center gap-3 rounded-lg border p-2.5 text-left ${
+                      challengeType === 'collection' ? 'border-[#00e676] bg-[#00e676]/12' : 'border-white/10 bg-white/[0.04] hover:border-white/20'
+                    }`}
+                  >
+                    <div className="h-14 w-14 overflow-hidden rounded-lg bg-black/30">
+                      <img src={activeCollection.coverImage} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-black text-white">Selected pack: {activeCollection.title}</div>
+                      <div className="truncate text-xs text-white/45">{activeCollection.songIds.length || activeCollection.songsCount || 0} playable songs</div>
+                    </div>
+                    <span className="rounded-full bg-[#00e676]/15 px-2 py-1 text-[10px] font-black text-[#00e676]">Use pack</span>
+                  </button>
+                )}
                 <div className="grid grid-cols-3 gap-2">
                   {[
                     ['country', Globe2, 'Country'],

@@ -223,6 +223,21 @@ export default function App() {
 
   const totalRounds = gameSongs.length;
   const currentSong = gameSongs[roundIndex] || ALL_SONGS[0];
+  const currentMultiplayerRound = activeMultiplayerSession?.rounds[roundIndex];
+  const currentMultiplayerPlayer = activeMultiplayerSession?.players.find((player) => player.id === currentMultiplayerRound?.playerId);
+  const nextMultiplayerRound = activeMultiplayerSession?.rounds[roundIndex + 1];
+  const nextMultiplayerPlayer = activeMultiplayerSession?.players.find((player) => player.id === nextMultiplayerRound?.playerId);
+  const currentOnlinePlayerId = activeMultiplayerSession?.mode === 'online'
+    ? activeMultiplayerSession.onlinePlayerId ||
+      activeMultiplayerSession.players.find((player) =>
+        player.email && authSession.user?.email && player.email.toLowerCase() === authSession.user.email.toLowerCase()
+      )?.id ||
+      (authSession.user?.id ? `user-${authSession.user.id}` : '')
+    : '';
+  const isMultiplayerGuestTurn =
+    activeMultiplayerSession?.mode === 'online' &&
+    Boolean(currentOnlinePlayerId) &&
+    currentOnlinePlayerId !== currentMultiplayerPlayer?.id;
 
   // Dynamic round difficulties
   const roundDifficulties: Difficulty[] = ['EASY', 'MEDIUM', 'HARD', 'EXPERT', 'IMPOSSIBLE'];
@@ -618,6 +633,8 @@ export default function App() {
   }, [activeMultiplayerSession, activeChallenge, activeCollection, settings.selectedCountry]);
 
   const ensurePlayAccess = useCallback(async () => {
+    if (isMultiplayerGuestTurn) return true;
+
     const session = isAuthLoading ? await refreshAccessState() : authSession;
     if (session.entitlement.active) return true;
 
@@ -667,7 +684,7 @@ export default function App() {
       }
       return false;
     }
-  }, [authSession, gameSessionKey, getCurrentScope, isAuthLoading, refreshAccessState, roundIndex]);
+  }, [authSession, gameSessionKey, getCurrentScope, isAuthLoading, isMultiplayerGuestTurn, refreshAccessState, roundIndex]);
 
   const handleUnlock = useCallback(async () => {
     if (!authSession.authenticated) {
@@ -1254,15 +1271,6 @@ export default function App() {
     }
   }, [multiplayerAuthReturn, refreshAccessState]);
 
-  const currentMultiplayerRound = activeMultiplayerSession?.rounds[roundIndex];
-  const currentMultiplayerPlayer = activeMultiplayerSession?.players.find((player) => player.id === currentMultiplayerRound?.playerId);
-  const nextMultiplayerRound = activeMultiplayerSession?.rounds[roundIndex + 1];
-  const nextMultiplayerPlayer = activeMultiplayerSession?.players.find((player) => player.id === nextMultiplayerRound?.playerId);
-  const isMultiplayerGuestTurn =
-    activeMultiplayerSession?.mode === 'online' &&
-    Boolean(activeMultiplayerSession.onlinePlayerId) &&
-    activeMultiplayerSession.onlinePlayerId !== currentMultiplayerPlayer?.id;
-
   useEffect(() => {
     const socket = activeMultiplayerSession?.socket;
     if (!socket) return;
@@ -1440,6 +1448,7 @@ export default function App() {
             Next: {nextMultiplayerPlayer?.name || 'Results'}
           </span>
           <button
+            type="button"
             onClick={() => setIsMultiplayerInfoOpen(true)}
             className="rounded-full border border-[#00e676]/35 bg-[#00e676]/10 px-3 py-1 text-[#00e676] hover:bg-[#00e676]/20"
           >
@@ -1565,11 +1574,12 @@ export default function App() {
           initialRoomCode={initialMultiplayerRoomCode}
           initialMode={multiplayerInitialMode}
           initialStep={multiplayerInitialStep}
+          activeCollection={activeCollection}
         />
       )}
 
       {isMultiplayerInfoOpen && activeMultiplayerSession && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-3 backdrop-blur-md">
+        <div className="fixed inset-0 z-[140] flex items-center justify-center bg-black/80 p-3 backdrop-blur-md">
           <div className="w-full max-w-lg rounded-lg border border-white/12 bg-[#0d1410] p-4 shadow-2xl">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -2111,6 +2121,7 @@ export default function App() {
           initialRoomCode={initialMultiplayerRoomCode}
           initialMode={multiplayerInitialMode}
           initialStep={multiplayerInitialStep}
+          activeCollection={activeCollection}
         />
       )}
 
