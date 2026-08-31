@@ -552,9 +552,7 @@ function artistNameFromSlugFallback(slug: string): string {
     parts.length > 2 && /^[a-z0-9]{8}$/.test(parts[parts.length - 1])
       ? parts.slice(0, -1)
       : parts;
-  return withoutSpotifySuffix
-    .join(' ')
-    .replace(/\b[a-z]/g, (character) => character.toUpperCase());
+  return withoutSpotifySuffix.join(' ');
 }
 
 function safeText(value: unknown, maxLength: number): string {
@@ -883,14 +881,14 @@ function createDefaultRouteConfig(routeKey: string, appUrl: string): AdminPageCo
     return {
       countryCode: 'GLOBAL',
       slug,
-      pageTitle: `${name} Song Guess Quiz - Unofficial Fan Game`,
-      metaDescription: `Play an unofficial fan-made ${name} song guessing quiz on Song Guess Game. Guess short music snippets. Not affiliated with ${name}, Spotify, or any record label.`,
+      pageTitle: `${name} Song Guess - Heardle`,
+      metaDescription: `Play the ${name} Heardle-style song guessing challenge. Guess songs by ${name} from short audio snippets.`,
       keywords: `${name} heardle, ${name} song guess, ${name} music quiz`,
       canonicalUrl: `${appUrl}/artist/${slug}`,
-      customHeading: `${name} Song Guess Quiz`,
-      customIntroText: `Unofficial fan-made music trivia. Not affiliated with ${name}, Spotify, or any record label.`,
-      socialTitle: `${name} Song Guess Quiz - Unofficial Fan Game`,
-      socialDescription: `Guess ${name} songs from tiny snippets in this unofficial fan-made Song Guess Game challenge. Not affiliated with ${name}, Spotify, or any record label.`,
+      customHeading: `${name} Song Guess - Heardle`,
+      customIntroText: `Guess ${name} songs from short audio snippets.`,
+      socialTitle: `${name} Song Guess - Heardle`,
+      socialDescription: `Can you recognize ${name} songs from tiny snippets?`,
       socialImageUrl: artist?.coverImage || '',
       updatedAt: now
     };
@@ -1986,22 +1984,7 @@ function getRouteSeo(req: Request, publicConfig: PublicRuntimeConfig): AdminPage
 
   const routeKey = getRouteOverrideKey(req);
   if (routeKey) {
-    const fallback = createDefaultRouteConfig(routeKey, publicConfig.appUrl);
-    const configured = publicConfig.routeConfigs[routeKey];
-    if (routeKey.startsWith('artist:')) {
-      return {
-        ...(configured || fallback),
-        pageTitle: fallback.pageTitle,
-        metaDescription: fallback.metaDescription,
-        customHeading: fallback.customHeading,
-        customIntroText: fallback.customIntroText,
-        socialTitle: fallback.socialTitle,
-        socialDescription: fallback.socialDescription,
-        canonicalUrl: fallback.canonicalUrl,
-        socialImageUrl: configured?.socialImageUrl || fallback.socialImageUrl
-      };
-    }
-    return configured || fallback;
+    return publicConfig.routeConfigs[routeKey] || createDefaultRouteConfig(routeKey, publicConfig.appUrl);
   }
 
   const countryCode = resolveCountryCodeFromRequest(req, publicConfig);

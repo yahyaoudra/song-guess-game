@@ -953,13 +953,13 @@ export default function App() {
     activeChallenge?.type === 'artist' && challengeSeo
       ? {
           ...challengeSeo,
-          pageTitle: `${activeChallenge.title} Song Guess Quiz - Unofficial Fan Game`,
-          metaDescription: `Play an unofficial fan-made ${activeChallenge.title} song guessing quiz on Song Guess Game. Guess short music snippets. Not affiliated with ${activeChallenge.title}, Spotify, or any record label.`,
+          pageTitle: `${activeChallenge.title} Song Guess - Heardle`,
+          metaDescription: `Play the ${activeChallenge.title} Heardle-style song guessing challenge. Guess songs by ${activeChallenge.title} from short audio snippets.`,
           keywords: `${activeChallenge.title} heardle, ${activeChallenge.title} song guess, ${activeChallenge.title} music quiz`,
-          customHeading: `${activeChallenge.title} Song Guess Quiz`,
-          customIntroText: `Unofficial fan-made music trivia. Not affiliated with ${activeChallenge.title}, Spotify, or any record label.`,
-          socialTitle: `${activeChallenge.title} Song Guess Quiz - Unofficial Fan Game`,
-          socialDescription: `Guess ${activeChallenge.title} songs from tiny snippets in this unofficial fan-made Song Guess Game challenge. Not affiliated with ${activeChallenge.title}, Spotify, or any record label.`
+          customHeading: `${activeChallenge.title} Song Guess - Heardle`,
+          customIntroText: `Guess ${activeChallenge.title} songs from short audio snippets.`,
+          socialTitle: `${activeChallenge.title} Song Guess - Heardle`,
+          socialDescription: `Can you recognize ${activeChallenge.title} songs from tiny snippets?`
         }
       : challengeSeo || directorySeo || playSeo;
   const legalSeo = {

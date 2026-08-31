@@ -73,7 +73,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           <div>
             <h2 className="text-xl font-black text-white">Player account</h2>
             <p className="mt-1 text-xs text-white/50">Sign in to unlock weekly access and save your player identity.</p>
-            <p className="mt-1 text-[11px] text-white/35">This is a Song Guess Game account, not an artist or Spotify account.</p>
           </div>
           <button
             onClick={onClose}

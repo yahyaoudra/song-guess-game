@@ -191,9 +191,6 @@ export const ArtistBrowserPage: React.FC<ArtistBrowserPageProps> = ({
           <p className="mt-3 text-white/55 text-base sm:text-lg">
             Search all {artists.length} artist games and choose your next challenge.
           </p>
-          <p className="mx-auto mt-2 max-w-2xl text-xs leading-relaxed text-white/40">
-            Song Guess Game artist challenges are unofficial fan-made music quizzes and are not affiliated with any artist, Spotify, or record label.
-          </p>
 
           <div className="relative mt-8 mx-auto max-w-xl">
             <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-6 h-6 text-white/35" />

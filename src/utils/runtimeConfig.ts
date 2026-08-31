@@ -51,9 +51,7 @@ function artistNameFromSlugFallback(slug: string): string {
     parts.length > 2 && /^[a-z0-9]{8}$/.test(parts[parts.length - 1])
       ? parts.slice(0, -1)
       : parts;
-  return withoutSpotifySuffix
-    .join(' ')
-    .replace(/\b[a-z]/g, (character) => character.toUpperCase());
+  return withoutSpotifySuffix.join(' ');
 }
 
 export function createDefaultPageConfig(countryCode: string, appUrl = DEFAULT_APP_URL): AdminPageConfig {
@@ -210,14 +208,14 @@ export function createDefaultRouteConfig(routeKey: string, appUrl = DEFAULT_APP_
     return {
       countryCode: 'GLOBAL',
       slug,
-      pageTitle: `${name} Song Guess Quiz - Unofficial Fan Game`,
-      metaDescription: `Play an unofficial fan-made ${name} song guessing quiz on Song Guess Game. Guess short music snippets. Not affiliated with ${name}, Spotify, or any record label.`,
+      pageTitle: `${name} Song Guess - Heardle`,
+      metaDescription: `Play the ${name} Heardle-style song guessing challenge. Guess songs by ${name} from short audio snippets.`,
       keywords: `${name} heardle, ${name} song guess, ${name} music quiz`,
       canonicalUrl: `${cleanAppUrl}/artist/${slug}`,
-      customHeading: `${name} Song Guess Quiz`,
-      customIntroText: `Unofficial fan-made music trivia. Not affiliated with ${name}, Spotify, or any record label.`,
-      socialTitle: `${name} Song Guess Quiz - Unofficial Fan Game`,
-      socialDescription: `Guess ${name} songs from tiny snippets in this unofficial fan-made Song Guess Game challenge. Not affiliated with ${name}, Spotify, or any record label.`,
+      customHeading: `${name} Song Guess - Heardle`,
+      customIntroText: `Guess ${name} songs from short audio snippets.`,
+      socialTitle: `${name} Song Guess - Heardle`,
+      socialDescription: `Can you recognize ${name} songs from tiny snippets?`,
       socialImageUrl: artist?.coverImage || '',
       updatedAt: now
     };
@@ -328,21 +326,7 @@ export function getGenrePath(slug: string): string {
 }
 
 export function getRouteConfig(routeKey: string, config = getInitialPublicRuntimeConfig()): AdminPageConfig {
-  const fallback = createDefaultRouteConfig(routeKey, config.appUrl);
-  const configured = config.routeConfigs?.[routeKey];
-  if (!routeKey.startsWith('artist:')) return configured || fallback;
-
-  return {
-    ...(configured || fallback),
-    pageTitle: fallback.pageTitle,
-    metaDescription: fallback.metaDescription,
-    customHeading: fallback.customHeading,
-    customIntroText: fallback.customIntroText,
-    socialTitle: fallback.socialTitle,
-    socialDescription: fallback.socialDescription,
-    canonicalUrl: fallback.canonicalUrl,
-    socialImageUrl: configured?.socialImageUrl || fallback.socialImageUrl
-  };
+  return config.routeConfigs?.[routeKey] || createDefaultRouteConfig(routeKey, config.appUrl);
 }
 
 export function getRouteDisplayName(routeKey: string): string {
