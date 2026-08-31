@@ -7,6 +7,7 @@ import { COUNTRIES } from '../data/countries';
 import { getShareUrl } from '../utils/domain';
 import { getArtistPath, getCountryPath, getGenrePath } from '../utils/runtimeConfig';
 import { downloadScoreCardImage } from '../utils/scoreCardCanvas';
+import { publishLeaderboardEntry } from '../utils/authApi';
 
 interface GameCompleteModalProps {
   result: GameResult;
@@ -28,6 +29,7 @@ export const GameCompleteModal: React.FC<GameCompleteModalProps> = ({
   const streak = getDailyStreak();
   const [nickname, setNickname] = useState(settings.nickname || '');
   const [isPublished, setIsPublished] = useState(false);
+  const [isPublishing, setIsPublishing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [isDownloadingCard, setIsDownloadingCard] = useState(false);
   const [downloadedCard, setDownloadedCard] = useState(false);
@@ -100,7 +102,7 @@ export const GameCompleteModal: React.FC<GameCompleteModalProps> = ({
     setIsPublished(false);
   }, [result.id, result.nickname]);
 
-  const handlePublishScore = () => {
+  const handlePublishScore = async () => {
     if (!trimmedNickname) {
       setErrorMessage('Please enter a nickname to publish your score.');
       return;
@@ -133,7 +135,7 @@ export const GameCompleteModal: React.FC<GameCompleteModalProps> = ({
       ? '🔥 Pro Listener'
       : '⚡ Fan';
 
-    addLeaderboardEntry({
+    const leaderboardEntry = {
       id: result.id,
       nickname: trimmedNickname,
       countryCode: result.countryCode || settings.selectedCountry || 'GLOBAL',
@@ -144,10 +146,27 @@ export const GameCompleteModal: React.FC<GameCompleteModalProps> = ({
       date: 'Today',
       isCurrentUser: true,
       badge: leaderboardBadge
-    });
+    };
 
-    setIsPublished(true);
+    setIsPublishing(true);
     setErrorMessage(null);
+    try {
+      const published = await publishLeaderboardEntry({
+        ...leaderboardEntry,
+        durationSeconds: result.durationSeconds,
+        mode: result.mode,
+        collectionTitle: result.collectionTitle,
+        challengeType: result.challengeType,
+        challengeSlug: result.challengeSlug
+      });
+      addLeaderboardEntry({ ...leaderboardEntry, ...published, isCurrentUser: true });
+      setIsPublished(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not publish leaderboard score.';
+      setErrorMessage(message);
+    } finally {
+      setIsPublishing(false);
+    }
   };
 
   const handleCopyShare = () => {
@@ -340,16 +359,16 @@ export const GameCompleteModal: React.FC<GameCompleteModalProps> = ({
             <button
               id="publish-nickname-btn"
               onClick={handlePublishScore}
-              disabled={isPublished || !trimmedNickname || isTooShort || isTaken}
+              disabled={isPublished || isPublishing || !trimmedNickname || isTooShort || isTaken}
               className={`flex-1 py-3 px-4 rounded-xl text-sm font-black transition-all cursor-pointer shadow-lg ${
                 isPublished
                   ? 'bg-white/10 text-white/50 cursor-default'
-                  : !trimmedNickname || isTooShort || isTaken
+                  : isPublishing || !trimmedNickname || isTooShort || isTaken
                   ? 'bg-white/10 text-white/30 cursor-not-allowed'
                   : 'bg-[#00e676] hover:bg-[#1fe682] active:scale-95 text-black'
               }`}
             >
-              {isPublished ? 'Score Published ✓' : 'Publish unique score'}
+              {isPublished ? 'Score Published ✓' : isPublishing ? 'Publishing...' : 'Publish unique score'}
             </button>
 
             <button

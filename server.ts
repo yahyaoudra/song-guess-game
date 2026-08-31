@@ -266,6 +266,25 @@ async function ensureDatabaseSchema(): Promise<void> {
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now()
     );
+
+    CREATE TABLE IF NOT EXISTS sg_leaderboard_entries (
+      id text PRIMARY KEY,
+      user_id uuid REFERENCES sg_users(id) ON DELETE SET NULL,
+      nickname text NOT NULL,
+      country_code text,
+      points integer NOT NULL,
+      correct_count integer NOT NULL,
+      total_rounds integer NOT NULL,
+      time_formatted text NOT NULL,
+      duration_seconds integer NOT NULL DEFAULT 0,
+      mode text NOT NULL DEFAULT 'daily',
+      collection_title text,
+      challenge_type text,
+      challenge_slug text,
+      badge text,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
   `);
   await queryDb('ALTER TABLE sg_users ADD COLUMN IF NOT EXISTS country_code text');
   await queryDb('ALTER TABLE sg_users ADD COLUMN IF NOT EXISTS signup_bonus_claimed boolean NOT NULL DEFAULT false');
@@ -273,6 +292,8 @@ async function ensureDatabaseSchema(): Promise<void> {
   await queryDb('ALTER TABLE sg_users ADD COLUMN IF NOT EXISTS pending_email_verification_token_hash text');
   await queryDb('ALTER TABLE sg_users ADD COLUMN IF NOT EXISTS pending_email_verification_expires_at timestamptz');
   await queryDb('ALTER TABLE sg_payments ADD COLUMN IF NOT EXISTS receipt_url text');
+  await queryDb('ALTER TABLE sg_leaderboard_entries ADD COLUMN IF NOT EXISTS duration_seconds integer NOT NULL DEFAULT 0');
+  await queryDb('CREATE UNIQUE INDEX IF NOT EXISTS sg_leaderboard_nickname_unique ON sg_leaderboard_entries (lower(nickname))');
 }
 
 function hashToken(value: string): string {
@@ -1850,6 +1871,45 @@ function sanitizeActivityLog(raw: unknown, req: Request): ActivityLogEntry {
   };
 }
 
+function formatLeaderboardDate(value: unknown): string {
+  const date = value instanceof Date ? value : new Date(String(value || ''));
+  if (!Number.isFinite(date.getTime())) return 'Today';
+  const now = new Date();
+  if (date.toDateString() === now.toDateString()) return 'Today';
+  return date.toISOString().slice(0, 10);
+}
+
+function sanitizeLeaderboardPayload(raw: unknown, req: Request) {
+  const source = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+  const id = safeText(source.id, 120) || `score_${Date.now()}_${randomBytes(4).toString('hex')}`;
+  const nickname = safeText(source.nickname, 32);
+  const countryCode = safeText(source.countryCode, 12).toUpperCase() || 'GLOBAL';
+  const country = COUNTRIES.find((item) => item.code === countryCode);
+  const points = Number.parseInt(String(source.points ?? '0'), 10);
+  const correctCount = Number.parseInt(String(source.correctCount ?? '0'), 10);
+  const totalRounds = Number.parseInt(String(source.totalRounds ?? '0'), 10);
+  const durationSeconds = Number.parseInt(String(source.durationSeconds ?? '0'), 10);
+  const timeFormatted = safeText(source.timeFormatted, 16) ||
+    `${Math.floor(Math.max(0, durationSeconds) / 60)}:${String(Math.max(0, durationSeconds) % 60).padStart(2, '0')}`;
+
+  return {
+    id,
+    nickname,
+    countryCode: country?.code || 'GLOBAL',
+    points: Number.isFinite(points) ? Math.max(0, Math.min(100_000, points)) : 0,
+    correctCount: Number.isFinite(correctCount) ? Math.max(0, Math.min(100, correctCount)) : 0,
+    totalRounds: Number.isFinite(totalRounds) ? Math.max(1, Math.min(100, totalRounds)) : 1,
+    timeFormatted,
+    durationSeconds: Number.isFinite(durationSeconds) ? Math.max(0, Math.min(24 * 60 * 60, durationSeconds)) : 0,
+    mode: safeText(source.mode, 24) || 'daily',
+    collectionTitle: safeText(source.collectionTitle, 120),
+    challengeType: safeText(source.challengeType, 24),
+    challengeSlug: safeText(source.challengeSlug, 120),
+    badge: safeText(source.badge, 48),
+    ipHash: hashRequestIp(req)
+  };
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -3219,6 +3279,138 @@ async function startServer() {
     } catch (error) {
       console.error('Activity log error:', error);
       res.status(500).json({ error: 'Failed to record activity' });
+    }
+  });
+
+  app.get('/api/leaderboard', async (req, res) => {
+    if (!isDatabaseConfigured()) {
+      res.json({ entries: [], databaseConfigured: false });
+      return;
+    }
+
+    try {
+      const user = await getUserSession(req).catch(() => null);
+      const limit = parseLimit(req.query.limit, 50, 100);
+      const search = safeText(req.query.search, 80).toLowerCase();
+      const params: unknown[] = [];
+      let where = '';
+      if (search) {
+        params.push(`%${search}%`);
+        where = `WHERE lower(nickname) LIKE $${params.length}`;
+      }
+      params.push(limit);
+      const rows = await queryDb<Record<string, unknown>>(
+        `SELECT id, user_id, nickname, country_code, points, correct_count, total_rounds,
+                time_formatted, badge, created_at
+         FROM sg_leaderboard_entries
+         ${where}
+         ORDER BY points DESC, duration_seconds ASC, created_at ASC
+         LIMIT $${params.length}`,
+        params
+      );
+      res.json({
+        entries: rows.map((row) => ({
+          id: String(row.id || ''),
+          nickname: String(row.nickname || ''),
+          countryCode: String(row.country_code || '') || undefined,
+          points: Number(row.points) || 0,
+          correctCount: Number(row.correct_count) || 0,
+          totalRounds: Number(row.total_rounds) || 0,
+          timeFormatted: String(row.time_formatted || '0:00'),
+          date: formatLeaderboardDate(row.created_at),
+          badge: String(row.badge || '') || undefined,
+          isCurrentUser: Boolean(user?.id && String(row.user_id || '') === user.id)
+        })),
+        databaseConfigured: true
+      });
+    } catch (error) {
+      console.error('Leaderboard load error:', error);
+      res.status(503).json({ error: 'Could not load leaderboard' });
+    }
+  });
+
+  app.post('/api/leaderboard', async (req, res) => {
+    if (!isDatabaseConfigured()) {
+      res.status(503).json({ error: 'Leaderboard database is not configured' });
+      return;
+    }
+
+    try {
+      const user = await getUserSession(req).catch(() => null);
+      const entry = sanitizeLeaderboardPayload(req.body, req);
+      if (entry.nickname.length < 2) {
+        res.status(400).json({ error: 'Nickname must be at least 2 characters.' });
+        return;
+      }
+      if (entry.points <= 0 || entry.totalRounds <= 0) {
+        res.status(400).json({ error: 'A completed score is required.' });
+        return;
+      }
+
+      const rows = await queryDb<Record<string, unknown>>(
+        `INSERT INTO sg_leaderboard_entries (
+           id, user_id, nickname, country_code, points, correct_count, total_rounds,
+           time_formatted, duration_seconds, mode, collection_title, challenge_type,
+           challenge_slug, badge, updated_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now())
+         ON CONFLICT (id) DO UPDATE SET
+           user_id = COALESCE(EXCLUDED.user_id, sg_leaderboard_entries.user_id),
+           nickname = EXCLUDED.nickname,
+           country_code = EXCLUDED.country_code,
+           points = GREATEST(EXCLUDED.points, sg_leaderboard_entries.points),
+           correct_count = GREATEST(EXCLUDED.correct_count, sg_leaderboard_entries.correct_count),
+           total_rounds = EXCLUDED.total_rounds,
+           time_formatted = EXCLUDED.time_formatted,
+           duration_seconds = EXCLUDED.duration_seconds,
+           mode = EXCLUDED.mode,
+           collection_title = EXCLUDED.collection_title,
+           challenge_type = EXCLUDED.challenge_type,
+           challenge_slug = EXCLUDED.challenge_slug,
+           badge = EXCLUDED.badge,
+           updated_at = now()
+         RETURNING id, user_id, nickname, country_code, points, correct_count, total_rounds,
+                   time_formatted, badge, created_at`,
+        [
+          entry.id,
+          user?.id || null,
+          entry.nickname,
+          entry.countryCode,
+          entry.points,
+          entry.correctCount,
+          entry.totalRounds,
+          entry.timeFormatted,
+          entry.durationSeconds,
+          entry.mode,
+          entry.collectionTitle || null,
+          entry.challengeType || null,
+          entry.challengeSlug || null,
+          entry.badge || null
+        ]
+      );
+      const row = rows[0];
+      res.json({
+        entry: {
+          id: String(row.id || ''),
+          nickname: String(row.nickname || ''),
+          countryCode: String(row.country_code || '') || undefined,
+          points: Number(row.points) || 0,
+          correctCount: Number(row.correct_count) || 0,
+          totalRounds: Number(row.total_rounds) || 0,
+          timeFormatted: String(row.time_formatted || '0:00'),
+          date: formatLeaderboardDate(row.created_at),
+          badge: String(row.badge || '') || undefined,
+          isCurrentUser: Boolean(user?.id && String(row.user_id || '') === user.id)
+        }
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      if (message.includes('sg_leaderboard_nickname_unique')) {
+        res.status(409).json({ error: 'This nickname is already taken. Please choose another unique name.' });
+        return;
+      }
+      console.error('Leaderboard submit error:', error);
+      res.status(503).json({ error: 'Could not publish leaderboard score' });
     }
   });
 

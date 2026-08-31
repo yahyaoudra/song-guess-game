@@ -27,16 +27,7 @@ const DEFAULT_STREAK: StreakData = {
   totalDaysCompleted: 0
 };
 
-const INITIAL_LEADERBOARD: LeaderboardEntry[] = [
-  { id: '1', nickname: 'BeatMaster', countryCode: 'GLOBAL', points: 4950, correctCount: 5, totalRounds: 5, timeFormatted: '0:38', date: 'Today', badge: '🏆 Global Legend' },
-  { id: '2', nickname: 'CasaRapKing', countryCode: 'MA', points: 4850, correctCount: 5, totalRounds: 5, timeFormatted: '0:42', date: 'Today', badge: '🔥 Sniper' },
-  { id: '3', nickname: 'LondonRhythm', countryCode: 'GB', points: 4700, correctCount: 5, totalRounds: 5, timeFormatted: '0:51', date: 'Today', badge: '⚡ Prodigy' },
-  { id: '4', nickname: 'ParisGroove', countryCode: 'FR', points: 4600, correctCount: 5, totalRounds: 5, timeFormatted: '0:58', date: 'Today', badge: '🎧 Pro' },
-  { id: '5', nickname: 'TokyoWave', countryCode: 'JP', points: 4300, correctCount: 5, totalRounds: 5, timeFormatted: '1:12', date: 'Today' },
-  { id: '6', nickname: 'CairoMelody', countryCode: 'EG', points: 3950, correctCount: 5, totalRounds: 5, timeFormatted: '1:35', date: 'Today' },
-  { id: '7', nickname: 'RioVibes', countryCode: 'BR', points: 3700, correctCount: 4, totalRounds: 5, timeFormatted: '1:48', date: 'Today' },
-  { id: '8', nickname: 'SeoulBeats', countryCode: 'KR', points: 3450, correctCount: 4, totalRounds: 5, timeFormatted: '2:10', date: 'Today' }
-];
+const INITIAL_LEADERBOARD: LeaderboardEntry[] = [];
 
 export function getStoredSettings(): UserSettings {
   try {

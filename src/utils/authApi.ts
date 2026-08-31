@@ -1,4 +1,5 @@
 import { AuthSessionResponse, DailyAccessState, PaymentRecord, RequestedArtist, SpotifyArtistSuggestion } from '../adminTypes';
+import { LeaderboardEntry } from '../types';
 import { executeRecaptcha } from './recaptcha';
 
 export interface RegisterUserResponse {
@@ -125,4 +126,25 @@ export async function sendContactRequest(name: string, email: string, message: s
     method: 'POST',
     body: JSON.stringify({ name, email, message, recaptchaToken })
   });
+}
+
+export async function fetchLeaderboard(search = ''): Promise<LeaderboardEntry[]> {
+  const params = new URLSearchParams({ limit: '100' });
+  if (search.trim()) params.set('search', search.trim());
+  const body = await requestJson<{ entries: LeaderboardEntry[] }>(`/api/leaderboard?${params.toString()}`);
+  return body.entries;
+}
+
+export async function publishLeaderboardEntry(entry: LeaderboardEntry & {
+  durationSeconds?: number;
+  mode?: string;
+  collectionTitle?: string;
+  challengeType?: string;
+  challengeSlug?: string;
+}): Promise<LeaderboardEntry> {
+  const body = await requestJson<{ entry: LeaderboardEntry }>('/api/leaderboard', {
+    method: 'POST',
+    body: JSON.stringify(entry)
+  });
+  return body.entry;
 }

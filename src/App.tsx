@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import confetti from 'canvas-confetti';
 import { Song, Difficulty, GameMode, GameResult, QuizCollection, UserSettings, TitleDisplayMode, StreakData, MultiplayerSession } from './types';
 import { ALL_SONGS, getSongsForCountry, SNIPPET_TIERS } from './data/moroccanSongs';
 import { QUIZ_COLLECTIONS, getDefaultCollectionForCountry } from './data/quizCollections';
@@ -736,6 +737,26 @@ export default function App() {
     }));
   }, [activeMultiplayerSession?.roomCode, activeMultiplayerSession?.socket]);
 
+  const fireCorrectGuessConfetti = useCallback(() => {
+    const colors = ['#00e676', '#ffd600', '#ffffff', '#00e5ff'];
+    confetti({
+      particleCount: 70,
+      spread: 58,
+      startVelocity: 40,
+      scalar: 0.85,
+      origin: { y: 0.68 },
+      colors
+    });
+    confetti({
+      particleCount: 32,
+      spread: 95,
+      startVelocity: 28,
+      scalar: 0.65,
+      origin: { y: 0.72 },
+      colors
+    });
+  }, []);
+
   const handleSelectCountry = (countryCode: string, updateRoute = true) => {
     const updated = { ...getStoredSettings(), selectedCountry: countryCode };
     setSettings(updated);
@@ -812,6 +833,7 @@ export default function App() {
 
     if (isCorrect) {
       const earned = SNIPPET_TIERS[currentStepIndex]?.points || 250;
+      fireCorrectGuessConfetti();
       if (settings.enableSfx) audioEngine.playSfx('correct');
       completeRound(true, earned);
     } else {

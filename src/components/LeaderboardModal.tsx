@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { X, Trophy, Search } from 'lucide-react';
 import { LeaderboardEntry } from '../types';
 import { getLeaderboard } from '../utils/storage';
+import { fetchLeaderboard } from '../utils/authApi';
 import { COUNTRIES } from '../data/countries';
 
 interface LeaderboardModalProps {
@@ -9,11 +10,40 @@ interface LeaderboardModalProps {
 }
 
 export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ onClose }) => {
-  const [entries] = useState<LeaderboardEntry[]>(getLeaderboard());
+  const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const filtered = entries.filter((e) =>
-    e.nickname.toLowerCase().includes(searchTerm.toLowerCase())
+  useEffect(() => {
+    const controller = new AbortController();
+    setIsLoading(true);
+    const timeout = window.setTimeout(() => {
+      fetchLeaderboard(searchTerm)
+        .then((serverEntries) => {
+          if (controller.signal.aborted) return;
+          setEntries(serverEntries);
+          setLoadError(null);
+        })
+        .catch(() => {
+          if (controller.signal.aborted) return;
+          setEntries(getLeaderboard());
+          setLoadError('Live leaderboard is temporarily unavailable.');
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setIsLoading(false);
+        });
+    }, searchTerm ? 220 : 0);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeout);
+    };
+  }, [searchTerm]);
+
+  const filtered = useMemo(
+    () => entries.filter((e) => e.nickname.toLowerCase().includes(searchTerm.toLowerCase())),
+    [entries, searchTerm]
   );
 
   return (
@@ -61,7 +91,28 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ onClose }) =
 
         {/* Entries List */}
         <div className="overflow-y-auto flex flex-col gap-2 pr-1 max-h-[62vh]">
-          {filtered.map((entry, index) => {
+          {isLoading && (
+            <div className="rounded-lg border border-white/10 bg-[#151c18] p-5 text-center text-xs font-bold text-white/50">
+              Loading real player scores...
+            </div>
+          )}
+
+          {!isLoading && loadError && (
+            <div className="rounded-lg border border-amber-400/20 bg-amber-400/10 p-3 text-center text-xs font-bold text-amber-200">
+              {loadError}
+            </div>
+          )}
+
+          {!isLoading && filtered.length === 0 && (
+            <div className="rounded-lg border border-white/10 bg-[#151c18] p-5 text-center">
+              <p className="text-sm font-black text-white">No real scores yet</p>
+              <p className="mt-1 text-xs text-white/45">
+                Finish a game and publish your score to appear here.
+              </p>
+            </div>
+          )}
+
+          {!isLoading && filtered.map((entry, index) => {
             const isTop1 = index === 0;
             const isTop2 = index === 1;
             const isTop3 = index === 2;
