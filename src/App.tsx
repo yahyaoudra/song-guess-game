@@ -123,10 +123,11 @@ export default function App() {
   const [isMultiplayerOpen, setIsMultiplayerOpen] = useState(false);
   const [initialMultiplayerRoomCode, setInitialMultiplayerRoomCode] = useState('');
   const [multiplayerInitialMode, setMultiplayerInitialMode] = useState<'party' | 'online'>('party');
-  const [multiplayerInitialStep, setMultiplayerInitialStep] = useState<'mode' | 'setup' | 'players' | 'lobby' | undefined>(undefined);
+  const [multiplayerInitialStep, setMultiplayerInitialStep] = useState<'mode' | 'pack' | 'settings' | 'players' | 'lobby' | undefined>(undefined);
   const [multiplayerAuthReturn, setMultiplayerAuthReturn] = useState<'online-create' | 'online-join' | null>(null);
   const [activeMultiplayerSession, setActiveMultiplayerSession] = useState<MultiplayerSession | null>(null);
   const [isMultiplayerInfoOpen, setIsMultiplayerInfoOpen] = useState(false);
+  const [multiplayerConfirmAction, setMultiplayerConfirmAction] = useState<'quit' | 'new-room' | null>(null);
   const [authSession, setAuthSession] = useState<AuthSessionResponse>({
     authenticated: false,
     entitlement: { active: false },
@@ -273,7 +274,7 @@ export default function App() {
     updateRemaining();
     const interval = window.setInterval(updateRemaining, 250);
     return () => window.clearInterval(interval);
-  }, [activeMultiplayerSession, isMultiplayerGuestTurn, isRevealed, multiplayerRoundEndsAt]);
+  }, [activeMultiplayerSession, isMultiplayerGuestTurn, isRevealed, multiplayerCountdownSeconds, multiplayerRoundEndsAt]);
 
   // Load public runtime config from the server. Production HTML injects an initial copy.
   useEffect(() => {
@@ -969,6 +970,7 @@ export default function App() {
         setMultiplayerSecondsLeft(null);
         setIsMultiplayerInfoOpen(true);
         sendMultiplayerEvent({ type: 'finish', players: activeMultiplayerSession.players, message: 'Final results are ready' });
+        return;
       }
       const totalElapsedSec = Math.max(15, Math.floor((Date.now() - gameStartTime) / 1000));
       const resultCountryCode = activeChallenge ? 'GLOBAL' : settings.selectedCountry || 'GLOBAL';
@@ -1333,6 +1335,10 @@ export default function App() {
     setSavedResult(null);
     setWrongFeedback(null);
     setGameSessionKey(Date.now());
+    const firstRoundEndsAt = Date.now() + Math.max(10, session.countdownSeconds || 80) * 1000;
+    setMultiplayerRoundEndsAt(firstRoundEndsAt);
+    setMultiplayerSecondsLeft(Math.max(10, session.countdownSeconds || 80));
+    roundTimeoutRef.current = false;
     const nextPath = session.roomCode ? `/play?room=${encodeURIComponent(session.roomCode)}` : '/play';
     if (`${window.location.pathname}${window.location.search}` !== nextPath) {
       window.history.pushState({}, document.title, nextPath);
@@ -1347,7 +1353,7 @@ export default function App() {
     if (multiplayerAuthReturn) {
       setIsAuthOpen(false);
       setMultiplayerInitialMode('online');
-      setMultiplayerInitialStep(multiplayerAuthReturn === 'online-create' ? 'setup' : 'lobby');
+      setMultiplayerInitialStep(multiplayerAuthReturn === 'online-create' ? 'pack' : 'lobby');
       setIsMultiplayerOpen(true);
       setMultiplayerAuthReturn(null);
     }
@@ -1501,7 +1507,7 @@ export default function App() {
     }
   }, [activeMultiplayerSession, currentMultiplayerPlayer, roundIndex, sendMultiplayerEvent]);
 
-  const quitMultiplayerSession = useCallback(() => {
+  const performQuitMultiplayerSession = useCallback(() => {
     audioEngine.stop();
     if (activeMultiplayerSession?.mode === 'online' && activeMultiplayerSession.socket && activeMultiplayerSession.roomCode && activeMultiplayerSession.onlinePlayerId) {
       const player = activeMultiplayerSession.players.find((item) => item.id === activeMultiplayerSession.onlinePlayerId);
@@ -1521,6 +1527,21 @@ export default function App() {
     navigateToPage('/play');
   }, [activeMultiplayerSession, navigateToPage, settings.selectedCountry, startNewGame]);
 
+  const quitMultiplayerSession = useCallback(() => {
+    setMultiplayerConfirmAction('quit');
+  }, []);
+
+  const openMultiplayerLauncher = useCallback(() => {
+    if (activeMultiplayerSession) {
+      setMultiplayerConfirmAction('new-room');
+      return;
+    }
+    setInitialMultiplayerRoomCode('');
+    setMultiplayerInitialMode('party');
+    setMultiplayerInitialStep('mode');
+    setIsMultiplayerOpen(true);
+  }, [activeMultiplayerSession]);
+
   const renderMultiplayerStatusBar = () => {
     if (!activeMultiplayerSession || !currentMultiplayerPlayer) return null;
     return (
@@ -1532,15 +1553,23 @@ export default function App() {
           <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-white">
             Current: {currentMultiplayerPlayer.name}
           </span>
-          <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-white/65">
+          <button
+            type="button"
+            onClick={() => setIsMultiplayerInfoOpen(true)}
+            className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-white/65 hover:border-[#00e676]/35 hover:text-white"
+          >
             {activeMultiplayerSession.activity}
-          </span>
+          </button>
           <span className="rounded-full border border-yellow-300/25 bg-yellow-300/10 px-3 py-1 font-mono text-yellow-200">
             {multiplayerSecondsLeft ?? multiplayerCountdownSeconds}s left
           </span>
-          <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-white/65">
+          <button
+            type="button"
+            onClick={() => setIsMultiplayerInfoOpen(true)}
+            className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-white/65 hover:border-[#00e676]/35 hover:text-white"
+          >
             Next: {nextMultiplayerPlayer?.name || 'Results'}
-          </span>
+          </button>
           <button
             type="button"
             onClick={() => setIsMultiplayerInfoOpen(true)}
@@ -1555,6 +1584,49 @@ export default function App() {
         {isMultiplayerGuestTurn && (
           <p className="mt-2 text-center text-[11px] font-bold text-white/45">Listen along. Only {currentMultiplayerPlayer.name} can guess this round.</p>
         )}
+      </div>
+    );
+  };
+
+  const renderMultiplayerConfirmModal = () => {
+    if (!multiplayerConfirmAction) return null;
+    const isNewRoom = multiplayerConfirmAction === 'new-room';
+    return (
+      <div className="fixed inset-0 z-[220] flex items-center justify-center bg-black/85 p-3 backdrop-blur-md">
+        <div className="w-full max-w-md rounded-lg border border-white/12 bg-[#0d1410] p-4 shadow-2xl">
+          <h2 className="text-xl font-black text-white">{isNewRoom ? 'Create a new room?' : 'Quit multiplayer?'}</h2>
+          <p className="mt-2 text-sm leading-6 text-white/55">
+            {isNewRoom
+              ? 'Creating a new room will quit your current multiplayer game. Continue?'
+              : 'Quit this multiplayer game? Your current room progress will be left.'}
+          </p>
+          <div className="mt-5 grid gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => setMultiplayerConfirmAction(null)}
+              className="h-11 rounded-lg border border-white/10 bg-white/[0.04] text-sm font-black text-white/70 hover:bg-white/10"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const action = multiplayerConfirmAction;
+                setMultiplayerConfirmAction(null);
+                performQuitMultiplayerSession();
+                if (action === 'new-room') {
+                  setInitialMultiplayerRoomCode('');
+                  setMultiplayerInitialMode('party');
+                  setMultiplayerInitialStep('mode');
+                  setIsMultiplayerOpen(true);
+                }
+              }}
+              className="h-11 rounded-lg bg-[#00e676] text-sm font-black text-black hover:bg-[#1fe682]"
+            >
+              {isNewRoom ? 'Quit and create' : 'Quit game'}
+            </button>
+          </div>
+        </div>
       </div>
     );
   };
@@ -1674,7 +1746,7 @@ export default function App() {
       )}
 
       {isMultiplayerInfoOpen && activeMultiplayerSession && (
-        <div className="fixed inset-0 z-[140] flex items-center justify-center bg-black/80 p-3 backdrop-blur-md">
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-3 backdrop-blur-md">
           <div className="w-full max-w-lg rounded-lg border border-white/12 bg-[#0d1410] p-4 shadow-2xl">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -1720,7 +1792,7 @@ export default function App() {
                   onClick={() => {
                     setInitialMultiplayerRoomCode(activeMultiplayerSession.roomCode || '');
                     setMultiplayerInitialMode('online');
-                    setMultiplayerInitialStep('setup');
+                    setMultiplayerInitialStep('pack');
                     setIsMultiplayerInfoOpen(false);
                     setIsMultiplayerOpen(true);
                   }}
@@ -1750,6 +1822,8 @@ export default function App() {
           databaseConfigured={authSession.databaseConfigured}
         />
       )}
+
+      {renderMultiplayerConfirmModal()}
     </>
   );
 
@@ -2068,12 +2142,7 @@ export default function App() {
         onOpenAuth={() => setIsAuthOpen(true)}
         onOpenPaywall={() => setIsPaywallOpen(true)}
         onUnlock={handleUnlock}
-        onOpenMultiplayer={() => {
-          setInitialMultiplayerRoomCode('');
-          setMultiplayerInitialMode('party');
-          setMultiplayerInitialStep('mode');
-          setIsMultiplayerOpen(true);
-        }}
+        onOpenMultiplayer={openMultiplayerLauncher}
       />
 
       {/* 5. Minimal Production Footer with Compliance & Secret Admin Trigger */}
@@ -2239,6 +2308,84 @@ export default function App() {
         />
       )}
 
+      {isMultiplayerInfoOpen && activeMultiplayerSession && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-3 backdrop-blur-md">
+          <div className="w-full max-w-lg rounded-lg border border-white/12 bg-[#0d1410] p-4 shadow-2xl">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-black text-white">Multiplayer info</h2>
+                <p className="mt-1 text-xs text-white/45">
+                  {activeMultiplayerSession.challengeTitle} · {activeMultiplayerSession.turnsPerPlayer} songs each
+                </p>
+              </div>
+              <button type="button" onClick={() => setIsMultiplayerInfoOpen(false)} className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-black text-white/60 hover:text-white">
+                Close
+              </button>
+            </div>
+            <div className="mt-4 grid gap-2 text-xs text-white/55 sm:grid-cols-3">
+              <div className="rounded-lg border border-white/10 bg-white/[0.04] p-3">
+                <span className="block text-[10px] font-black uppercase tracking-wide text-white/35">Current</span>
+                <span className="font-black text-white">{currentMultiplayerPlayer?.name || 'Results'}</span>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-white/[0.04] p-3">
+                <span className="block text-[10px] font-black uppercase tracking-wide text-white/35">Activity</span>
+                <span className="font-black text-white">{activeMultiplayerSession.activity}</span>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-white/[0.04] p-3">
+                <span className="block text-[10px] font-black uppercase tracking-wide text-white/35">Next</span>
+                <span className="font-black text-white">{nextMultiplayerPlayer?.name || 'Results'}</span>
+              </div>
+            </div>
+            {activeMultiplayerSession.roomCode && (
+              <div className="mt-4 rounded-lg border border-[#00e676]/25 bg-[#00e676]/10 p-3">
+                <div className="text-[10px] font-black uppercase tracking-wide text-[#00e676]">Room</div>
+                <div className="mt-1 font-mono text-2xl font-black text-white">{activeMultiplayerSession.roomCode}</div>
+              </div>
+            )}
+            <div className="mt-4 space-y-2">
+              {[...activeMultiplayerSession.players]
+                .sort((left, right) => right.score - left.score || left.name.localeCompare(right.name))
+                .map((player, index) => (
+                  <div key={player.id} className="flex items-center justify-between rounded-lg border border-white/10 bg-white/[0.04] p-3">
+                    <div className="flex items-center gap-3">
+                      <span className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-black ${
+                        index === 0 ? 'bg-yellow-300 text-black' : index === 1 ? 'bg-slate-300 text-black' : index === 2 ? 'bg-amber-700 text-white' : 'bg-white/10 text-white/55'
+                      }`}>
+                        {index < 3 ? ['1', '2', '3'][index] : `#${index + 1}`}
+                      </span>
+                      <div>
+                        <div className="text-sm font-black text-white">{player.name}{player.connected === false ? ' (left)' : ''}</div>
+                        <div className="text-[11px] text-white/45">{player.correct}/{player.turnsPlayed} correct</div>
+                      </div>
+                    </div>
+                    <div className="font-mono text-sm font-black text-[#00e676]">{player.score} pts</div>
+                  </div>
+                ))}
+            </div>
+            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+              {activeMultiplayerSession.isHost && activeMultiplayerSession.mode === 'online' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInitialMultiplayerRoomCode(activeMultiplayerSession.roomCode || '');
+                    setMultiplayerInitialMode('online');
+                    setMultiplayerInitialStep('pack');
+                    setIsMultiplayerInfoOpen(false);
+                    setIsMultiplayerOpen(true);
+                  }}
+                  className="h-11 rounded-lg bg-[#00e676] text-sm font-black text-black hover:bg-[#1fe682]"
+                >
+                  Change pack / restart
+                </button>
+              )}
+              <button type="button" onClick={quitMultiplayerSession} className="h-11 rounded-lg border border-red-400/25 bg-red-400/10 text-sm font-black text-red-200 hover:bg-red-400/20">
+                Quit multiplayer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isPaywallOpen && (
         <PaywallModal
           onClose={() => setIsPaywallOpen(false)}
@@ -2252,6 +2399,8 @@ export default function App() {
           databaseConfigured={authSession.databaseConfigured}
         />
       )}
+
+      {renderMultiplayerConfirmModal()}
 
       {/* 9. Game Complete Modal (Daily 5 / Quiz completion) */}
       {isCompleteModalOpen && (

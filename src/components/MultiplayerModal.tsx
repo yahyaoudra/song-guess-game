@@ -28,7 +28,7 @@ interface MultiplayerModalProps {
 }
 
 type MultiplayerMode = 'party' | 'online';
-type SetupStep = 'mode' | 'setup' | 'players' | 'lobby';
+type SetupStep = 'mode' | 'pack' | 'settings' | 'players' | 'lobby';
 type ChallengeType = 'country' | 'artist' | 'genre' | 'collection';
 
 interface ChallengeOption {
@@ -123,7 +123,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
     : null;
   const [mode, setMode] = useState<MultiplayerMode>(existingOnlineRoom || initialRoomCode ? 'online' : initialMode);
   const [step, setStep] = useState<SetupStep>(initialStep || (initialRoomCode ? 'lobby' : 'mode'));
-  const [challengeType, setChallengeType] = useState<ChallengeType>(activeCollection ? 'collection' : existingSession?.challengeType || 'country');
+  const [challengeType, setChallengeType] = useState<ChallengeType>(existingSession?.challengeType === 'artist' || existingSession?.challengeType === 'genre' ? existingSession.challengeType : 'country');
   const [challengeSlug, setChallengeSlug] = useState(activeCollection?.id || 'GLOBAL');
   const [turnsPerPlayer, setTurnsPerPlayer] = useState(DEFAULT_TURNS);
   const [countdownSeconds, setCountdownSeconds] = useState(existingSession?.countdownSeconds || 80);
@@ -144,34 +144,31 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
   const [isJoiningRoom, setIsJoiningRoom] = useState(false);
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
   const [isRoomInfoOpen, setIsRoomInfoOpen] = useState(false);
+  const [packError, setPackError] = useState('');
   const socketRef = useRef<WebSocket | null>(existingSession?.socket || null);
   const handoffSocketRef = useRef(false);
   const ownsSocketRef = useRef(!existingSession?.socket);
 
   const challengeOptions = useMemo<ChallengeOption[]>(() => {
-    if (challengeType === 'collection') {
-      const collection = activeCollection || QUIZ_COLLECTIONS.find((item) => item.id === challengeSlug) || QUIZ_COLLECTIONS[0];
-      return collection
-        ? [{
-            type: 'collection',
-            slug: collection.id,
-            title: collection.title,
-            subtitle: `${collection.songIds.length || collection.songsCount || 0} songs`,
-            image: collection.coverImage,
-            songIds: collection.songIds
-          }]
-        : [];
-    }
     if (challengeType === 'country') {
-      return COUNTRIES.slice(0, 24).map((country) => ({
-        type: 'country',
+      const collectionOptions = QUIZ_COLLECTIONS.map((collection) => ({
+        type: 'collection' as const,
+        slug: collection.id,
+        title: collection.title,
+        subtitle: `${collection.songIds.length || collection.songsCount || 0} songs`,
+        image: collection.coverImage,
+        songIds: collection.songIds
+      }));
+      const countryOptions = COUNTRIES.map((country) => ({
+        type: 'country' as const,
         slug: country.code,
         title: country.name,
-        subtitle: country.description
+        subtitle: `${getSongsForCountry(country.code).length} songs`
       }));
+      return [...collectionOptions, ...countryOptions];
     }
     if (challengeType === 'artist') {
-      return orderArtistsByFeaturedPriority(getArtistChallenges()).slice(0, 36).map((artist) => ({
+      return orderArtistsByFeaturedPriority(getArtistChallenges()).map((artist) => ({
         type: 'artist',
         slug: artist.slug,
         title: artist.name,
@@ -191,19 +188,19 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
   }, [activeCollection, challengeSlug, challengeType]);
 
   const selectedChallenge = useMemo(
-    () => challengeOptions.find((item) => item.slug === challengeSlug) || challengeOptions[0],
+    () => challengeOptions.find((item) => item.slug === challengeSlug) || null,
     [challengeOptions, challengeSlug]
   );
 
   useEffect(() => {
-    if (!challengeOptions.some((option) => option.slug === challengeSlug) && challengeOptions[0]) {
-      setChallengeSlug(challengeOptions[0].slug);
+    if (challengeSlug && !challengeOptions.some((option) => option.slug === challengeSlug)) {
+      setChallengeSlug('');
     }
   }, [challengeOptions, challengeSlug]);
 
   useEffect(() => {
     if (!activeCollection || initialRoomCode) return;
-    setChallengeType('collection');
+    setChallengeType('country');
     setChallengeSlug(activeCollection.id);
   }, [activeCollection, initialRoomCode]);
 
@@ -237,7 +234,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
     if (!selectedChallenge) return ALL_SONGS;
     if (selectedChallenge.type === 'country') return getSongsForCountry(selectedChallenge.slug);
     if (selectedChallenge.type === 'collection') {
-      const collection = activeCollection || QUIZ_COLLECTIONS.find((item) => item.id === selectedChallenge.slug);
+      const collection = QUIZ_COLLECTIONS.find((item) => item.id === selectedChallenge.slug) || activeCollection;
       const byIds = ALL_SONGS.filter((song) => collection?.songIds.includes(song.id));
       return byIds.length > 0 ? byIds : collection?.songs || ALL_SONGS;
     }
@@ -249,8 +246,10 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
     return byGenre.length > 0 ? byGenre : ALL_SONGS.filter((song) => selectedChallenge.songIds?.includes(song.id));
   };
 
+  const selectedSongCount = getSongPool().length;
+
   const buildRoomSettings = () => ({
-    challengeType,
+    challengeType: selectedChallenge?.type || challengeType,
     challengeSlug: selectedChallenge?.slug || challengeSlug,
     challengeTitle: selectedChallenge?.title || 'Global',
     turnsPerPlayer: safeTurns,
@@ -480,7 +479,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
         <div className="overflow-y-auto p-4 sm:p-5">
           {step === 'mode' && (
             <section className="grid gap-3 sm:grid-cols-2">
-              <button onClick={() => { setMode('party'); setStep('setup'); }} className="rounded-lg border border-[#00e676]/35 bg-[#00e676]/10 p-5 text-left hover:bg-[#00e676]/15">
+              <button onClick={() => { setMode('party'); setStep('pack'); }} className="rounded-lg border border-[#00e676]/35 bg-[#00e676]/10 p-5 text-left hover:bg-[#00e676]/15">
                 <Users className="h-7 w-7 text-[#00e676]" />
                 <h3 className="mt-4 text-xl font-black text-white">Same device</h3>
                 <p className="mt-2 text-sm leading-6 text-white/55">Add names, pass the device, and play equal turns together.</p>
@@ -493,69 +492,98 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
             </section>
           )}
 
-          {step === 'setup' && (
-            <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
-              <section className="space-y-4">
-                {activeCollection && (
+          {step === 'pack' && (
+            <section className="space-y-4">
+              <div>
+                <h3 className="text-lg font-black text-white">Choose a pack</h3>
+                <p className="mt-1 text-xs text-white/45">Pick one country, artist, genre, or official playlist before game settings.</p>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  ['country', Globe2, 'Country'],
+                  ['artist', Mic2, 'Artist'],
+                  ['genre', Tags, 'Genre']
+                ].map(([type, Icon, label]) => (
                   <button
+                    key={String(type)}
                     onClick={() => {
-                      setChallengeType('collection');
-                      setChallengeSlug(activeCollection.id);
+                      setChallengeType(type as ChallengeType);
+                      setChallengeSlug('');
+                      setPackError('');
                     }}
-                    className={`grid w-full grid-cols-[56px_minmax(0,1fr)_auto] items-center gap-3 rounded-lg border p-2.5 text-left ${
-                      challengeType === 'collection' ? 'border-[#00e676] bg-[#00e676]/12' : 'border-white/10 bg-white/[0.04] hover:border-white/20'
+                    className={`flex h-12 items-center justify-center gap-2 rounded-lg border text-xs font-black ${
+                      challengeType === type ? 'border-[#00e676] bg-[#00e676] text-black' : 'border-white/10 bg-white/[0.04] text-white/65 hover:text-white'
                     }`}
                   >
-                    <div className="h-14 w-14 overflow-hidden rounded-lg bg-black/30">
-                      <img src={activeCollection.coverImage} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                    <Icon className="h-4 w-4" />
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="grid max-h-[54vh] gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                {challengeOptions.map((option) => (
+                  <button
+                    key={`${option.type}-${option.slug}`}
+                    onClick={() => {
+                      setChallengeSlug(option.slug);
+                      setPackError('');
+                    }}
+                    className={`grid grid-cols-[52px_minmax(0,1fr)] items-center gap-3 rounded-lg border p-2 text-left ${
+                      selectedChallenge?.slug === option.slug ? 'border-[#00e676] bg-[#00e676]/12' : 'border-white/10 bg-white/[0.04] hover:border-white/20'
+                    }`}
+                  >
+                    <div className="flex h-[52px] w-[52px] items-center justify-center overflow-hidden rounded-lg bg-black/30 text-xl">
+                      {option.image ? <img src={option.image} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" /> : option.slug === 'GLOBAL' ? '🌍' : COUNTRIES.find((country) => country.code === option.slug)?.flag || '♪'}
                     </div>
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-black text-white">Selected pack: {activeCollection.title}</div>
-                      <div className="truncate text-xs text-white/45">{activeCollection.songIds.length || activeCollection.songsCount || 0} playable songs</div>
+                      <div className="truncate text-sm font-black text-white">{option.title}</div>
+                      <div className="truncate text-[11px] text-white/45">{option.subtitle}</div>
                     </div>
-                    <span className="rounded-full bg-[#00e676]/15 px-2 py-1 text-[10px] font-black text-[#00e676]">Use pack</span>
                   </button>
-                )}
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    ['country', Globe2, 'Country'],
-                    ['artist', Mic2, 'Artist'],
-                    ['genre', Tags, 'Genre']
-                  ].map(([type, Icon, label]) => (
-                    <button
-                      key={String(type)}
-                      onClick={() => {
-                        setChallengeType(type as ChallengeType);
-                        setChallengeSlug('');
-                      }}
-                      className={`flex h-12 items-center justify-center gap-2 rounded-lg border text-xs font-black ${
-                        challengeType === type ? 'border-[#00e676] bg-[#00e676] text-black' : 'border-white/10 bg-white/[0.04] text-white/65 hover:text-white'
-                      }`}
-                    >
-                      <Icon className="h-4 w-4" />
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                <div className="grid max-h-[430px] gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
-                  {challengeOptions.map((option) => (
-                    <button
-                      key={option.slug}
-                      onClick={() => setChallengeSlug(option.slug)}
-                      className={`grid grid-cols-[52px_minmax(0,1fr)] items-center gap-3 rounded-lg border p-2 text-left ${
-                        selectedChallenge?.slug === option.slug ? 'border-[#00e676] bg-[#00e676]/12' : 'border-white/10 bg-white/[0.04] hover:border-white/20'
-                      }`}
-                    >
-                      <div className="flex h-[52px] w-[52px] items-center justify-center overflow-hidden rounded-lg bg-black/30 text-xl">
-                        {option.image ? <img src={option.image} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" /> : option.slug === 'GLOBAL' ? '🌍' : COUNTRIES.find((country) => country.code === option.slug)?.flag || '♪'}
+                ))}
+              </div>
+              {packError && <div className="rounded-lg border border-red-400/25 bg-red-400/10 p-3 text-xs font-bold text-red-100">{packError}</div>}
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <button onClick={() => setStep(mode === 'online' ? 'lobby' : 'mode')} className="h-11 rounded-lg border border-white/10 px-4 text-sm font-bold text-white/65 hover:bg-white/10">Back</button>
+                <button
+                  onClick={() => {
+                    if (!selectedChallenge) {
+                      setPackError('Select a pack before game settings.');
+                      return;
+                    }
+                    setStep('settings');
+                  }}
+                  className="h-11 flex-1 rounded-lg bg-[#00e676] text-sm font-black text-black hover:bg-[#1fe682]"
+                >
+                  Next: game settings
+                </button>
+              </div>
+            </section>
+          )}
+
+          {step === 'settings' && (
+            <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
+              <section className="space-y-4">
+                <button
+                  type="button"
+                  onClick={() => setStep('pack')}
+                  className="grid w-full grid-cols-[64px_minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-[#00e676]/45 bg-[#00e676]/10 p-3 text-left hover:bg-[#00e676]/15"
+                >
+                  <div className="h-16 w-16 overflow-hidden rounded-lg bg-black/30">
+                    {selectedChallenge?.image ? (
+                      <img src={selectedChallenge.image} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-2xl">
+                        {selectedChallenge?.slug === 'GLOBAL' ? '🌍' : COUNTRIES.find((country) => country.code === selectedChallenge?.slug)?.flag || '♪'}
                       </div>
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-black text-white">{option.title}</div>
-                        <div className="truncate text-[11px] text-white/45">{option.subtitle}</div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="truncate text-base font-black text-white">{selectedChallenge?.title || 'No pack selected'}</div>
+                    <div className="truncate text-sm text-white/45">{selectedSongCount} playable songs</div>
+                  </div>
+                  <span className="rounded-full bg-[#00e676]/15 px-3 py-1 text-xs font-black text-[#00e676]">Change</span>
+                </button>
               </section>
 
               <aside className="rounded-lg border border-white/10 bg-[#111915] p-4">
@@ -595,8 +623,15 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
                   </button>
                 )}
                 <button
-                  onClick={() => mode === 'party' ? setStep('players') : room ? startOnlineGame() : createOnlineRoom()}
-                  disabled={mode === 'online' && isCreatingRoom}
+                  onClick={() => {
+                    if (!selectedChallenge) {
+                      setPackError('Select a pack before creating the game.');
+                      setStep('pack');
+                      return;
+                    }
+                    mode === 'party' ? setStep('players') : room ? startOnlineGame() : createOnlineRoom();
+                  }}
+                  disabled={(mode === 'online' && isCreatingRoom) || !selectedChallenge}
                   className="mt-4 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#00e676] text-sm font-black text-black hover:bg-[#1fe682] disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {mode === 'online' && isCreatingRoom ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4 fill-black" />}
@@ -631,7 +666,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
                 ))}
               </div>
               <div className="mt-5 flex gap-2">
-                <button onClick={() => setStep('setup')} className="h-11 rounded-lg border border-white/10 px-4 text-sm font-bold text-white/65 hover:bg-white/10">Back</button>
+                <button onClick={() => setStep('settings')} className="h-11 rounded-lg border border-white/10 px-4 text-sm font-bold text-white/65 hover:bg-white/10">Back</button>
                 <button onClick={startLocalGame} className="h-11 flex-1 rounded-lg bg-[#00e676] text-sm font-black text-black hover:bg-[#1fe682]">
                   Start on main screen
                 </button>
@@ -650,7 +685,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
                   </button>
                 ) : !room ? (
                   <div className="mt-3 grid gap-2">
-                    <button type="button" onClick={() => setStep('setup')} className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[#00e676] text-xs font-black text-black">
+                    <button type="button" onClick={() => setStep('pack')} className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[#00e676] text-xs font-black text-black">
                       <Gamepad2 className="h-4 w-4" />
                       Choose challenge and songs
                     </button>
@@ -741,7 +776,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
                         Enter game
                       </button>
                     ) : isOnlineHost ? (
-                      <button type="button" onClick={() => setStep('setup')} className="h-11 rounded-lg bg-[#00e676] text-sm font-black text-black hover:bg-[#1fe682]">
+                      <button type="button" onClick={() => setStep('pack')} className="h-11 rounded-lg bg-[#00e676] text-sm font-black text-black hover:bg-[#1fe682]">
                         Choose pack
                       </button>
                     ) : (
