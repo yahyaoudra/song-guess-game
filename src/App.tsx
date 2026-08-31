@@ -1952,6 +1952,12 @@ export default function App() {
           <span>Song Guess Game</span>
         </div>
 
+        {activeChallenge?.type === 'artist' && (
+          <div className="max-w-full truncate text-center text-white/35 sm:max-w-md">
+            Not affiliated with {activeChallenge.title}, Spotify, Apple Music or any record label
+          </div>
+        )}
+
         <div className="flex items-center gap-4 text-white/40">
           <button
             onClick={() => openLegalSection('privacy')}
