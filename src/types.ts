@@ -116,6 +116,7 @@ export interface MultiplayerSession {
   socket?: WebSocket;
   onlinePlayerId?: string;
   isHost?: boolean;
+  hostHasUnlimited?: boolean;
   challengeTitle: string;
   challengeType: 'country' | 'artist' | 'genre' | 'collection';
   turnsPerPlayer: number;

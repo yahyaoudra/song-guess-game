@@ -113,6 +113,7 @@ interface MultiplayerRoom {
     challengeSlug?: string;
     challengeTitle?: string;
     turnsPerPlayer?: number;
+    hostHasUnlimited?: boolean;
   };
   activity?: string;
   status?: 'lobby' | 'playing' | 'finished';
@@ -2390,7 +2391,8 @@ function sanitizeMultiplayerSettings(source: unknown): MultiplayerRoom['settings
     challengeType: safeText(raw.challengeType, 24),
     challengeSlug: safeText(raw.challengeSlug, 120),
     challengeTitle: safeText(raw.challengeTitle, 120),
-    turnsPerPlayer: Math.max(1, Math.min(25, Number(raw.turnsPerPlayer) || 1))
+    turnsPerPlayer: Math.max(1, Math.min(25, Number(raw.turnsPerPlayer) || 1)),
+    hostHasUnlimited: raw.hostHasUnlimited === true
   };
 }
 
@@ -2518,6 +2520,8 @@ function attachMultiplayerServer(server: http.Server): void {
           if (payloadType === 'start-game') {
             room.status = 'playing';
             room.startedPayload = payload;
+            room.settings = sanitizeMultiplayerSettings(payload.settings) || room.settings;
+            room.activity = 'Room game started';
           }
           if (payloadType === 'finish') room.status = 'finished';
           if (payloadType === 'activity') room.activity = safeText(payload.message, 160);

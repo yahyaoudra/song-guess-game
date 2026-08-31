@@ -24,6 +24,7 @@ interface MultiplayerModalProps {
   initialMode?: MultiplayerMode;
   initialStep?: SetupStep;
   activeCollection?: QuizCollection | null;
+  existingSession?: MultiplayerSession | null;
 }
 
 type MultiplayerMode = 'party' | 'online';
@@ -49,6 +50,7 @@ interface OnlineRoom {
     challengeSlug: string;
     challengeTitle: string;
     turnsPerPlayer: number;
+    hostHasUnlimited?: boolean;
   };
   activity?: string;
   status?: 'lobby' | 'playing' | 'finished';
@@ -92,29 +94,54 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
   initialRoomCode = '',
   initialMode = 'party',
   initialStep,
-  activeCollection = null
+  activeCollection = null,
+  existingSession = null
 }) => {
-  const [mode, setMode] = useState<MultiplayerMode>(initialRoomCode ? 'online' : initialMode);
-  const [step, setStep] = useState<SetupStep>(initialRoomCode ? 'lobby' : initialStep || 'mode');
-  const [challengeType, setChallengeType] = useState<ChallengeType>(activeCollection ? 'collection' : 'country');
+  const existingOnlineRoom = existingSession?.mode === 'online' && existingSession.roomCode
+    ? {
+        code: existingSession.roomCode,
+        hostName: existingSession.players[0]?.name || 'Host',
+        players: existingSession.players,
+        createdAt: existingSession.startedAt,
+        settings: {
+          challengeType: existingSession.challengeType,
+          challengeSlug: '',
+          challengeTitle: existingSession.challengeTitle,
+          turnsPerPlayer: existingSession.turnsPerPlayer,
+          hostHasUnlimited: Boolean(existingSession.hostHasUnlimited)
+        },
+        activity: existingSession.activity,
+        status: existingSession.completed ? 'finished' as const : 'playing' as const,
+        startedPayload: existingSession.completed ? undefined : {
+          type: 'start-game',
+          rounds: existingSession.rounds,
+          players: existingSession.players
+        }
+      }
+    : null;
+  const [mode, setMode] = useState<MultiplayerMode>(existingOnlineRoom || initialRoomCode ? 'online' : initialMode);
+  const [step, setStep] = useState<SetupStep>(initialStep || (initialRoomCode ? 'lobby' : 'mode'));
+  const [challengeType, setChallengeType] = useState<ChallengeType>(activeCollection ? 'collection' : existingSession?.challengeType || 'country');
   const [challengeSlug, setChallengeSlug] = useState(activeCollection?.id || 'GLOBAL');
   const [turnsPerPlayer, setTurnsPerPlayer] = useState(DEFAULT_TURNS);
   const [players, setPlayers] = useState<MultiplayerPlayer[]>([
-    { id: createPlayerId(), name: 'Player 1', score: 0, correct: 0, turnsPlayed: 0 },
-    { id: createPlayerId(), name: 'Player 2', score: 0, correct: 0, turnsPlayed: 0 }
+    ...(existingSession?.players.length ? existingSession.players : [
+      { id: createPlayerId(), name: 'Player 1', score: 0, correct: 0, turnsPlayed: 0 },
+      { id: createPlayerId(), name: 'Player 2', score: 0, correct: 0, turnsPlayed: 0 }
+    ])
   ]);
   const [newPlayerName, setNewPlayerName] = useState('');
   const [newPlayerEmail, setNewPlayerEmail] = useState('');
-  const [room, setRoom] = useState<OnlineRoom | null>(null);
-  const [roomCodeInput, setRoomCodeInput] = useState(initialRoomCode.toUpperCase());
-  const [onlinePlayerId, setOnlinePlayerId] = useState('');
+  const [room, setRoom] = useState<OnlineRoom | null>(existingOnlineRoom);
+  const [roomCodeInput, setRoomCodeInput] = useState((existingOnlineRoom?.code || initialRoomCode).toUpperCase());
+  const [onlinePlayerId, setOnlinePlayerId] = useState(existingSession?.onlinePlayerId || '');
   const [socketStatus, setSocketStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
   const [copiedInvite, setCopiedInvite] = useState(false);
   const [roomError, setRoomError] = useState('');
   const [isJoiningRoom, setIsJoiningRoom] = useState(false);
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
   const [isRoomInfoOpen, setIsRoomInfoOpen] = useState(false);
-  const socketRef = useRef<WebSocket | null>(null);
+  const socketRef = useRef<WebSocket | null>(existingSession?.socket || null);
   const handoffSocketRef = useRef(false);
 
   const challengeOptions = useMemo<ChallengeOption[]>(() => {
@@ -179,10 +206,10 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
   useEffect(() => {
     if (initialRoomCode) {
       setMode('online');
-      setStep('lobby');
+      setStep(initialStep || 'lobby');
       setRoomCodeInput(initialRoomCode.toUpperCase());
     }
-  }, [initialRoomCode]);
+  }, [initialRoomCode, initialStep]);
 
   useEffect(() => {
     if (!initialRoomCode) {
@@ -222,7 +249,8 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
     challengeType,
     challengeSlug: selectedChallenge?.slug || challengeSlug,
     challengeTitle: selectedChallenge?.title || 'Global',
-    turnsPerPlayer: safeTurns
+    turnsPerPlayer: safeTurns,
+    hostHasUnlimited: isUnlocked
   });
 
   const buildRounds = (sessionPlayers: MultiplayerPlayer[]): MultiplayerRound[] => {
@@ -237,16 +265,22 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
     );
   };
 
-  const createSession = (sessionPlayers: MultiplayerPlayer[], rounds: MultiplayerRound[], roomCode?: string): MultiplayerSession => ({
+  const createSession = (
+    sessionPlayers: MultiplayerPlayer[],
+    rounds: MultiplayerRound[],
+    roomCode?: string,
+    settingsOverride?: OnlineRoom['settings']
+  ): MultiplayerSession => ({
     id: `mp-${Date.now()}`,
     mode,
     roomCode,
     socket: mode === 'online' ? socketRef.current || undefined : undefined,
     onlinePlayerId,
     isHost: mode === 'party' || isOnlineHost,
-    challengeTitle: room?.settings?.challengeTitle || selectedChallenge?.title || 'Multiplayer',
-    challengeType: (room?.settings?.challengeType as ChallengeType | undefined) || challengeType,
-    turnsPerPlayer: room?.settings?.turnsPerPlayer || safeTurns,
+    hostHasUnlimited: Boolean(settingsOverride?.hostHasUnlimited || room?.settings?.hostHasUnlimited || (mode === 'party' && isUnlocked)),
+    challengeTitle: settingsOverride?.challengeTitle || room?.settings?.challengeTitle || selectedChallenge?.title || 'Multiplayer',
+    challengeType: (settingsOverride?.challengeType as ChallengeType | undefined) || (room?.settings?.challengeType as ChallengeType | undefined) || challengeType,
+    turnsPerPlayer: settingsOverride?.turnsPerPlayer || room?.settings?.turnsPerPlayer || safeTurns,
     players: sessionPlayers.map((player) => ({ ...player, score: 0, correct: 0, turnsPlayed: 0 })),
     rounds,
     activity: `${sessionPlayers[0]?.name || 'Player'} starts the challenge`,
@@ -290,8 +324,9 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
         if (message.type === 'room-event' && message.payload?.type === 'start-game') {
           const roomPlayers = (message.payload.players as MultiplayerPlayer[]) || players;
           const rounds = (message.payload.rounds as MultiplayerRound[]) || [];
+          const settings = message.payload.settings as OnlineRoom['settings'] | undefined;
           handoffSocketRef.current = true;
-          onStartSession(createSession(roomPlayers, rounds, room?.code || roomCodeInput));
+          onStartSession(createSession(roomPlayers, rounds, room?.code || roomCodeInput, settings));
           onClose();
         }
       } catch {
@@ -388,15 +423,23 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
 
   const startOnlineGame = () => {
     if (!room || !isOnlineHost) return;
-    const sessionPlayers = players.slice(0, MAX_PLAYERS);
+    const sessionPlayers = players.slice(0, MAX_PLAYERS).map((player) => ({
+      ...player,
+      score: 0,
+      correct: 0,
+      turnsPlayed: 0,
+      connected: player.connected !== false
+    }));
     const rounds = buildRounds(sessionPlayers);
+    const settings = buildRoomSettings();
     sendSocket({
       type: 'room-event',
       roomCode: room.code,
-      payload: { type: 'start-game', rounds, settings: buildRoomSettings(), players: sessionPlayers }
+      payload: { type: 'start-game', rounds, settings, players: sessionPlayers }
     });
+    setRoom((current) => current ? { ...current, settings, status: 'playing', startedPayload: { type: 'start-game', rounds, settings, players: sessionPlayers } } : current);
     handoffSocketRef.current = true;
-    onStartSession(createSession(sessionPlayers, rounds, room.code));
+    onStartSession(createSession(sessionPlayers, rounds, room.code, settings));
     onClose();
   };
 
@@ -524,7 +567,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
                   className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-[#0b100d] px-3 text-white outline-none focus:border-[#00e676]"
                 />
                 <p className="mt-2 text-xs text-white/45">
-                  Free games allow up to 5 songs per player. Longer rooms need premium access.
+                  Free games allow up to 5 songs per player. If the room creator has unlimited access, everyone can play inside that room.
                 </p>
                 {!isUnlocked && (
                   <button onClick={onOpenPaywall} className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-[#00e676]/35 bg-[#00e676]/10 text-xs font-black text-[#00e676]">
@@ -533,12 +576,12 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
                   </button>
                 )}
                 <button
-                  onClick={() => mode === 'party' ? setStep('players') : createOnlineRoom()}
+                  onClick={() => mode === 'party' ? setStep('players') : room ? startOnlineGame() : createOnlineRoom()}
                   disabled={mode === 'online' && isCreatingRoom}
                   className="mt-4 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#00e676] text-sm font-black text-black hover:bg-[#1fe682] disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {mode === 'online' && isCreatingRoom ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4 fill-black" />}
-                  {mode === 'online' ? 'Create room code' : 'Continue'}
+                  {mode === 'online' ? room ? 'Start in same room' : 'Create room code' : 'Continue'}
                 </button>
               </aside>
             </div>
@@ -582,24 +625,29 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
               <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
                 <h3 className="text-sm font-black text-white">Create new game</h3>
                 {!authSession.authenticated ? (
-                  <button onClick={() => onOpenAuth('online-create')} className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[#00e676] text-xs font-black text-black">
+                  <button type="button" onClick={() => onOpenAuth('online-create')} className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[#00e676] text-xs font-black text-black">
                     <Lock className="h-4 w-4" />
                     Login or sign up
                   </button>
                 ) : !room ? (
                   <div className="mt-3 grid gap-2">
-                    <button onClick={() => setStep('setup')} className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[#00e676] text-xs font-black text-black">
+                    <button type="button" onClick={() => setStep('setup')} className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[#00e676] text-xs font-black text-black">
                       <Gamepad2 className="h-4 w-4" />
                       Choose challenge and songs
                     </button>
                     <p className="text-xs text-white/45">Pick country, artist, or genre first, then Song Guess creates a shareable room code.</p>
+                    {!isUnlocked && (
+                      <p className="rounded-lg border border-amber-300/20 bg-amber-300/10 p-2 text-xs font-bold text-amber-100">
+                        If players already used their free Daily 5, the room creator needs unlimited access for everyone to keep playing in this room.
+                      </p>
+                    )}
                   </div>
                 ) : (
                   <div className="mt-3 rounded-lg bg-black/30 p-3">
                     <div className="text-xs font-bold text-white/45">Room code</div>
                     <div className="mt-1 flex items-center justify-between gap-3">
                       <span className="font-mono text-2xl font-black text-[#00e676]">{room.code}</span>
-                      <button onClick={copyRoomInvite} className="flex h-9 items-center gap-2 rounded-lg border border-[#00e676]/35 bg-[#00e676]/10 px-3 text-xs font-black text-[#00e676] hover:bg-[#00e676]/20 hover:text-white">
+                      <button type="button" onClick={copyRoomInvite} className="flex h-9 items-center gap-2 rounded-lg border border-[#00e676]/35 bg-[#00e676]/10 px-3 text-xs font-black text-[#00e676] hover:bg-[#00e676]/20 hover:text-white">
                         {copiedInvite ? <Check className="h-4 w-4" /> : <Share2 className="h-4 w-4" />}
                         {copiedInvite ? 'Copied' : 'Share'}
                       </button>
@@ -615,6 +663,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
                 )}
                 <input value={roomCodeInput} onChange={(event) => setRoomCodeInput(event.target.value.toUpperCase())} placeholder="ROOM CODE" className="mt-3 h-11 w-full rounded-lg border border-white/10 bg-[#141c17] px-3 font-mono text-white outline-none focus:border-[#00e676]" />
                 <button
+                  type="button"
                   onClick={joinOnlineRoom}
                   disabled={isJoiningRoom || isJoinedInRequestedRoom}
                   className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-[#00e676]/35 bg-[#00e676]/10 text-xs font-black text-[#00e676] hover:bg-[#00e676]/20 disabled:cursor-not-allowed disabled:opacity-55"
@@ -637,6 +686,23 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
                     <span className="text-xs text-white/45">{players.length}/{MAX_PLAYERS}</span>
                   </div>
                   {room.activity && <p className="mt-2 text-xs text-white/45">{room.activity}</p>}
+                  {!room.settings?.hostHasUnlimited && (
+                    <div className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/10 p-3">
+                      <p className="text-xs font-bold text-amber-100">
+                        This room uses each player&apos;s free Daily 5. For everyone to play unlimited in this room, the room creator needs unlimited access.
+                      </p>
+                      {isOnlineHost && (
+                        <button
+                          type="button"
+                          onClick={onOpenPaywall}
+                          className="mt-2 inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-[#00e676] px-3 text-xs font-black text-black hover:bg-[#1fe682]"
+                        >
+                          <Crown className="h-4 w-4" />
+                          Unlock unlimited
+                        </button>
+                      )}
+                    </div>
+                  )}
                   <div className="mt-3 flex flex-wrap gap-2">
                     {players.map((player) => (
                       <span key={player.id} className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-black text-white">
@@ -645,19 +711,19 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
                     ))}
                   </div>
                   <div className="mt-4 grid gap-2 sm:grid-cols-3">
-                    <button onClick={copyRoomInvite} className="h-11 rounded-lg border border-[#00e676]/35 bg-[#00e676]/10 text-sm font-black text-[#00e676] hover:bg-[#00e676]/20">
+                    <button type="button" onClick={copyRoomInvite} className="h-11 rounded-lg border border-[#00e676]/35 bg-[#00e676]/10 text-sm font-black text-[#00e676] hover:bg-[#00e676]/20">
                       {copiedInvite ? 'Invite copied' : 'Share invite'}
                     </button>
-                    <button onClick={() => setIsRoomInfoOpen((current) => !current)} className="h-11 rounded-lg border border-white/10 bg-white/[0.04] text-sm font-black text-white/70 hover:bg-white/10">
+                    <button type="button" onClick={() => setIsRoomInfoOpen((current) => !current)} className="h-11 rounded-lg border border-white/10 bg-white/[0.04] text-sm font-black text-white/70 hover:bg-white/10">
                       Room info
                     </button>
                     {room.status === 'playing' && room.startedPayload ? (
-                      <button onClick={enterStartedOnlineGame} className="h-11 rounded-lg bg-[#00e676] text-sm font-black text-black hover:bg-[#1fe682]">
+                      <button type="button" onClick={enterStartedOnlineGame} className="h-11 rounded-lg bg-[#00e676] text-sm font-black text-black hover:bg-[#1fe682]">
                         Enter game
                       </button>
                     ) : isOnlineHost ? (
-                      <button onClick={startOnlineGame} className="h-11 rounded-lg bg-[#00e676] text-sm font-black text-black hover:bg-[#1fe682]">
-                        Start game
+                      <button type="button" onClick={() => setStep('setup')} className="h-11 rounded-lg bg-[#00e676] text-sm font-black text-black hover:bg-[#1fe682]">
+                        Choose pack
                       </button>
                     ) : (
                       <div className="flex h-11 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-xs font-black text-white/45">

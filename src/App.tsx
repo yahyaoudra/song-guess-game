@@ -635,6 +635,7 @@ export default function App() {
 
   const ensurePlayAccess = useCallback(async () => {
     if (isMultiplayerGuestTurn) return true;
+    if (activeMultiplayerSession?.hostHasUnlimited) return true;
 
     const session = isAuthLoading ? await refreshAccessState() : authSession;
     if (session.entitlement.active) return true;
@@ -660,7 +661,11 @@ export default function App() {
 
       const state = await claimFreePlay(scope.type, scope.slug);
       if (!state.allowed && !state.unlimited) {
-        setAccessNotice(state.reason || 'Unlock a 7-day pass for unlimited play and no ads.');
+        setAccessNotice(
+          activeMultiplayerSession
+            ? 'Your free Daily 5 is used for today. To keep playing in this room, the room creator needs unlimited access.'
+            : state.reason || 'Unlock a 7-day pass for unlimited play and no ads.'
+        );
         if (session.authenticated) {
           setIsPaywallOpen(true);
         } else {
@@ -685,7 +690,7 @@ export default function App() {
       }
       return false;
     }
-  }, [authSession, gameSessionKey, getCurrentScope, isAuthLoading, isMultiplayerGuestTurn, refreshAccessState, roundIndex]);
+  }, [activeMultiplayerSession, authSession, gameSessionKey, getCurrentScope, isAuthLoading, isMultiplayerGuestTurn, refreshAccessState, roundIndex]);
 
   const handleUnlock = useCallback(async () => {
     if (!authSession.authenticated) {
@@ -1476,7 +1481,7 @@ export default function App() {
           >
             Info
           </button>
-          <button onClick={quitMultiplayerSession} className="rounded-full border border-red-400/25 bg-red-400/10 px-3 py-1 text-red-200 hover:bg-red-400/20">
+          <button type="button" onClick={quitMultiplayerSession} className="rounded-full border border-red-400/25 bg-red-400/10 px-3 py-1 text-red-200 hover:bg-red-400/20">
             Quit
           </button>
         </div>
@@ -1597,6 +1602,7 @@ export default function App() {
           initialMode={multiplayerInitialMode}
           initialStep={multiplayerInitialStep}
           activeCollection={activeCollection}
+          existingSession={activeMultiplayerSession}
         />
       )}
 
@@ -1640,9 +1646,26 @@ export default function App() {
                   </div>
                 ))}
             </div>
-            <button onClick={quitMultiplayerSession} className="mt-4 h-11 w-full rounded-lg border border-red-400/25 bg-red-400/10 text-sm font-black text-red-200 hover:bg-red-400/20">
-              Quit multiplayer
-            </button>
+            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+              {activeMultiplayerSession.isHost && activeMultiplayerSession.mode === 'online' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInitialMultiplayerRoomCode(activeMultiplayerSession.roomCode || '');
+                    setMultiplayerInitialMode('online');
+                    setMultiplayerInitialStep('setup');
+                    setIsMultiplayerInfoOpen(false);
+                    setIsMultiplayerOpen(true);
+                  }}
+                  className="h-11 rounded-lg bg-[#00e676] text-sm font-black text-black hover:bg-[#1fe682]"
+                >
+                  Change pack / restart
+                </button>
+              )}
+              <button type="button" onClick={quitMultiplayerSession} className="h-11 rounded-lg border border-red-400/25 bg-red-400/10 text-sm font-black text-red-200 hover:bg-red-400/20">
+                Quit multiplayer
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -2144,6 +2167,7 @@ export default function App() {
           initialMode={multiplayerInitialMode}
           initialStep={multiplayerInitialStep}
           activeCollection={activeCollection}
+          existingSession={activeMultiplayerSession}
         />
       )}
 

@@ -359,6 +359,7 @@ export const RoundReveal: React.FC<RoundRevealProps> = ({
         {/* Challenge a friend */}
         <button
           id="challenge-friend-btn"
+          type="button"
           onClick={onChallengeFriend}
           className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 bg-[#161d19] border border-white/10 hover:border-white/30 hover:bg-[#1f2824] active:scale-95 text-white text-sm font-bold rounded-full transition-all cursor-pointer shadow-lg"
         >
@@ -369,6 +370,7 @@ export const RoundReveal: React.FC<RoundRevealProps> = ({
         {/* Next Song / See Results */}
         <button
           id="next-round-btn"
+          type="button"
           onClick={onNextRound}
           className="w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-3 rounded-full text-black text-sm font-black transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-xl"
           style={{
@@ -386,6 +388,7 @@ export const RoundReveal: React.FC<RoundRevealProps> = ({
         {onOpenShareCard && (
           <button
             id="share-image-card-btn"
+            type="button"
             onClick={onOpenShareCard}
             className="text-xs text-[#00e676] hover:text-[#26e886] font-bold flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#00e676]/10 border border-[#00e676]/20 transition-all cursor-pointer shadow-sm hover:scale-105 active:scale-95"
           >
