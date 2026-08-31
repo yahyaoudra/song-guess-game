@@ -25,6 +25,7 @@ export const GoogleIntegrations: React.FC<GoogleIntegrationsProps> = ({
   pagePath
 }) => {
   const initializedAnalyticsId = useRef<string>('');
+  const initializedClarityId = useRef<string>('');
 
   useEffect(() => {
     const measurementId = config.integrations.googleAnalyticsMeasurementId.trim();
@@ -73,6 +74,22 @@ export const GoogleIntegrations: React.FC<GoogleIntegrationsProps> = ({
   }, [
     config.integrations.adsenseEnabled,
     config.integrations.googleAdsenseClientId
+  ]);
+
+  useEffect(() => {
+    const projectId = config.integrations.microsoftClarityProjectId.trim();
+    if (!config.integrations.clarityEnabled || !projectId || initializedClarityId.current === projectId) return;
+
+    window.clarity = window.clarity || function clarityFallback(...args: unknown[]) {
+      (window.clarity as unknown as { q?: unknown[] }).q = (window.clarity as unknown as { q?: unknown[] }).q || [];
+      (window.clarity as unknown as { q?: unknown[] }).q?.push(args);
+    };
+
+    ensureScript('song-guess-clarity', `https://www.clarity.ms/tag/${encodeURIComponent(projectId)}`);
+    initializedClarityId.current = projectId;
+  }, [
+    config.integrations.clarityEnabled,
+    config.integrations.microsoftClarityProjectId
   ]);
 
   return null;

@@ -616,6 +616,11 @@ function sanitizeSearchConsoleVerification(value: unknown): string {
   return /^[A-Za-z0-9_-]{8,160}$/.test(token) ? token : '';
 }
 
+function sanitizeMicrosoftClarityProjectId(value: unknown): string {
+  const raw = safeText(value, 64).toLowerCase();
+  return /^[a-z0-9]{6,32}$/.test(raw) ? raw : '';
+}
+
 function createDefaultPageConfig(countryCode: string, appUrl: string): AdminPageConfig {
   const country = COUNTRIES.find((item) => item.code === countryCode) || COUNTRIES[0];
   const countryName = country.code === 'GLOBAL' ? 'Global' : country.name;
@@ -703,19 +708,26 @@ function createDefaultAdSlots(): AdminAdSlot[] {
 function sanitizeIntegrations(raw: unknown): IntegrationSettings {
   const source = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
   const envGa = sanitizeGoogleAnalyticsId(process.env.GOOGLE_ANALYTICS_MEASUREMENT_ID);
+  const envClarity = sanitizeMicrosoftClarityProjectId(process.env.MICROSOFT_CLARITY_PROJECT_ID);
   const envAdsense = sanitizeAdsenseClientId(process.env.GOOGLE_ADSENSE_CLIENT);
   const envSearchConsole = sanitizeSearchConsoleVerification(process.env.GOOGLE_SEARCH_CONSOLE_VERIFICATION);
   const sourceGa = sanitizeGoogleAnalyticsId(source.googleAnalyticsMeasurementId);
+  const sourceClarity = sanitizeMicrosoftClarityProjectId(source.microsoftClarityProjectId);
   const sourceAdsense = sanitizeAdsenseClientId(source.googleAdsenseClientId);
   const sourceSearchConsole = sanitizeSearchConsoleVerification(source.searchConsoleVerification);
 
   const googleAnalyticsMeasurementId = sourceGa || envGa;
+  const microsoftClarityProjectId = sourceClarity || envClarity;
   const googleAdsenseClientId = sourceAdsense || envAdsense;
   const searchConsoleVerification = sourceSearchConsole || envSearchConsole;
   const analyticsEnabled =
     sourceGa
       ? (typeof source.analyticsEnabled === 'boolean' ? source.analyticsEnabled : true)
       : Boolean(envGa);
+  const clarityEnabled =
+    sourceClarity
+      ? (typeof source.clarityEnabled === 'boolean' ? source.clarityEnabled : true)
+      : Boolean(envClarity);
   const adsenseEnabled =
     sourceAdsense
       ? (typeof source.adsenseEnabled === 'boolean' ? source.adsenseEnabled : true)
@@ -724,6 +736,8 @@ function sanitizeIntegrations(raw: unknown): IntegrationSettings {
   return {
     analyticsEnabled: Boolean(analyticsEnabled && googleAnalyticsMeasurementId),
     googleAnalyticsMeasurementId,
+    clarityEnabled: Boolean(clarityEnabled && microsoftClarityProjectId),
+    microsoftClarityProjectId,
     adsenseEnabled: Boolean(adsenseEnabled && googleAdsenseClientId),
     googleAdsenseClientId,
     searchConsoleVerification
@@ -1624,13 +1638,35 @@ function todayUtcDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+const DAILY_FREE_PLAY_LIMIT = 5;
+const SIGNUP_BONUS_FREE_PLAY_LIMIT = 7;
+
+function createDailyAccessState(
+  playCount: number,
+  freePlayLimit: number,
+  options: { unlimited?: boolean; accessUntil?: string; reason?: string } = {}
+): DailyAccessState {
+  const remaining = Math.max(0, freePlayLimit - playCount);
+  const blockedReason = options.reason || 'Your free Daily 5 is used for today. Unlock a 7-day pass for unlimited play and no ads.';
+  return {
+    allowed: Boolean(options.unlimited) || playCount < freePlayLimit,
+    unlimited: Boolean(options.unlimited),
+    freePlayUsed: playCount > 0,
+    freePlayLimit,
+    freePlaysUsed: playCount,
+    freePlaysRemaining: remaining,
+    accessUntil: options.accessUntil,
+    reason: !options.unlimited && playCount >= freePlayLimit ? blockedReason : undefined
+  };
+}
+
 async function getDailyAccessState(req: Request, res: ExpressResponse, user?: UserSession | null): Promise<DailyAccessState> {
   const entitlement = await getUserEntitlement(user?.id);
   if (entitlement.active) {
-    return { allowed: true, unlimited: true, freePlayUsed: false, accessUntil: entitlement.accessUntil };
+    return createDailyAccessState(0, DAILY_FREE_PLAY_LIMIT, { unlimited: true, accessUntil: entitlement.accessUntil });
   }
   if (!isDatabaseConfigured()) {
-    return { allowed: true, unlimited: false, freePlayUsed: false, reason: 'Database not configured; local fallback applies.' };
+    return { ...createDailyAccessState(0, DAILY_FREE_PLAY_LIMIT), reason: 'Database not configured; local fallback applies.' };
   }
   if (user) {
     const rows = await queryDb<Record<string, unknown>>(
@@ -1644,23 +1680,16 @@ async function getDailyAccessState(req: Request, res: ExpressResponse, user?: Us
     );
     const row = rows[0];
     const playCount = Number(row?.play_count || 0);
-    const maxFreePlays = row && !row.signup_bonus_claimed ? 2 : 1;
-    return {
-      allowed: playCount < maxFreePlays,
-      unlimited: false,
-      freePlayUsed: playCount > 0,
-      reason: playCount >= maxFreePlays ? 'Your free Daily 5 is used for today. Unlock a 7-day pass for unlimited play and no ads.' : undefined
-    };
+    const maxFreePlays = row && !row.signup_bonus_claimed ? SIGNUP_BONUS_FREE_PLAY_LIMIT : DAILY_FREE_PLAY_LIMIT;
+    return createDailyAccessState(playCount, maxFreePlays);
   }
   const anonHash = hashToken(getOrSetAnonId(req, res));
-  const dailyKey = `${todayUtcDate()}:${anonHash}`;
-  const rows = await queryDb('SELECT daily_key FROM sg_daily_plays WHERE daily_key = $1 LIMIT 1', [dailyKey]);
-  return {
-    allowed: rows.length === 0,
-    unlimited: false,
-    freePlayUsed: rows.length > 0,
-    reason: rows.length > 0 ? 'Your free Daily 5 is used for today. Unlock a 7-day pass for unlimited play and no ads.' : undefined
-  };
+  const rows = await queryDb<Record<string, unknown>>(
+    'SELECT count(*)::int AS play_count FROM sg_daily_plays WHERE anon_hash = $1 AND play_date = $2',
+    [anonHash, todayUtcDate()]
+  );
+  const playCount = Number(rows[0]?.play_count || 0);
+  return createDailyAccessState(playCount, DAILY_FREE_PLAY_LIMIT);
 }
 
 async function grantWeeklyEntitlement(userId: string, source = 'stripe', stripeCustomerId = ''): Promise<string> {
@@ -2007,6 +2036,12 @@ function injectRuntimeHtml(html: string, req: Request, publicConfig: PublicRunti
         `<script${nonce ? ` nonce="${escapeHtml(nonce)}"` : ''}>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','${escapeHtml(googleAnalyticsId)}',{send_page_view:false});</script>`
       ].join('\n    ')
     : '';
+  const clarityProjectId = publicConfig.integrations.clarityEnabled
+    ? sanitizeMicrosoftClarityProjectId(publicConfig.integrations.microsoftClarityProjectId)
+    : '';
+  const clarityScript = clarityProjectId
+    ? `<script id="song-guess-clarity"${nonce ? ` nonce="${escapeHtml(nonce)}"` : ''}>(function(c,l,a,r,i,t,y){c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments);};t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);})(window,document,"clarity","script","${escapeHtml(clarityProjectId)}");</script>`
+    : '';
   const adsenseClientId = publicConfig.integrations.adsenseEnabled
     ? sanitizeAdsenseClientId(publicConfig.integrations.googleAdsenseClientId)
     : '';
@@ -2041,6 +2076,7 @@ function injectRuntimeHtml(html: string, req: Request, publicConfig: PublicRunti
     socialImageMeta,
     searchConsoleMeta,
     googleTagScript,
+    clarityScript,
     adsenseScript,
     runtimeScript
   ].filter(Boolean).join('\n    ');
@@ -2442,7 +2478,8 @@ function applySecurityHeaders(req: Request, res: ExpressResponse, next: NextFunc
       'https://pagead2.googlesyndication.com',
       'https://www.google.com',
       'https://www.gstatic.com',
-      'https://www.recaptcha.net'
+      'https://www.recaptcha.net',
+      'https://www.clarity.ms'
     ].join(' ');
     res.setHeader(
       'Content-Security-Policy',
@@ -3521,21 +3558,25 @@ async function startServer() {
             'SELECT count(*)::int AS play_count FROM sg_daily_plays WHERE user_id = $1 AND play_date = $2',
             [user.id, todayUtcDate()]
           )
-        : [];
-      const existingCount = user ? Number(existingRows[0]?.play_count || 0) : 0;
+        : await queryDb<Record<string, unknown>>(
+            'SELECT count(*)::int AS play_count FROM sg_daily_plays WHERE anon_hash = $1 AND play_date = $2',
+            [anonHash, todayUtcDate()]
+          );
+      const existingCount = Number(existingRows[0]?.play_count || 0);
       const dailyKey = user
         ? `${todayUtcDate()}:${user.id}:${existingCount + 1}`
-        : `${todayUtcDate()}:${anonHash}`;
+        : `${todayUtcDate()}:${anonHash}:${existingCount + 1}`;
       await queryDb(
         `INSERT INTO sg_daily_plays (daily_key, user_id, anon_hash, play_date, scope_type, scope_slug)
          VALUES ($1, $2, NULLIF($3, ''), $4, $5, $6)
          ON CONFLICT (daily_key) DO NOTHING`,
         [dailyKey, user?.id || null, anonHash, todayUtcDate(), scopeType, scopeSlug]
       );
-      if (user && existingCount >= 1) {
+      if (user && existingCount + 1 >= SIGNUP_BONUS_FREE_PLAY_LIMIT) {
         await queryDb('UPDATE sg_users SET signup_bonus_claimed = true, updated_at = now() WHERE id = $1', [user.id]);
       }
-      res.json({ allowed: true, unlimited: false, freePlayUsed: true });
+      const claimedState = createDailyAccessState(existingCount + 1, state.freePlayLimit || DAILY_FREE_PLAY_LIMIT);
+      res.json({ ...claimedState, allowed: true, reason: undefined });
     } catch {
       res.status(503).json({ allowed: false, unlimited: false, freePlayUsed: true, reason: 'Could not claim daily free play' });
     }

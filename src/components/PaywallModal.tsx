@@ -2,6 +2,17 @@ import React, { useMemo } from 'react';
 import { Check, Crown, Lock, X } from 'lucide-react';
 import { getArtistChallenges } from '../utils/challengeCatalog';
 
+const ARTIST_IMAGE_OVERRIDES: Record<string, string> = {
+  'Taylor Swift': 'https://i.scdn.co/image/ab6761610000e5ebe2e8e7ff002a4afda1c7147e',
+  Drake: 'https://i.scdn.co/image/ab6761610000e5eb4293385d324db8558179afd9',
+  'Justin Bieber': 'https://i.scdn.co/image/ab6761610000e5ebaf20f7db5288bce9beede034',
+  'Ariana Grande': 'https://i.scdn.co/image/ab6761610000e5eb68412f2d0177a9ebc265ff58',
+  'Bruno Mars': 'https://i.scdn.co/image/ab6761610000e5ebc7688aad1bf03986934d7e26',
+  'The Weeknd': 'https://i.scdn.co/image/ab6761610000e5ebc1719ac9e6a75c1c25835018',
+  'Billie Eilish': 'https://i.scdn.co/image/ab6761610000e5eb4a21b4760d2ecb7b0dcdc8da',
+  'Sabrina Carpenter': 'https://i.scdn.co/image/ab6761610000e5eb78e45cfa4697ce3c437cb455'
+};
+
 interface PaywallModalProps {
   onClose: () => void;
   onLogin: () => void;
@@ -27,7 +38,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
       return {
         slug: match?.slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''),
         name,
-        displayImage: `/api/music/artist-image?name=${encodeURIComponent(name)}`
+        displayImage: ARTIST_IMAGE_OVERRIDES[name] || match?.coverImage || `/api/music/artist-image?name=${encodeURIComponent(name)}`
       };
     });
   }, []);

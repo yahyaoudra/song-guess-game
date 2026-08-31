@@ -12,6 +12,7 @@ declare global {
     __SONG_GUESS_PUBLIC_CONFIG__?: PublicRuntimeConfig;
     dataLayer?: unknown[];
     gtag?: (...args: unknown[]) => void;
+    clarity?: (...args: unknown[]) => void;
     adsbygoogle?: unknown[];
   }
 }
@@ -95,6 +96,8 @@ export function createDefaultPublicRuntimeConfig(): PublicRuntimeConfig {
     integrations: {
       analyticsEnabled: false,
       googleAnalyticsMeasurementId: '',
+      clarityEnabled: false,
+      microsoftClarityProjectId: '',
       adsenseEnabled: false,
       googleAdsenseClientId: '',
       searchConsoleVerification: ''

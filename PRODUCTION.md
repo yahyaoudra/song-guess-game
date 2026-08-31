@@ -65,6 +65,7 @@ GOOGLE_CLIENT_ID=optional_google_oauth_client_id
 GOOGLE_CLIENT_SECRET=optional_google_oauth_client_secret
 
 GOOGLE_ANALYTICS_MEASUREMENT_ID=G-XXXXXXXXXX
+MICROSOFT_CLARITY_PROJECT_ID=your_clarity_project_id
 GOOGLE_ADSENSE_CLIENT=ca-pub-XXXXXXXXXXXXXXXX
 GOOGLE_SEARCH_CONSOLE_VERIFICATION=google-site-verification-code
 
@@ -189,6 +190,13 @@ The app serves:
 3. Copy the Measurement ID, formatted like `G-XXXXXXXXXX`.
 4. Set `GOOGLE_ANALYTICS_MEASUREMENT_ID` or paste it in the admin Google integrations panel.
 5. Open the live app and confirm traffic in GA4 Realtime.
+
+## Microsoft Clarity
+
+1. Create a Clarity project for `https://songguessgame.online`.
+2. Copy only the Clarity project ID.
+3. Set `MICROSOFT_CLARITY_PROJECT_ID` or paste it in the admin integrations panel.
+4. Open the live app and confirm the Clarity tag is detected.
 
 ## AdSense
 

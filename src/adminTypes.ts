@@ -38,6 +38,8 @@ export interface AdminAdSlot {
 export interface IntegrationSettings {
   analyticsEnabled: boolean;
   googleAnalyticsMeasurementId: string;
+  clarityEnabled: boolean;
+  microsoftClarityProjectId: string;
   adsenseEnabled: boolean;
   googleAdsenseClientId: string;
   searchConsoleVerification: string;
@@ -113,6 +115,9 @@ export interface DailyAccessState {
   allowed: boolean;
   unlimited: boolean;
   freePlayUsed: boolean;
+  freePlayLimit?: number;
+  freePlaysUsed?: number;
+  freePlaysRemaining?: number;
   accessUntil?: string;
   reason?: string;
 }

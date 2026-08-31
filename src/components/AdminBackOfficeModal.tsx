@@ -954,6 +954,41 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
               <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-4 space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
+                    <h3 className="text-sm font-black text-white">Microsoft Clarity</h3>
+                    <p className="text-xs text-white/45">Loads Clarity for heatmaps, recordings, and UX diagnostics.</p>
+                  </div>
+                  <button
+                    onClick={() => updateConfig((current) => ({
+                      ...current,
+                      integrations: {
+                        ...current.integrations,
+                        clarityEnabled: !current.integrations.clarityEnabled
+                      }
+                    }))}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-black cursor-pointer ${
+                      config.integrations.clarityEnabled ? 'bg-[#00e676] text-black' : 'bg-white/10 text-white/55'
+                    }`}
+                  >
+                    {config.integrations.clarityEnabled ? 'Enabled' : 'Disabled'}
+                  </button>
+                </div>
+                <input
+                  value={config.integrations.microsoftClarityProjectId}
+                  onChange={(event) => updateConfig((current) => ({
+                    ...current,
+                    integrations: {
+                      ...current.integrations,
+                      microsoftClarityProjectId: event.target.value
+                    }
+                  }))}
+                  placeholder="Clarity project ID"
+                  className="w-full px-3 py-2 rounded-xl bg-[#151d18] border border-white/10 text-white text-sm focus:outline-none focus:border-[#00e676]"
+                />
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-4 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
                     <h3 className="text-sm font-black text-white">Google Analytics 4</h3>
                     <p className="text-xs text-white/45">Loads gtag.js and sends SPA page views.</p>
                   </div>

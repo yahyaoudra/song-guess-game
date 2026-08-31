@@ -125,6 +125,7 @@ export default function App() {
     databaseConfigured: false,
     stripeConfigured: false
   });
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [accessNotice, setAccessNotice] = useState<string | null>(null);
   const [requestedArtists, setRequestedArtists] = useState<RequestedArtist[]>([]);
   const [requestedArtistsLoaded, setRequestedArtistsLoaded] = useState(false);
@@ -259,7 +260,8 @@ export default function App() {
       })
       .catch((error) => {
         console.debug('Player auth session unavailable', error);
-      });
+      })
+      .finally(() => setIsAuthLoading(false));
     fetchRequestedArtists()
       .then(setRequestedArtists)
       .catch((error) => {
@@ -592,9 +594,11 @@ export default function App() {
         getAccessStatus().catch(() => null)
       ]);
       setAuthSession(session);
+      setIsAuthLoading(false);
       return session;
     } catch (error) {
       console.debug('Access refresh skipped', error);
+      setIsAuthLoading(false);
       return authSession;
     }
   }, [authSession]);
@@ -607,10 +611,11 @@ export default function App() {
   }, [activeMultiplayerSession, activeChallenge, activeCollection, settings.selectedCountry]);
 
   const ensurePlayAccess = useCallback(async () => {
-    if (authSession.entitlement.active) return true;
+    const session = isAuthLoading ? await refreshAccessState() : authSession;
+    if (session.entitlement.active) return true;
 
     const today = getTodayDateString();
-    if (!authSession.authenticated) {
+    if (!session.authenticated && !session.databaseConfigured) {
       try {
         const usedDate = localStorage.getItem(FREE_PLAY_DATE_KEY);
         const usedSession = Number(localStorage.getItem(FREE_PLAY_SESSION_KEY) || '0');
@@ -628,14 +633,14 @@ export default function App() {
       const state = await claimFreePlay(scope.type, scope.slug);
       if (!state.allowed && !state.unlimited) {
         setAccessNotice(state.reason || 'Unlock a 7-day pass for unlimited play and no ads.');
-        if (authSession.authenticated) {
+        if (session.authenticated) {
           setIsPaywallOpen(true);
         } else {
           setIsAuthOpen(true);
         }
         return false;
       }
-      if (!authSession.authenticated) {
+      if (!session.authenticated && !session.databaseConfigured) {
         try {
           localStorage.setItem(FREE_PLAY_DATE_KEY, today);
           localStorage.setItem(FREE_PLAY_SESSION_KEY, String(gameSessionKey));
@@ -644,14 +649,14 @@ export default function App() {
       return true;
     } catch (error) {
       setAccessNotice(error instanceof Error ? error.message : 'Access check failed');
-      if (authSession.authenticated) {
+      if (session.authenticated) {
         setIsPaywallOpen(true);
       } else {
         setIsAuthOpen(true);
       }
       return false;
     }
-  }, [authSession.authenticated, authSession.entitlement.active, gameSessionKey, getCurrentScope]);
+  }, [authSession, gameSessionKey, getCurrentScope, isAuthLoading, refreshAccessState]);
 
   const handleUnlock = useCallback(async () => {
     if (!authSession.authenticated) {
