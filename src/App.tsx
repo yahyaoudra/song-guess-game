@@ -96,6 +96,7 @@ export default function App() {
   const [activeChallenge, setActiveChallenge] = useState<ActiveChallenge>(null);
   const [isInterstitialOpen, setIsInterstitialOpen] = useState(false);
   const lastInterstitialPathRef = useRef('');
+  const claimedFreePlayKeysRef = useRef<Set<string>>(new Set());
 
   // Modals state
   const [isCollectionsOpen, setIsCollectionsOpen] = useState(false);
@@ -584,6 +585,7 @@ export default function App() {
     setIsCompleteModalOpen(false);
     setSavedResult(null);
     setWrongFeedback(null);
+    claimedFreePlayKeysRef.current.clear();
     audioEngine.stop();
   }, []);
 
@@ -630,6 +632,9 @@ export default function App() {
 
     try {
       const scope = getCurrentScope();
+      const claimKey = `${gameSessionKey}:${roundIndex}:${scope.type}:${scope.slug}`;
+      if (claimedFreePlayKeysRef.current.has(claimKey)) return true;
+
       const state = await claimFreePlay(scope.type, scope.slug);
       if (!state.allowed && !state.unlimited) {
         setAccessNotice(state.reason || 'Unlock a 7-day pass for unlimited play and no ads.');
@@ -646,6 +651,7 @@ export default function App() {
           localStorage.setItem(FREE_PLAY_SESSION_KEY, String(gameSessionKey));
         } catch {}
       }
+      claimedFreePlayKeysRef.current.add(claimKey);
       return true;
     } catch (error) {
       setAccessNotice(error instanceof Error ? error.message : 'Access check failed');
@@ -656,7 +662,7 @@ export default function App() {
       }
       return false;
     }
-  }, [authSession, gameSessionKey, getCurrentScope, isAuthLoading, refreshAccessState]);
+  }, [authSession, gameSessionKey, getCurrentScope, isAuthLoading, refreshAccessState, roundIndex]);
 
   const handleUnlock = useCallback(async () => {
     if (!authSession.authenticated) {

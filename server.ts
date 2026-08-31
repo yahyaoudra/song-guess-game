@@ -1669,18 +1669,27 @@ async function getDailyAccessState(req: Request, res: ExpressResponse, user?: Us
     return { ...createDailyAccessState(0, DAILY_FREE_PLAY_LIMIT), reason: 'Database not configured; local fallback applies.' };
   }
   if (user) {
+    const anonHash = hashToken(getOrSetAnonId(req, res));
     const rows = await queryDb<Record<string, unknown>>(
       `SELECT
-         (SELECT count(*)::int FROM sg_daily_plays WHERE user_id = $1 AND play_date = $2) AS play_count,
+         (SELECT count(*)::int FROM sg_daily_plays WHERE user_id = $1 AND play_date = $2) AS today_user_count,
+         (SELECT count(*)::int FROM sg_daily_plays WHERE user_id = $1) AS lifetime_user_count,
+         (SELECT count(*)::int FROM sg_daily_plays WHERE anon_hash = $3 AND play_date = $2) AS today_anon_count,
          signup_bonus_claimed
        FROM sg_users
        WHERE id = $1
        LIMIT 1`,
-      [user.id, todayUtcDate()]
+      [user.id, todayUtcDate(), anonHash]
     );
     const row = rows[0];
-    const playCount = Number(row?.play_count || 0);
-    const maxFreePlays = row && !row.signup_bonus_claimed ? SIGNUP_BONUS_FREE_PLAY_LIMIT : DAILY_FREE_PLAY_LIMIT;
+    const todayUserCount = Number(row?.today_user_count || 0);
+    const lifetimeUserCount = Number(row?.lifetime_user_count || 0);
+    const todayAnonCount = Number(row?.today_anon_count || 0);
+    const playCount = todayUserCount + todayAnonCount;
+    const bonusProgressCount = lifetimeUserCount + todayAnonCount;
+    const hasSignupBonusRemaining =
+      row && (!row.signup_bonus_claimed || bonusProgressCount < SIGNUP_BONUS_FREE_PLAY_LIMIT);
+    const maxFreePlays = hasSignupBonusRemaining ? SIGNUP_BONUS_FREE_PLAY_LIMIT : DAILY_FREE_PLAY_LIMIT;
     return createDailyAccessState(playCount, maxFreePlays);
   }
   const anonHash = hashToken(getOrSetAnonId(req, res));
@@ -3555,16 +3564,24 @@ async function startServer() {
       const anonHash = user ? '' : hashToken(getOrSetAnonId(req, res));
       const existingRows = user
         ? await queryDb<Record<string, unknown>>(
-            'SELECT count(*)::int AS play_count FROM sg_daily_plays WHERE user_id = $1 AND play_date = $2',
-            [user.id, todayUtcDate()]
+            `SELECT
+               (SELECT count(*)::int FROM sg_daily_plays WHERE user_id = $1 AND play_date = $2) AS today_user_count,
+               (SELECT count(*)::int FROM sg_daily_plays WHERE user_id = $1) AS lifetime_user_count,
+               (SELECT count(*)::int FROM sg_daily_plays WHERE anon_hash = $3 AND play_date = $2) AS today_anon_count`,
+            [user.id, todayUtcDate(), hashToken(getOrSetAnonId(req, res))]
           )
         : await queryDb<Record<string, unknown>>(
             'SELECT count(*)::int AS play_count FROM sg_daily_plays WHERE anon_hash = $1 AND play_date = $2',
             [anonHash, todayUtcDate()]
           );
-      const existingCount = Number(existingRows[0]?.play_count || 0);
+      const todayUserCount = Number(existingRows[0]?.today_user_count || 0);
+      const lifetimeUserCount = Number(existingRows[0]?.lifetime_user_count || 0);
+      const todayAnonCount = Number(existingRows[0]?.today_anon_count || 0);
+      const existingCount = user
+        ? todayUserCount + todayAnonCount
+        : Number(existingRows[0]?.play_count || 0);
       const dailyKey = user
-        ? `${todayUtcDate()}:${user.id}:${existingCount + 1}`
+        ? `${todayUtcDate()}:${user.id}:${todayUserCount + 1}`
         : `${todayUtcDate()}:${anonHash}:${existingCount + 1}`;
       await queryDb(
         `INSERT INTO sg_daily_plays (daily_key, user_id, anon_hash, play_date, scope_type, scope_slug)
@@ -3572,7 +3589,8 @@ async function startServer() {
          ON CONFLICT (daily_key) DO NOTHING`,
         [dailyKey, user?.id || null, anonHash, todayUtcDate(), scopeType, scopeSlug]
       );
-      if (user && existingCount + 1 >= SIGNUP_BONUS_FREE_PLAY_LIMIT) {
+      const bonusProgressAfterInsert = lifetimeUserCount + todayAnonCount + 1;
+      if (user && bonusProgressAfterInsert >= SIGNUP_BONUS_FREE_PLAY_LIMIT) {
         await queryDb('UPDATE sg_users SET signup_bonus_claimed = true, updated_at = now() WHERE id = $1', [user.id]);
       }
       const claimedState = createDailyAccessState(existingCount + 1, state.freePlayLimit || DAILY_FREE_PLAY_LIMIT);
