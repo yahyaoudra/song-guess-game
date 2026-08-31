@@ -116,6 +116,7 @@ interface MultiplayerRoom {
   };
   activity?: string;
   status?: 'lobby' | 'playing' | 'finished';
+  startedPayload?: Record<string, unknown>;
 }
 
 interface UrlValidationSuccess {
@@ -2364,10 +2365,11 @@ function attachMultiplayerServer(server: http.Server): void {
         const roomCode = safeText(message.roomCode, 12).toUpperCase();
         const playerName = safeText(message.name, 40) || 'Player';
         const playerEmail = safeText(message.email, 254).toLowerCase();
+        const requestedPlayerId = safeText(message.playerId, 80);
 
         if (type === 'create-room') {
           const code = createRoomCode();
-          const playerId = randomUUID();
+          const playerId = requestedPlayerId || randomUUID();
           const room: MultiplayerRoom = {
             code,
             hostName: playerName,
@@ -2390,16 +2392,41 @@ function attachMultiplayerServer(server: http.Server): void {
             socket.send(JSON.stringify({ type: 'error', error: 'Room not found' }));
             return;
           }
-          if (room.players.length >= 10) {
+          const existingPlayerIndex = room.players.findIndex((player) =>
+            (requestedPlayerId && player.id === requestedPlayerId) ||
+            (playerEmail && player.email?.toLowerCase() === playerEmail)
+          );
+          if (existingPlayerIndex < 0 && room.players.length >= 10) {
             socket.send(JSON.stringify({ type: 'error', error: 'Room is full' }));
             return;
           }
-          const playerId = randomUUID();
-          room.players.push({ id: playerId, name: playerName, email: playerEmail || undefined, score: 0, correct: 0, turnsPlayed: 0, connected: true });
-          room.activity = `${playerName} joined`;
+          const playerId = existingPlayerIndex >= 0 ? room.players[existingPlayerIndex].id : requestedPlayerId || randomUUID();
+          const nextPlayer = existingPlayerIndex >= 0
+            ? {
+                ...room.players[existingPlayerIndex],
+                name: playerName,
+                email: playerEmail || room.players[existingPlayerIndex].email,
+                connected: true
+              }
+            : { id: playerId, name: playerName, email: playerEmail || undefined, score: 0, correct: 0, turnsPlayed: 0, connected: true };
+          if (existingPlayerIndex >= 0) {
+            room.players = room.players
+              .map((player, index) => index === existingPlayerIndex ? nextPlayer : player)
+              .filter((player, index) =>
+                index === existingPlayerIndex ||
+                (player.id !== playerId && (!playerEmail || player.email?.toLowerCase() !== playerEmail))
+              );
+            room.activity = `${playerName} rejoined`;
+          } else {
+            room.players.push(nextPlayer);
+            room.activity = `${playerName} joined`;
+          }
           typedSocket.roomCode = room.code;
           typedSocket.playerId = playerId;
           socket.send(JSON.stringify({ type: 'room-joined', room, playerId }));
+          if (room.status === 'playing' && room.startedPayload) {
+            socket.send(JSON.stringify({ type: 'room-event', payload: room.startedPayload }));
+          }
           broadcastRoom(room, wss);
           return;
         }
@@ -2428,7 +2455,10 @@ function attachMultiplayerServer(server: http.Server): void {
             ? (message.payload as Record<string, unknown>)
             : {};
           const payloadType = safeText(payload.type, 40);
-          if (payloadType === 'start-game') room.status = 'playing';
+          if (payloadType === 'start-game') {
+            room.status = 'playing';
+            room.startedPayload = payload;
+          }
           if (payloadType === 'finish') room.status = 'finished';
           if (payloadType === 'activity') room.activity = safeText(payload.message, 160);
           if (Array.isArray(payload.players)) {

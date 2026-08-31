@@ -118,6 +118,9 @@ export default function App() {
   const [isPaywallOpen, setIsPaywallOpen] = useState(false);
   const [isMultiplayerOpen, setIsMultiplayerOpen] = useState(false);
   const [initialMultiplayerRoomCode, setInitialMultiplayerRoomCode] = useState('');
+  const [multiplayerInitialMode, setMultiplayerInitialMode] = useState<'party' | 'online'>('party');
+  const [multiplayerInitialStep, setMultiplayerInitialStep] = useState<'mode' | 'setup' | 'players' | 'lobby' | undefined>(undefined);
+  const [multiplayerAuthReturn, setMultiplayerAuthReturn] = useState<'online-create' | 'online-join' | null>(null);
   const [activeMultiplayerSession, setActiveMultiplayerSession] = useState<MultiplayerSession | null>(null);
   const [isMultiplayerInfoOpen, setIsMultiplayerInfoOpen] = useState(false);
   const [authSession, setAuthSession] = useState<AuthSessionResponse>({
@@ -337,6 +340,8 @@ export default function App() {
         const roomCode = (urlParams.get('room') || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
         if (roomCode) {
           setInitialMultiplayerRoomCode(roomCode);
+          setMultiplayerInitialMode('online');
+          setMultiplayerInitialStep('lobby');
           setIsMultiplayerOpen(true);
         }
 
@@ -1235,6 +1240,20 @@ export default function App() {
     }
   }, []);
 
+  const handleAuthenticated = useCallback((session: AuthSessionResponse) => {
+    setAuthSession(session);
+    setAnalyticsUser(session.user?.id);
+    setAccessNotice(null);
+    void refreshAccessState();
+    if (multiplayerAuthReturn) {
+      setIsAuthOpen(false);
+      setMultiplayerInitialMode('online');
+      setMultiplayerInitialStep(multiplayerAuthReturn === 'online-create' ? 'setup' : 'lobby');
+      setIsMultiplayerOpen(true);
+      setMultiplayerAuthReturn(null);
+    }
+  }, [multiplayerAuthReturn, refreshAccessState]);
+
   const currentMultiplayerRound = activeMultiplayerSession?.rounds[roundIndex];
   const currentMultiplayerPlayer = activeMultiplayerSession?.players.find((player) => player.id === currentMultiplayerRound?.playerId);
   const nextMultiplayerRound = activeMultiplayerSession?.rounds[roundIndex + 1];
@@ -1522,12 +1541,7 @@ export default function App() {
         <AuthModal
           initialMode={authInitialMode}
           onClose={() => setIsAuthOpen(false)}
-          onAuthenticated={(session) => {
-            setAuthSession(session);
-            setAnalyticsUser(session.user?.id);
-            setAccessNotice(null);
-            void refreshAccessState();
-          }}
+          onAuthenticated={handleAuthenticated}
           databaseConfigured={authSession.databaseConfigured}
         />
       )}
@@ -1537,8 +1551,10 @@ export default function App() {
           onClose={() => setIsMultiplayerOpen(false)}
           isUnlocked={authSession.entitlement.active}
           authSession={authSession}
-          onOpenAuth={() => {
+          onOpenAuth={(returnTo) => {
+            setMultiplayerAuthReturn(returnTo || null);
             setIsMultiplayerOpen(false);
+            setAuthInitialMode('login');
             setIsAuthOpen(true);
           }}
           onOpenPaywall={() => {
@@ -1547,6 +1563,8 @@ export default function App() {
           }}
           onStartSession={startMultiplayerSession}
           initialRoomCode={initialMultiplayerRoomCode}
+          initialMode={multiplayerInitialMode}
+          initialStep={multiplayerInitialStep}
         />
       )}
 
@@ -1927,7 +1945,12 @@ export default function App() {
         onOpenAuth={() => setIsAuthOpen(true)}
         onOpenPaywall={() => setIsPaywallOpen(true)}
         onUnlock={handleUnlock}
-        onOpenMultiplayer={() => setIsMultiplayerOpen(true)}
+        onOpenMultiplayer={() => {
+          setInitialMultiplayerRoomCode('');
+          setMultiplayerInitialMode('party');
+          setMultiplayerInitialStep('mode');
+          setIsMultiplayerOpen(true);
+        }}
       />
 
       {/* 5. Minimal Production Footer with Compliance & Secret Admin Trigger */}
@@ -2064,12 +2087,7 @@ export default function App() {
         <AuthModal
           initialMode={authInitialMode}
           onClose={() => setIsAuthOpen(false)}
-          onAuthenticated={(session) => {
-            setAuthSession(session);
-            setAnalyticsUser(session.user?.id);
-            setAccessNotice(null);
-            void refreshAccessState();
-          }}
+          onAuthenticated={handleAuthenticated}
           databaseConfigured={authSession.databaseConfigured}
         />
       )}
@@ -2079,8 +2097,10 @@ export default function App() {
           onClose={() => setIsMultiplayerOpen(false)}
           isUnlocked={authSession.entitlement.active}
           authSession={authSession}
-          onOpenAuth={() => {
+          onOpenAuth={(returnTo) => {
+            setMultiplayerAuthReturn(returnTo || null);
             setIsMultiplayerOpen(false);
+            setAuthInitialMode('login');
             setIsAuthOpen(true);
           }}
           onOpenPaywall={() => {
@@ -2089,6 +2109,8 @@ export default function App() {
           }}
           onStartSession={startMultiplayerSession}
           initialRoomCode={initialMultiplayerRoomCode}
+          initialMode={multiplayerInitialMode}
+          initialStep={multiplayerInitialStep}
         />
       )}
 
