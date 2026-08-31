@@ -75,6 +75,9 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
             <p className="mt-3 max-w-lg text-xs leading-relaxed text-white/58 sm:mt-4 sm:text-sm">
               One $3.99 payment unlocks every mode for a week. No subscription, no daily wall, and no ads while your pass is active.
             </p>
+            <p className="mt-2 max-w-lg text-[11px] leading-relaxed text-white/38">
+              Payments are processed for Song Guess Game access only. This service is not affiliated with any artist, Spotify, or record label.
+            </p>
 
             <div className="mt-4 grid gap-2 sm:mt-6 sm:grid-cols-2">
               {[
