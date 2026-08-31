@@ -67,7 +67,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md">
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md">
       <div className="w-full max-w-md rounded-lg border border-white/12 bg-[#0d1410] p-5 shadow-2xl">
         <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-4">
           <div>

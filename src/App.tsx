@@ -1537,8 +1537,14 @@ export default function App() {
           onClose={() => setIsMultiplayerOpen(false)}
           isUnlocked={authSession.entitlement.active}
           authSession={authSession}
-          onOpenAuth={() => setIsAuthOpen(true)}
-          onOpenPaywall={() => setIsPaywallOpen(true)}
+          onOpenAuth={() => {
+            setIsMultiplayerOpen(false);
+            setIsAuthOpen(true);
+          }}
+          onOpenPaywall={() => {
+            setIsMultiplayerOpen(false);
+            setIsPaywallOpen(true);
+          }}
           onStartSession={startMultiplayerSession}
           initialRoomCode={initialMultiplayerRoomCode}
         />
@@ -2067,8 +2073,14 @@ export default function App() {
           onClose={() => setIsMultiplayerOpen(false)}
           isUnlocked={authSession.entitlement.active}
           authSession={authSession}
-          onOpenAuth={() => setIsAuthOpen(true)}
-          onOpenPaywall={() => setIsPaywallOpen(true)}
+          onOpenAuth={() => {
+            setIsMultiplayerOpen(false);
+            setIsAuthOpen(true);
+          }}
+          onOpenPaywall={() => {
+            setIsMultiplayerOpen(false);
+            setIsPaywallOpen(true);
+          }}
           onStartSession={startMultiplayerSession}
           initialRoomCode={initialMultiplayerRoomCode}
         />
