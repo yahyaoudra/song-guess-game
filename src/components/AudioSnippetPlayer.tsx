@@ -11,6 +11,7 @@ interface AudioSnippetPlayerProps {
   themeOverride?: ThemeColor | 'auto';
   onSnippetEnded?: () => void;
   onBeforePlay?: () => boolean | Promise<boolean>;
+  onPlayStart?: () => void;
 }
 
 export const AudioSnippetPlayer: React.FC<AudioSnippetPlayerProps> = ({
@@ -18,7 +19,8 @@ export const AudioSnippetPlayer: React.FC<AudioSnippetPlayerProps> = ({
   currentStepIndex,
   difficulty,
   themeOverride = 'auto',
-  onBeforePlay
+  onBeforePlay,
+  onPlayStart
 }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -73,6 +75,7 @@ export const AudioSnippetPlayer: React.FC<AudioSnippetPlayerProps> = ({
       if (!allowed) return;
     }
 
+    if (!isPlaying) onPlayStart?.();
     const offset = song.smartCueOffsetSec || 0;
     audioEngine.toggle(song.previewUrl, maxDuration, offset, {
       title: song.title,

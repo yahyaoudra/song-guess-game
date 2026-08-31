@@ -2,6 +2,7 @@ type AnalyticsParams = Record<string, unknown>;
 
 const PURCHASE_TRACKED_KEY = 'song_guess_purchase_tracked_sessions_v1';
 const RETURNING_USER_TRACKED_KEY = 'song_guess_returning_user_tracked_v1';
+const EVENT_DEDUPE_KEY = 'song_guess_analytics_event_dedupe_v1';
 
 function getTrackedSet(key: string): Set<string> {
   try {
@@ -25,6 +26,17 @@ export function trackEvent(eventName: string, params: AnalyticsParams = {}): voi
   }
   window.dataLayer = window.dataLayer || [];
   window.dataLayer.push(['event', eventName, params]);
+}
+
+export function trackEventOnce(eventName: string, dedupeId: string, params: AnalyticsParams = {}): boolean {
+  if (!eventName || !dedupeId) return false;
+  const tracked = getTrackedSet(EVENT_DEDUPE_KEY);
+  const key = `${eventName}:${dedupeId}`;
+  if (tracked.has(key)) return false;
+  tracked.add(key);
+  saveTrackedSet(EVENT_DEDUPE_KEY, tracked);
+  trackEvent(eventName, params);
+  return true;
 }
 
 export function setAnalyticsUser(userId?: string): void {

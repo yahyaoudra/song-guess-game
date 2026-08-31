@@ -51,6 +51,7 @@ interface OnlineRoom {
     challengeTitle: string;
     turnsPerPlayer: number;
     hostHasUnlimited?: boolean;
+    countdownSeconds?: number;
   };
   activity?: string;
   status?: 'lobby' | 'playing' | 'finished';
@@ -108,7 +109,8 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
           challengeSlug: '',
           challengeTitle: existingSession.challengeTitle,
           turnsPerPlayer: existingSession.turnsPerPlayer,
-          hostHasUnlimited: Boolean(existingSession.hostHasUnlimited)
+          hostHasUnlimited: Boolean(existingSession.hostHasUnlimited),
+          countdownSeconds: existingSession.countdownSeconds || 80
         },
         activity: existingSession.activity,
         status: existingSession.completed ? 'finished' as const : 'playing' as const,
@@ -124,6 +126,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
   const [challengeType, setChallengeType] = useState<ChallengeType>(activeCollection ? 'collection' : existingSession?.challengeType || 'country');
   const [challengeSlug, setChallengeSlug] = useState(activeCollection?.id || 'GLOBAL');
   const [turnsPerPlayer, setTurnsPerPlayer] = useState(DEFAULT_TURNS);
+  const [countdownSeconds, setCountdownSeconds] = useState(existingSession?.countdownSeconds || 80);
   const [players, setPlayers] = useState<MultiplayerPlayer[]>([
     ...(existingSession?.players.length ? existingSession.players : [
       { id: createPlayerId(), name: 'Player 1', score: 0, correct: 0, turnsPlayed: 0 },
@@ -143,6 +146,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
   const [isRoomInfoOpen, setIsRoomInfoOpen] = useState(false);
   const socketRef = useRef<WebSocket | null>(existingSession?.socket || null);
   const handoffSocketRef = useRef(false);
+  const ownsSocketRef = useRef(!existingSession?.socket);
 
   const challengeOptions = useMemo<ChallengeOption[]>(() => {
     if (challengeType === 'collection') {
@@ -219,7 +223,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
   }, [initialMode, initialRoomCode, initialStep]);
 
   useEffect(() => () => {
-    if (!handoffSocketRef.current) socketRef.current?.close();
+    if (!handoffSocketRef.current && ownsSocketRef.current) socketRef.current?.close();
   }, []);
 
   const maxTurns = isUnlocked ? 25 : FREE_TURNS_PER_PLAYER;
@@ -250,7 +254,8 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
     challengeSlug: selectedChallenge?.slug || challengeSlug,
     challengeTitle: selectedChallenge?.title || 'Global',
     turnsPerPlayer: safeTurns,
-    hostHasUnlimited: isUnlocked
+    hostHasUnlimited: isUnlocked,
+    countdownSeconds: Math.max(10, Math.min(300, countdownSeconds || 80))
   });
 
   const buildRounds = (sessionPlayers: MultiplayerPlayer[]): MultiplayerRound[] => {
@@ -281,6 +286,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
     challengeTitle: settingsOverride?.challengeTitle || room?.settings?.challengeTitle || selectedChallenge?.title || 'Multiplayer',
     challengeType: (settingsOverride?.challengeType as ChallengeType | undefined) || (room?.settings?.challengeType as ChallengeType | undefined) || challengeType,
     turnsPerPlayer: settingsOverride?.turnsPerPlayer || room?.settings?.turnsPerPlayer || safeTurns,
+    countdownSeconds: settingsOverride?.countdownSeconds || room?.settings?.countdownSeconds || Math.max(10, Math.min(300, countdownSeconds || 80)),
     players: sessionPlayers.map((player) => ({ ...player, score: 0, correct: 0, turnsPlayed: 0 })),
     rounds,
     activity: `${sessionPlayers[0]?.name || 'Player'} starts the challenge`,
@@ -292,6 +298,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
     setSocketStatus('connecting');
     const socket = new WebSocket(getWsUrl());
     socketRef.current = socket;
+    ownsSocketRef.current = true;
     socket.onopen = () => setSocketStatus('connected');
     socket.onerror = () => setSocketStatus('error');
     socket.onclose = () => setSocketStatus('idle');
@@ -423,7 +430,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
 
   const startOnlineGame = () => {
     if (!room || !isOnlineHost) return;
-    const sessionPlayers = players.slice(0, MAX_PLAYERS).map((player) => ({
+    const sessionPlayers = (room.players.length ? room.players : players).slice(0, MAX_PLAYERS).map((player) => ({
       ...player,
       score: 0,
       correct: 0,
@@ -568,6 +575,18 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
                 />
                 <p className="mt-2 text-xs text-white/45">
                   Free games allow up to 5 songs per player. If the room creator has unlimited access, everyone can play inside that room.
+                </p>
+                <label className="mt-4 block text-[11px] font-black uppercase tracking-wide text-white/45">Round countdown seconds</label>
+                <input
+                  type="number"
+                  min={10}
+                  max={300}
+                  value={countdownSeconds}
+                  onChange={(event) => setCountdownSeconds(Math.max(10, Math.min(300, Number(event.target.value) || 80)))}
+                  className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-[#0b100d] px-3 text-white outline-none focus:border-[#00e676]"
+                />
+                <p className="mt-2 text-xs text-white/45">
+                  Default is 80 seconds. The same timer is shown to the current player and everyone listening.
                 </p>
                 {!isUnlocked && (
                   <button onClick={onOpenPaywall} className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-[#00e676]/35 bg-[#00e676]/10 text-xs font-black text-[#00e676]">

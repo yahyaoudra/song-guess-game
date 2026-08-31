@@ -41,7 +41,7 @@ import {
 import { audioEngine } from './utils/audioPlayer';
 import { cacheSongsMetadata, preCacheGameAudioSnippets } from './utils/offlineCache';
 import { recordActivity } from './utils/adminApi';
-import { setAnalyticsUser, trackEvent, trackPurchaseOnce, trackReturningUser } from './utils/analytics';
+import { setAnalyticsUser, trackEvent, trackEventOnce, trackPurchaseOnce, trackReturningUser } from './utils/analytics';
 import { getArchivePageHref, parseArchivePage } from './utils/archivePagination';
 import { getPublicHost, getShareUrl } from './utils/domain';
 import {
@@ -98,6 +98,9 @@ export default function App() {
   const [isInterstitialOpen, setIsInterstitialOpen] = useState(false);
   const lastInterstitialPathRef = useRef('');
   const claimedFreePlayKeysRef = useRef<Set<string>>(new Set());
+  const checkoutInFlightRef = useRef(false);
+  const checkoutAttemptIdRef = useRef('');
+  const roundTimeoutRef = useRef(false);
 
   // Modals state
   const [isCollectionsOpen, setIsCollectionsOpen] = useState(false);
@@ -149,6 +152,8 @@ export default function App() {
     }[]
   >([]);
   const [gameStartTime, setGameStartTime] = useState<number>(Date.now());
+  const [multiplayerRoundEndsAt, setMultiplayerRoundEndsAt] = useState<number | null>(null);
+  const [multiplayerSecondsLeft, setMultiplayerSecondsLeft] = useState<number | null>(null);
   const [savedResult, setSavedResult] = useState<GameResult | null>(null);
 
   // Feedback banner state for incorrect guesses
@@ -239,6 +244,7 @@ export default function App() {
     activeMultiplayerSession?.mode === 'online' &&
     Boolean(currentOnlinePlayerId) &&
     currentOnlinePlayerId !== currentMultiplayerPlayer?.id;
+  const multiplayerCountdownSeconds = Math.max(10, activeMultiplayerSession?.countdownSeconds || 80);
 
   // Dynamic round difficulties
   const roundDifficulties: Difficulty[] = ['EASY', 'MEDIUM', 'HARD', 'EXPERT', 'IMPOSSIBLE'];
@@ -248,6 +254,26 @@ export default function App() {
   // Calculate Running Points
   const totalPoints = roundHistory.reduce((sum, r) => sum + r.pointsEarned, 0);
   const maxPossiblePoints = totalRounds * 1000;
+
+  useEffect(() => {
+    if (!activeMultiplayerSession || !multiplayerRoundEndsAt || isRevealed) {
+      setMultiplayerSecondsLeft(null);
+      return;
+    }
+
+    const updateRemaining = () => {
+      const secondsLeft = Math.max(0, Math.ceil((multiplayerRoundEndsAt - Date.now()) / 1000));
+      setMultiplayerSecondsLeft(secondsLeft);
+      if (secondsLeft <= 0 && !roundTimeoutRef.current && !isMultiplayerGuestTurn) {
+        roundTimeoutRef.current = true;
+        completeRound(false, 0);
+      }
+    };
+
+    updateRemaining();
+    const interval = window.setInterval(updateRemaining, 250);
+    return () => window.clearInterval(interval);
+  }, [activeMultiplayerSession, isMultiplayerGuestTurn, isRevealed, multiplayerRoundEndsAt]);
 
   // Load public runtime config from the server. Production HTML injects an initial copy.
   useEffect(() => {
@@ -603,6 +629,9 @@ export default function App() {
     setIsRevealed(false);
     setRoundHistory([]);
     setGameStartTime(Date.now());
+    setMultiplayerRoundEndsAt(null);
+    setMultiplayerSecondsLeft(null);
+    roundTimeoutRef.current = false;
     setIsCompleteModalOpen(false);
     setSavedResult(null);
     setWrongFeedback(null);
@@ -693,13 +722,15 @@ export default function App() {
   }, [activeMultiplayerSession, authSession, gameSessionKey, getCurrentScope, isAuthLoading, isMultiplayerGuestTurn, refreshAccessState, roundIndex]);
 
   const handleUnlock = useCallback(async () => {
+    if (checkoutInFlightRef.current) return;
     if (!authSession.authenticated) {
       setIsAuthOpen(true);
       return;
     }
+    checkoutInFlightRef.current = true;
+    checkoutAttemptIdRef.current = checkoutAttemptIdRef.current || `attempt-${Date.now()}`;
     try {
-      const url = await createCheckout();
-      trackEvent('begin_checkout', {
+      trackEventOnce('begin_checkout', checkoutAttemptIdRef.current, {
         currency: 'USD',
         value: 3.99,
         items: [{
@@ -709,8 +740,11 @@ export default function App() {
           quantity: 1
         }]
       });
+      const url = await createCheckout();
       window.location.href = url;
     } catch (error) {
+      checkoutInFlightRef.current = false;
+      checkoutAttemptIdRef.current = '';
       setAccessNotice(error instanceof Error ? error.message : 'Stripe checkout is not available yet');
       if (authSession.authenticated) {
         setIsPaywallOpen(true);
@@ -860,8 +894,17 @@ export default function App() {
     }
   };
 
+  const handleSnippetPlayStart = () => {
+    if (!activeMultiplayerSession || !currentMultiplayerPlayer || isMultiplayerGuestTurn) return;
+    const message = `${currentMultiplayerPlayer.name} is listening to ${SNIPPET_TIERS[currentStepIndex]?.label || 'the clip'}`;
+    setActiveMultiplayerSession((current) => current ? { ...current, activity: message } : current);
+    sendMultiplayerEvent({ type: 'activity', message, stepIndex: currentStepIndex, roundIndex });
+  };
+
   const completeRound = (isCorrect: boolean, points: number) => {
+    if (isRevealed) return;
     audioEngine.stop();
+    setMultiplayerSecondsLeft(null);
     const newHistoryItem = {
       song: currentSong,
       isCorrect,
@@ -903,8 +946,12 @@ export default function App() {
 
     if (roundIndex < totalRounds - 1) {
       const nextIndex = roundIndex + 1;
+      const nextRoundEndsAt = activeMultiplayerSession ? Date.now() + multiplayerCountdownSeconds * 1000 : null;
       setRoundIndex(nextIndex);
       setCurrentStepIndex(0);
+      roundTimeoutRef.current = false;
+      setMultiplayerRoundEndsAt(nextRoundEndsAt);
+      setMultiplayerSecondsLeft(nextRoundEndsAt ? multiplayerCountdownSeconds : null);
       setIsRevealed(false);
       setWrongFeedback(null);
       if (activeMultiplayerSession) {
@@ -912,12 +959,14 @@ export default function App() {
         const nextPlayer = activeMultiplayerSession.players.find((player) => player.id === nextRound?.playerId);
         const message = `${nextPlayer?.name || 'Next player'} is up`;
         setActiveMultiplayerSession((current) => current ? { ...current, activity: message } : current);
-        sendMultiplayerEvent({ type: 'next-round', roundIndex: nextIndex, message });
+        sendMultiplayerEvent({ type: 'next-round', roundIndex: nextIndex, message, roundEndsAt: nextRoundEndsAt });
       }
     } else {
       // All rounds complete!
       if (activeMultiplayerSession) {
         setActiveMultiplayerSession((current) => current ? { ...current, completed: true, activity: 'Final results are ready' } : current);
+        setMultiplayerRoundEndsAt(null);
+        setMultiplayerSecondsLeft(null);
         setIsMultiplayerInfoOpen(true);
         sendMultiplayerEvent({ type: 'finish', players: activeMultiplayerSession.players, message: 'Final results are ready' });
       }
@@ -1198,6 +1247,9 @@ export default function App() {
     setIsRevealed(false);
     setRoundHistory([]);
     setGameStartTime(Date.now());
+    setMultiplayerRoundEndsAt(null);
+    setMultiplayerSecondsLeft(null);
+    roundTimeoutRef.current = false;
     setIsCompleteModalOpen(false);
     setWrongFeedback(null);
     setGameSessionKey(Date.now());
@@ -1254,6 +1306,9 @@ export default function App() {
       setIsRevealed(false);
       setRoundHistory([]);
       setGameStartTime(Date.now());
+      setMultiplayerRoundEndsAt(null);
+      setMultiplayerSecondsLeft(null);
+      roundTimeoutRef.current = false;
       setIsCompleteModalOpen(false);
       setSavedResult(null);
       setWrongFeedback(null);
@@ -1370,8 +1425,15 @@ export default function App() {
 
         if (eventType === 'next-round') {
           const nextIndex = Number(payload.roundIndex);
+          const nextRoundEndsAt = Number(payload.roundEndsAt);
           if (Number.isFinite(nextIndex)) setRoundIndex(Math.max(0, nextIndex));
           setCurrentStepIndex(0);
+          roundTimeoutRef.current = false;
+          if (Number.isFinite(nextRoundEndsAt) && nextRoundEndsAt > Date.now()) {
+            setMultiplayerRoundEndsAt(nextRoundEndsAt);
+          } else {
+            setMultiplayerRoundEndsAt(Date.now() + multiplayerCountdownSeconds * 1000);
+          }
           setIsRevealed(false);
           setWrongFeedback(null);
           setActiveMultiplayerSession((current) => current ? { ...current, activity: String(payload.message || current.activity) } : current);
@@ -1391,6 +1453,8 @@ export default function App() {
               : current
           );
           setIsMultiplayerInfoOpen(true);
+          setMultiplayerRoundEndsAt(null);
+          setMultiplayerSecondsLeft(null);
           return;
         }
 
@@ -1413,7 +1477,7 @@ export default function App() {
 
     socket.addEventListener('message', handleMultiplayerMessage);
     return () => socket.removeEventListener('message', handleMultiplayerMessage);
-  }, [activeMultiplayerSession?.socket, currentStepIndex]);
+  }, [activeMultiplayerSession?.socket, currentStepIndex, multiplayerCountdownSeconds]);
 
   useEffect(() => {
     if (!activeMultiplayerSession || !currentMultiplayerPlayer || currentMultiplayerPlayer.connected !== false) return;
@@ -1470,6 +1534,9 @@ export default function App() {
           </span>
           <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-white/65">
             {activeMultiplayerSession.activity}
+          </span>
+          <span className="rounded-full border border-yellow-300/25 bg-yellow-300/10 px-3 py-1 font-mono text-yellow-200">
+            {multiplayerSecondsLeft ?? multiplayerCountdownSeconds}s left
           </span>
           <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-white/65">
             Next: {nextMultiplayerPlayer?.name || 'Results'}
@@ -1918,6 +1985,7 @@ export default function App() {
               difficulty={currentDifficulty}
               themeOverride={settings.accentColorOverride}
               onBeforePlay={ensurePlayAccess}
+              onPlayStart={handleSnippetPlayStart}
             />
 
             {/* Song Autocomplete Search Box & Skip / Give Up Button */}

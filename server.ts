@@ -114,6 +114,7 @@ interface MultiplayerRoom {
     challengeTitle?: string;
     turnsPerPlayer?: number;
     hostHasUnlimited?: boolean;
+    countdownSeconds?: number;
   };
   activity?: string;
   status?: 'lobby' | 'playing' | 'finished';
@@ -2392,7 +2393,8 @@ function sanitizeMultiplayerSettings(source: unknown): MultiplayerRoom['settings
     challengeSlug: safeText(raw.challengeSlug, 120),
     challengeTitle: safeText(raw.challengeTitle, 120),
     turnsPerPlayer: Math.max(1, Math.min(25, Number(raw.turnsPerPlayer) || 1)),
-    hostHasUnlimited: raw.hostHasUnlimited === true
+    hostHasUnlimited: raw.hostHasUnlimited === true,
+    countdownSeconds: Math.max(10, Math.min(300, Number(raw.countdownSeconds) || 80))
   };
 }
 
