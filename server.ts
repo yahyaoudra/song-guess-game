@@ -3148,6 +3148,10 @@ async function startServer() {
     }
   });
 
+  app.get('/ads.txt', (_req, res) => {
+    res.type('text/plain').send('google.com, pub-7788063372192422, DIRECT, f08c47fec0942fa0\n');
+  });
+
   app.get('/sitemap.xml', async (req, res) => {
     try {
       const adminConfig = await getAdminConfig(req);
