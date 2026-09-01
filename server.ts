@@ -579,6 +579,50 @@ function artistNameFromSlugFallback(slug: string): string {
   return withoutSpotifySuffix.join(' ');
 }
 
+function getArtistGeneratedIdSuffix(slug: string): string {
+  const match = slug.match(/-([a-z0-9]{8})$/i);
+  return match?.[1] || '';
+}
+
+function stripArtistGeneratedIdFromText(value: string, slug: string): string {
+  const suffix = getArtistGeneratedIdSuffix(slug);
+  if (!suffix || !value) return value;
+
+  const escapedSuffix = suffix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return value
+    .replace(new RegExp(`[-_]+${escapedSuffix}(?=\\b)`, 'gi'), '')
+    .replace(new RegExp(`\\s+${escapedSuffix}(?=\\b)`, 'gi'), '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s+([.,;:!?])/g, '$1')
+    .trim();
+}
+
+function sanitizeArtistRouteSeo(config: AdminPageConfig, routeKey: string): AdminPageConfig {
+  if (!routeKey.startsWith('artist:')) return config;
+
+  const slug = slugifyChallenge(routeKey.slice('artist:'.length));
+  if (!getArtistGeneratedIdSuffix(slug)) return config;
+
+  return {
+    ...config,
+    pageTitle: stripArtistGeneratedIdFromText(config.pageTitle, slug),
+    metaDescription: stripArtistGeneratedIdFromText(config.metaDescription, slug),
+    keywords: stripArtistGeneratedIdFromText(config.keywords, slug),
+    customHeading: config.customHeading
+      ? stripArtistGeneratedIdFromText(config.customHeading, slug)
+      : config.customHeading,
+    customIntroText: config.customIntroText
+      ? stripArtistGeneratedIdFromText(config.customIntroText, slug)
+      : config.customIntroText,
+    socialTitle: config.socialTitle
+      ? stripArtistGeneratedIdFromText(config.socialTitle, slug)
+      : config.socialTitle,
+    socialDescription: config.socialDescription
+      ? stripArtistGeneratedIdFromText(config.socialDescription, slug)
+      : config.socialDescription
+  };
+}
+
 function safeText(value: unknown, maxLength: number): string {
   if (typeof value !== 'string') return '';
   return value
@@ -901,7 +945,7 @@ function createDefaultRouteConfig(routeKey: string, appUrl: string): AdminPageCo
   if (routeKey.startsWith('artist:')) {
     const slug = slugifyChallenge(routeKey.slice('artist:'.length));
     const artist = getArtistChallenge(slug);
-    const name = artist?.name || artistNameFromSlugFallback(slug);
+    const name = stripArtistGeneratedIdFromText(artist?.name || artistNameFromSlugFallback(slug), slug);
     return {
       countryCode: 'GLOBAL',
       slug,
@@ -964,7 +1008,7 @@ function sanitizeRouteConfigs(raw: unknown, appUrl: string): Record<string, Admi
     const fallback = createDefaultRouteConfig(routeKey, appUrl);
     const cleanSlug = safeText(incoming.slug, 100) || fallback.slug;
 
-    routeConfigs[routeKey] = {
+    routeConfigs[routeKey] = sanitizeArtistRouteSeo({
       countryCode: 'GLOBAL',
       slug: routeKey.startsWith('system:') ? fallback.slug : slugifyRouteSegment(cleanSlug),
       pageTitle: safeText(incoming.pageTitle, 120) || fallback.pageTitle,
@@ -980,7 +1024,7 @@ function sanitizeRouteConfigs(raw: unknown, appUrl: string): Record<string, Admi
         fallback.socialDescription,
       socialImageUrl: safePublicImageUrl(incoming.socialImageUrl) || fallback.socialImageUrl || '',
       updatedAt: safeText(incoming.updatedAt, 40) || new Date().toISOString()
-    };
+    }, routeKey);
   }
 
   return routeConfigs;
@@ -2047,7 +2091,10 @@ function getRouteSeo(req: Request, publicConfig: PublicRuntimeConfig): AdminPage
 
   const routeKey = getRouteOverrideKey(req);
   if (routeKey) {
-    return publicConfig.routeConfigs[routeKey] || createDefaultRouteConfig(routeKey, publicConfig.appUrl);
+    return sanitizeArtistRouteSeo(
+      publicConfig.routeConfigs[routeKey] || createDefaultRouteConfig(routeKey, publicConfig.appUrl),
+      routeKey
+    );
   }
 
   const countryCode = resolveCountryCodeFromRequest(req, publicConfig);

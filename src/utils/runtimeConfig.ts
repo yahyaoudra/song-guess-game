@@ -54,6 +54,54 @@ function artistNameFromSlugFallback(slug: string): string {
   return withoutSpotifySuffix.join(' ');
 }
 
+function getArtistGeneratedIdSuffix(slug: string): string {
+  const match = slug.match(/-([a-z0-9]{8})$/i);
+  return match?.[1] || '';
+}
+
+export function stripArtistGeneratedIdFromText(value: string, slug: string): string {
+  const suffix = getArtistGeneratedIdSuffix(slug);
+  if (!suffix || !value) return value;
+
+  const escapedSuffix = suffix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return value
+    .replace(new RegExp(`[-_]+${escapedSuffix}(?=\\b)`, 'gi'), '')
+    .replace(new RegExp(`\\s+${escapedSuffix}(?=\\b)`, 'gi'), '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s+([.,;:!?])/g, '$1')
+    .trim();
+}
+
+export function getArtistSeoDisplayName(name: string, slug: string): string {
+  return stripArtistGeneratedIdFromText(name || artistNameFromSlugFallback(slug), slug);
+}
+
+function sanitizeArtistRouteConfig(config: AdminPageConfig, routeKey: string): AdminPageConfig {
+  if (!routeKey.startsWith('artist:')) return config;
+
+  const slug = slugifyChallenge(routeKey.slice('artist:'.length));
+  if (!getArtistGeneratedIdSuffix(slug)) return config;
+
+  return {
+    ...config,
+    pageTitle: stripArtistGeneratedIdFromText(config.pageTitle, slug),
+    metaDescription: stripArtistGeneratedIdFromText(config.metaDescription, slug),
+    keywords: stripArtistGeneratedIdFromText(config.keywords, slug),
+    customHeading: config.customHeading
+      ? stripArtistGeneratedIdFromText(config.customHeading, slug)
+      : config.customHeading,
+    customIntroText: config.customIntroText
+      ? stripArtistGeneratedIdFromText(config.customIntroText, slug)
+      : config.customIntroText,
+    socialTitle: config.socialTitle
+      ? stripArtistGeneratedIdFromText(config.socialTitle, slug)
+      : config.socialTitle,
+    socialDescription: config.socialDescription
+      ? stripArtistGeneratedIdFromText(config.socialDescription, slug)
+      : config.socialDescription
+  };
+}
+
 export function createDefaultPageConfig(countryCode: string, appUrl = DEFAULT_APP_URL): AdminPageConfig {
   const country = COUNTRIES.find((item) => item.code === countryCode) || COUNTRIES[0];
   const cleanAppUrl = normalizePublicAppUrl(appUrl);
@@ -204,7 +252,7 @@ export function createDefaultRouteConfig(routeKey: string, appUrl = DEFAULT_APP_
   if (routeKey.startsWith('artist:')) {
     const slug = slugifyChallenge(routeKey.slice('artist:'.length));
     const artist = getArtistChallenge(slug);
-    const name = artist?.name || artistNameFromSlugFallback(slug);
+    const name = getArtistSeoDisplayName(artist?.name || artistNameFromSlugFallback(slug), slug);
     return {
       countryCode: 'GLOBAL',
       slug,
@@ -326,7 +374,10 @@ export function getGenrePath(slug: string): string {
 }
 
 export function getRouteConfig(routeKey: string, config = getInitialPublicRuntimeConfig()): AdminPageConfig {
-  return config.routeConfigs?.[routeKey] || createDefaultRouteConfig(routeKey, config.appUrl);
+  return sanitizeArtistRouteConfig(
+    config.routeConfigs?.[routeKey] || createDefaultRouteConfig(routeKey, config.appUrl),
+    routeKey
+  );
 }
 
 export function getRouteDisplayName(routeKey: string): string {

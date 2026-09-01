@@ -53,7 +53,8 @@ import {
   getRouteConfig,
   getInitialPublicRuntimeConfig,
   getLegalPath,
-  getLegalSectionFromPath
+  getLegalSectionFromPath,
+  getArtistSeoDisplayName
 } from './utils/runtimeConfig';
 import {
   getArtistChallenge,
@@ -1049,17 +1050,21 @@ export default function App() {
     settings.selectedCountry === 'GLOBAL'
       ? getRouteConfig('system:play', publicConfig)
       : countrySeo;
+  const activeArtistSeoName =
+    activeChallenge?.type === 'artist'
+      ? getArtistSeoDisplayName(activeChallenge.title, activeChallenge.slug)
+      : '';
   const activeSeo: AdminPageConfig =
     activeChallenge?.type === 'artist' && challengeSeo
       ? {
           ...challengeSeo,
-          pageTitle: `${activeChallenge.title} Song Guess - Heardle`,
-          metaDescription: `Play the ${activeChallenge.title} Heardle-style song guessing challenge. Guess songs by ${activeChallenge.title} from short audio snippets.`,
-          keywords: `${activeChallenge.title} heardle, ${activeChallenge.title} song guess, ${activeChallenge.title} music quiz`,
-          customHeading: `${activeChallenge.title} Song Guess - Heardle`,
-          customIntroText: `Guess ${activeChallenge.title} songs from short audio snippets.`,
-          socialTitle: `${activeChallenge.title} Song Guess - Heardle`,
-          socialDescription: `Can you recognize ${activeChallenge.title} songs from tiny snippets?`
+          pageTitle: `${activeArtistSeoName} Song Guess - Heardle`,
+          metaDescription: `Play the ${activeArtistSeoName} Heardle-style song guessing challenge. Guess songs by ${activeArtistSeoName} from short audio snippets.`,
+          keywords: `${activeArtistSeoName} heardle, ${activeArtistSeoName} song guess, ${activeArtistSeoName} music quiz`,
+          customHeading: `${activeArtistSeoName} Song Guess - Heardle`,
+          customIntroText: `Guess ${activeArtistSeoName} songs from short audio snippets.`,
+          socialTitle: `${activeArtistSeoName} Song Guess - Heardle`,
+          socialDescription: `Can you recognize ${activeArtistSeoName} songs from tiny snippets?`
         }
       : challengeSeo || directorySeo || playSeo;
   const legalSeo = {
