@@ -141,6 +141,8 @@ export interface AdminUserRecord {
   email: string;
   name: string;
   emailVerified: boolean;
+  mailerSendRegisteredAt?: string;
+  mailerSendRegistrationSource?: string;
   accessUntil?: string;
   createdAt: string;
   lastSeenAt?: string;

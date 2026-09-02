@@ -146,3 +146,38 @@ HTML:
 <p style="color:#667;">Song Guess Game is not affiliated with any artist, Spotify, Apple Music, or any record label.</p>
 <p><a href="{{unsubscribe_url}}">Unsubscribe</a></p>
 ```
+
+## Campaign 5: Newly Added Artists
+
+Subject: New artist packs are live
+
+Preview text: Stray Kids, Lana Del Rey, Kanye West, and Maroon 5 are ready to play.
+
+Plain text:
+```text
+Hi {{name}},
+
+New artist packs are live in Song Guess Game:
+
+Stray Kids
+https://songguessgame.online/artist/stray-kids-2digfjal
+
+Lana Del Rey
+https://songguessgame.online/artist/lana-del-rey-00fqb4jt
+
+Kanye West
+https://songguessgame.online/artist/kanye-west-5k4w6rqb
+
+Maroon 5
+https://songguessgame.online/artist/maroon-5-04gdigrs
+
+Want more than Daily 5?
+Get unlimited access for the week: all artists, all countries, all genres, multiplayer rooms, and no ads while your pass is active.
+https://songguessgame.online/play?unlock=1
+
+Song Guess Game is not affiliated with Stray Kids, Lana Del Rey, Kanye West, Maroon 5, Spotify, Apple Music, or any record label.
+Unsubscribe: {{unsubscribe_url}}
+```
+
+HTML:
+Use `docs/new-added-artists-email.html`.

@@ -224,6 +224,8 @@ async function ensureDatabaseSchema(): Promise<void> {
       email_verification_token_hash text,
       email_verification_expires_at timestamptz,
       google_sub text UNIQUE,
+      mailersend_registered_at timestamptz,
+      mailersend_registration_source text,
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now(),
       last_seen_at timestamptz
@@ -293,6 +295,8 @@ async function ensureDatabaseSchema(): Promise<void> {
   await queryDb('ALTER TABLE sg_users ADD COLUMN IF NOT EXISTS pending_email text');
   await queryDb('ALTER TABLE sg_users ADD COLUMN IF NOT EXISTS pending_email_verification_token_hash text');
   await queryDb('ALTER TABLE sg_users ADD COLUMN IF NOT EXISTS pending_email_verification_expires_at timestamptz');
+  await queryDb('ALTER TABLE sg_users ADD COLUMN IF NOT EXISTS mailersend_registered_at timestamptz');
+  await queryDb('ALTER TABLE sg_users ADD COLUMN IF NOT EXISTS mailersend_registration_source text');
   await queryDb('ALTER TABLE sg_payments ADD COLUMN IF NOT EXISTS receipt_url text');
   await queryDb('ALTER TABLE sg_leaderboard_entries ADD COLUMN IF NOT EXISTS duration_seconds integer NOT NULL DEFAULT 0');
   await queryDb('CREATE UNIQUE INDEX IF NOT EXISTS sg_leaderboard_nickname_unique ON sg_leaderboard_entries (lower(nickname))');
@@ -316,6 +320,18 @@ function isMailerSendConfigured(): boolean {
   return Boolean(
     process.env.MAILERSEND_API_KEY?.trim() &&
     process.env.MAILERSEND_FROM_EMAIL?.trim()
+  );
+}
+
+async function markMailerSendRegistered(userId: string, source: 'password' | 'google'): Promise<void> {
+  if (!isDatabaseConfigured()) return;
+  await queryDb(
+    `UPDATE sg_users
+     SET mailersend_registered_at = COALESCE(mailersend_registered_at, now()),
+         mailersend_registration_source = COALESCE(mailersend_registration_source, $2),
+         updated_at = now()
+     WHERE id = $1`,
+    [userId, source]
   );
 }
 
@@ -3518,6 +3534,9 @@ async function startServer() {
          VALUES ($1, $2, $3, $4, $5, now() + interval '24 hours')`,
         [userId, email, passwordHash, name, verifyHash]
       );
+      await markMailerSendRegistered(userId, 'password').catch((error) => {
+        console.warn('MailerSend registration marker failed:', error instanceof Error ? error.message : error);
+      });
       const appUrl = getEffectiveAppUrl(req);
       const verificationUrl = `${appUrl}/api/auth/verify?token=${encodeURIComponent(rawVerifyToken)}`;
       const emailSent = await sendVerificationEmail(email, name, verificationUrl, 'new-account').catch((error) => {
@@ -3805,6 +3824,9 @@ async function startServer() {
         ]
       );
 
+      await markMailerSendRegistered(rows[0].id, 'google').catch((error) => {
+        console.warn('MailerSend registration marker failed:', error instanceof Error ? error.message : error);
+      });
       await createUserSession(req, res, rows[0].id);
       appendSetCookie(
         res,
@@ -4065,6 +4087,8 @@ async function startServer() {
     try {
       const users = await queryDb<AdminUserRecord>(
         `SELECT u.id, u.email, u.name, u.email_verified AS "emailVerified",
+                u.mailersend_registered_at AS "mailerSendRegisteredAt",
+                u.mailersend_registration_source AS "mailerSendRegistrationSource",
                 e.access_until AS "accessUntil", u.created_at AS "createdAt", u.last_seen_at AS "lastSeenAt"
          FROM sg_users u
          LEFT JOIN sg_entitlements e ON e.user_id = u.id
