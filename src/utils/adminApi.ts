@@ -97,8 +97,8 @@ export async function uploadBannerAsset(dataUrl: string): Promise<string> {
   return body.url;
 }
 
-export async function fetchAdminUsers(): Promise<{ users: AdminUserRecord[]; databaseConfigured: boolean }> {
-  return requestJson<{ users: AdminUserRecord[]; databaseConfigured: boolean }>('/api/admin/users');
+export async function fetchAdminUsers(): Promise<{ users: AdminUserRecord[]; totalUsers: number; databaseConfigured: boolean }> {
+  return requestJson<{ users: AdminUserRecord[]; totalUsers: number; databaseConfigured: boolean }>('/api/admin/users');
 }
 
 export async function fetchAdminPayments(): Promise<{

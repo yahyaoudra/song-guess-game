@@ -123,6 +123,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
   const [config, setConfig] = useState<AdminConfigState | null>(null);
   const [activityLogs, setActivityLogs] = useState<Awaited<ReturnType<typeof fetchAdminActivity>>>([]);
   const [adminUsers, setAdminUsers] = useState<AdminUserRecord[]>([]);
+  const [adminUserTotal, setAdminUserTotal] = useState(0);
   const [adminPayments, setAdminPayments] = useState<PaymentRecord[]>([]);
   const [requestedArtists, setRequestedArtists] = useState<RequestedArtist[]>([]);
   const [paymentMeta, setPaymentMeta] = useState({ databaseConfigured: false, stripeConfigured: false });
@@ -241,13 +242,14 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
     const [nextConfig, nextActivity, usersBody, paymentsBody, requestedBody] = await Promise.all([
       fetchAdminConfig(),
       fetchAdminActivity(),
-      fetchAdminUsers().catch(() => ({ users: [], databaseConfigured: false })),
+      fetchAdminUsers().catch(() => ({ users: [], totalUsers: 0, databaseConfigured: false })),
       fetchAdminPayments().catch(() => ({ payments: [], databaseConfigured: false, stripeConfigured: false })),
       fetchRequestedArtists().catch(() => [])
     ]);
     setConfig(nextConfig);
     setActivityLogs(nextActivity);
     setAdminUsers(usersBody.users);
+    setAdminUserTotal(usersBody.totalUsers || usersBody.users.length);
     setAdminPayments(paymentsBody.payments);
     setRequestedArtists(requestedBody);
     onRequestedArtistsChanged?.(requestedBody);
@@ -358,6 +360,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
         fetchAdminPayments()
       ]);
       setAdminUsers(usersBody.users);
+      setAdminUserTotal(usersBody.totalUsers || usersBody.users.length);
       setAdminPayments(paymentsBody.payments);
       setPaymentMeta({
         databaseConfigured: usersBody.databaseConfigured && paymentsBody.databaseConfigured,
@@ -689,7 +692,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                 <div className="mt-4 grid grid-cols-1 divide-y divide-slate-200 overflow-hidden rounded-2xl border border-slate-200 bg-white md:grid-cols-4 md:divide-x md:divide-y-0">
                   {[
                     ['Total revenue', `$${(totalRevenueCents / 100).toFixed(2)}`, '+ weekly passes'],
-                    ['Active users', `${adminUsers.length}`, '+ accounts'],
+                    ['Active users', `${adminUserTotal}`, '+ accounts'],
                     ['Catalog routes', `${Object.keys(config.pageConfigs).length + Object.keys(config.routeConfigs).length}`, '+ SEO pages'],
                     ['Activity records', `${activityLogs.length}`, '+ sessions']
                   ].map(([label, value, delta]) => (
@@ -1272,7 +1275,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                 <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-4">
                   <Users className="w-5 h-5 text-[#00e676] mb-3" />
                   <p className="text-[11px] uppercase tracking-wide text-white/40 font-bold">Users</p>
-                  <p className="text-xl font-black text-white mt-1">{adminUsers.length}</p>
+                  <p className="text-xl font-black text-white mt-1">{adminUserTotal}</p>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-4">
                   <CreditCard className="w-5 h-5 text-[#00e676] mb-3" />
@@ -1316,7 +1319,10 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
 
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                 <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-4">
-                  <h3 className="text-sm font-black text-white mb-3">Users and access</h3>
+                  <h3 className="text-sm font-black text-white mb-1">Users and access</h3>
+                  <p className="mb-3 text-[11px] font-semibold text-white/45">
+                    Showing latest {adminUsers.length} of {adminUserTotal} accounts.
+                  </p>
                   {adminUsers.length === 0 ? (
                     <p className="rounded-xl bg-white/5 p-4 text-xs text-white/45">No users found, or Postgres is not configured.</p>
                   ) : (

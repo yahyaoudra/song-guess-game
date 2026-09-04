@@ -4405,10 +4405,11 @@ async function startServer() {
 
   app.get('/api/admin/users', requireAdmin, async (_req, res) => {
     if (!isDatabaseConfigured()) {
-      res.json({ users: [], databaseConfigured: false });
+      res.json({ users: [], totalUsers: 0, databaseConfigured: false });
       return;
     }
     try {
+      const totalRows = await queryDb<{ total: string }>('SELECT count(*)::text AS total FROM sg_users');
       const users = await queryDb<AdminUserRecord>(
         `SELECT u.id, u.email, u.name, u.email_verified AS "emailVerified",
                 u.mailersend_registered_at AS "mailerSendRegisteredAt",
@@ -4419,7 +4420,7 @@ async function startServer() {
          ORDER BY u.created_at DESC
          LIMIT 500`
       );
-      res.json({ users, databaseConfigured: true });
+      res.json({ users, totalUsers: Number(totalRows[0]?.total || users.length), databaseConfigured: true });
     } catch {
       res.status(503).json({ error: 'Could not load users' });
     }
