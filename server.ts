@@ -62,6 +62,8 @@ const WEEKLY_UNLOCK_AMOUNT_CENTS = 399;
 const ARTIST_PACK_REFRESH_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 const ARTIST_PACK_REFRESH_CHECK_MS = 60 * 60 * 1000;
 const ARTIST_PACK_REFRESH_START_DELAY_MS = 15 * 60 * 1000;
+const ABANDONED_CHECKOUT_CHECK_MS = 5 * 60 * 1000;
+const ABANDONED_CHECKOUT_START_DELAY_MS = 60 * 1000;
 const SPOTIFY_ARTIST_ALBUM_LIMIT = Math.max(10, Math.min(50, Number(process.env.SPOTIFY_ARTIST_ALBUM_LIMIT || '20') || 20));
 const MAILERSEND_EMAIL_API_URL = 'https://api.mailersend.com/v1/email';
 const SPOTIFY_TOKEN_URL = 'https://accounts.spotify.com/api/token';
@@ -140,6 +142,7 @@ let adminConfigCache: AdminConfigState | null = null;
 let dbPool: Pool | null = null;
 let dbUnavailableLogged = false;
 let spotifyAccessTokenCache: { token: string; expiresAt: number } | null = null;
+let abandonedCheckoutTimer: NodeJS.Timeout | null = null;
 
 class SpotifyApiError extends Error {
   status: number;
@@ -153,6 +156,16 @@ class SpotifyApiError extends Error {
   }
 }
 let artistRefreshTimer: NodeJS.Timeout | null = null;
+
+interface AbandonedCheckoutRow {
+  stripeSessionId: string;
+  userId: string;
+  email: string;
+  name: string;
+  checkoutUrl: string;
+  reminderStep: number;
+  startedAt: string;
+}
 
 const AD_LOCATIONS = new Set<AdPlacementLocation>([
   'header',
@@ -271,6 +284,21 @@ async function ensureDatabaseSchema(): Promise<void> {
       updated_at timestamptz NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS sg_abandoned_checkouts (
+      stripe_session_id text PRIMARY KEY,
+      user_id uuid NOT NULL REFERENCES sg_users(id) ON DELETE CASCADE,
+      email text NOT NULL,
+      name text NOT NULL DEFAULT '',
+      checkout_url text NOT NULL,
+      status text NOT NULL DEFAULT 'pending',
+      reminder_step integer NOT NULL DEFAULT 0,
+      next_reminder_at timestamptz,
+      started_at timestamptz NOT NULL DEFAULT now(),
+      completed_at timestamptz,
+      last_reminder_sent_at timestamptz,
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS sg_leaderboard_entries (
       id text PRIMARY KEY,
       user_id uuid REFERENCES sg_users(id) ON DELETE SET NULL,
@@ -298,6 +326,8 @@ async function ensureDatabaseSchema(): Promise<void> {
   await queryDb('ALTER TABLE sg_users ADD COLUMN IF NOT EXISTS mailersend_registered_at timestamptz');
   await queryDb('ALTER TABLE sg_users ADD COLUMN IF NOT EXISTS mailersend_registration_source text');
   await queryDb('ALTER TABLE sg_payments ADD COLUMN IF NOT EXISTS receipt_url text');
+  await queryDb('ALTER TABLE sg_abandoned_checkouts ADD COLUMN IF NOT EXISTS name text NOT NULL DEFAULT \'\'');
+  await queryDb('ALTER TABLE sg_abandoned_checkouts ADD COLUMN IF NOT EXISTS last_reminder_sent_at timestamptz');
   await queryDb('ALTER TABLE sg_leaderboard_entries ADD COLUMN IF NOT EXISTS duration_seconds integer NOT NULL DEFAULT 0');
   await queryDb('CREATE UNIQUE INDEX IF NOT EXISTS sg_leaderboard_nickname_unique ON sg_leaderboard_entries (lower(nickname))');
 }
@@ -394,6 +424,213 @@ async function sendContactEmail(name: string, email: string, message: string): P
     ].join('')
   );
   return true;
+}
+
+const ABANDONED_CHECKOUT_REMINDERS = [
+  {
+    key: '30m',
+    delayMs: 30 * 60 * 1000,
+    subject: 'Your unlimited Song Guess pass is waiting',
+    preview: 'Finish unlocking unlimited play, all artists, all countries, all genres, multiplayer rooms, and no ads.'
+  },
+  {
+    key: '5h',
+    delayMs: 5 * 60 * 60 * 1000,
+    subject: 'Still want unlimited Song Guess?',
+    preview: 'Come back when you are ready and unlock your 7-day pass.'
+  },
+  {
+    key: '12h',
+    delayMs: 12 * 60 * 60 * 1000,
+    subject: 'Keep playing past Daily 5',
+    preview: 'Unlimited heardle, full artist packs, genre challenges, countries, multiplayer, and no ads.'
+  },
+  {
+    key: '3d',
+    delayMs: 3 * 24 * 60 * 60 * 1000,
+    subject: 'Your Song Guess unlimited pass is still available',
+    preview: 'One more reminder: unlock weekly unlimited play whenever you are ready.'
+  }
+] as const;
+
+function getProductionAppUrl(): string {
+  return normalizePublicAppUrl(getStringEnv(['APP_URL', 'VITE_APP_URL', 'VITE_DOMAIN_NAME']), 'https://songguessgame.online');
+}
+
+function createAbandonedCheckoutEmail(row: AbandonedCheckoutRow, reminderKey: string): { subject: string; text: string; html: string } {
+  const reminder = ABANDONED_CHECKOUT_REMINDERS.find((item) => item.key === reminderKey) || ABANDONED_CHECKOUT_REMINDERS[0];
+  const appUrl = getProductionAppUrl();
+  const unlockUrl = row.checkoutUrl || `${appUrl}/play?unlock=1`;
+  const safeName = row.name || row.email.split('@')[0] || 'there';
+  const features = [
+    'Unlimited heardle for 7 days',
+    'All artist packs',
+    'All countries and genres',
+    'Multiplayer rooms',
+    'No ads while your pass is active'
+  ];
+
+  const text = [
+    `Hi ${safeName},`,
+    '',
+    'You started unlocking Song Guess unlimited, but the checkout was not completed.',
+    '',
+    'Your pass includes:',
+    ...features.map((feature) => `- ${feature}`),
+    '',
+    `Finish unlocking: ${unlockUrl}`,
+    '',
+    'Song Guess Game is not affiliated with any artist, Spotify, Apple Music, or any record label.'
+  ].join('\n');
+
+  const html = `
+    <div style="margin:0;padding:0;background:#050806;color:#f5fff8;font-family:Arial,Helvetica,sans-serif;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#050806;padding:24px 12px;">
+        <tr>
+          <td align="center">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;max-width:640px;background:#0b120e;border:1px solid #1f3528;border-radius:18px;overflow:hidden;">
+              <tr>
+                <td style="padding:30px;background:linear-gradient(135deg,#08100b 0%,#0d2216 52%,#151400 100%);">
+                  <p style="margin:0 0 18px;color:#00e676;font-size:12px;line-height:16px;font-weight:900;text-transform:uppercase;letter-spacing:.04em;">Song Guess unlimited</p>
+                  <h1 style="margin:0 0 12px;color:#ffffff;font-size:34px;line-height:40px;font-weight:900;">Finish unlocking unlimited play</h1>
+                  <p style="margin:0;color:#b8c5bc;font-size:16px;line-height:25px;">${escapeHtml(reminder.preview)}</p>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:26px 30px 30px;">
+                  <p style="margin:0 0 14px;color:#f5fff8;font-size:16px;line-height:24px;">Hi ${escapeHtml(safeName)},</p>
+                  <p style="margin:0 0 18px;color:#a7b4ad;font-size:15px;line-height:24px;">You started unlocking Song Guess unlimited, but the checkout was not completed.</p>
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:0 0 22px;">
+                    ${features.map((feature) => `
+                      <tr>
+                        <td style="padding:8px 0;color:#00e676;font-size:16px;line-height:22px;width:28px;">&#10003;</td>
+                        <td style="padding:8px 0;color:#ffffff;font-size:15px;line-height:22px;font-weight:700;">${escapeHtml(feature)}</td>
+                      </tr>
+                    `).join('')}
+                  </table>
+                  <a href="${escapeHtml(unlockUrl)}" style="display:block;text-align:center;background:#00e676;color:#00140a;text-decoration:none;border-radius:999px;padding:15px 20px;font-size:16px;line-height:20px;font-weight:900;">Get unlimited</a>
+                  <p style="margin:20px 0 0;color:#819087;font-size:12px;line-height:19px;">Song Guess Game is not affiliated with any artist, Spotify, Apple Music, or any record label.</p>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </div>
+  `;
+
+  return { subject: reminder.subject, text, html };
+}
+
+async function recordAbandonedCheckoutStart(user: UserSession, session: Stripe.Checkout.Session): Promise<void> {
+  if (!isDatabaseConfigured() || !session.url) return;
+  await queryDb(
+    `UPDATE sg_abandoned_checkouts
+     SET status = 'superseded', updated_at = now()
+     WHERE user_id = $1 AND status = 'pending'`,
+    [user.id]
+  );
+  await queryDb(
+    `INSERT INTO sg_abandoned_checkouts
+       (stripe_session_id, user_id, email, name, checkout_url, status, reminder_step, next_reminder_at)
+     VALUES ($1, $2, $3, $4, $5, 'pending', 0, $6)
+     ON CONFLICT (stripe_session_id)
+     DO UPDATE SET checkout_url = EXCLUDED.checkout_url,
+                   status = 'pending',
+                   reminder_step = 0,
+                   next_reminder_at = EXCLUDED.next_reminder_at,
+                   updated_at = now()`,
+    [
+      session.id,
+      user.id,
+      user.email,
+      user.name || user.email.split('@')[0] || 'Player',
+      session.url,
+      new Date(Date.now() + ABANDONED_CHECKOUT_REMINDERS[0].delayMs)
+    ]
+  );
+}
+
+async function markCheckoutCompleted(userId: string, stripeSessionId: string): Promise<void> {
+  if (!isDatabaseConfigured()) return;
+  await queryDb(
+    `UPDATE sg_abandoned_checkouts
+     SET status = 'completed', completed_at = now(), next_reminder_at = null, updated_at = now()
+     WHERE user_id = $1 OR stripe_session_id = $2`,
+    [userId, stripeSessionId]
+  );
+}
+
+async function processAbandonedCheckoutReminders(): Promise<void> {
+  if (!isDatabaseConfigured() || !isMailerSendConfigured()) return;
+
+  const rows = await queryDb<AbandonedCheckoutRow>(
+    `SELECT a.stripe_session_id AS "stripeSessionId",
+            a.user_id AS "userId",
+            a.email,
+            a.name,
+            a.checkout_url AS "checkoutUrl",
+            a.reminder_step AS "reminderStep",
+            a.started_at AS "startedAt"
+     FROM sg_abandoned_checkouts a
+     LEFT JOIN sg_entitlements e ON e.user_id = a.user_id AND e.access_until > now()
+     WHERE a.status = 'pending'
+       AND a.next_reminder_at <= now()
+       AND a.reminder_step < $1
+       AND e.user_id IS NULL
+     ORDER BY a.next_reminder_at ASC
+     LIMIT 25`,
+    [ABANDONED_CHECKOUT_REMINDERS.length]
+  );
+
+  for (const row of rows) {
+    const reminder = ABANDONED_CHECKOUT_REMINDERS[row.reminderStep];
+    if (!reminder) continue;
+    try {
+      const email = createAbandonedCheckoutEmail(row, reminder.key);
+      await sendTransactionalEmail(row.email, row.name || row.email, email.subject, email.text, email.html);
+      const nextReminder = ABANDONED_CHECKOUT_REMINDERS[row.reminderStep + 1];
+      const startedAt = Date.parse(row.startedAt);
+      const nextReminderAt = nextReminder
+        ? new Date((Number.isFinite(startedAt) ? startedAt : Date.now()) + nextReminder.delayMs)
+        : null;
+      await queryDb(
+        `UPDATE sg_abandoned_checkouts
+         SET reminder_step = $2,
+             last_reminder_sent_at = now(),
+             next_reminder_at = $3,
+             status = CASE WHEN $3::timestamptz IS NULL THEN 'finished' ELSE status END,
+             updated_at = now()
+         WHERE stripe_session_id = $1 AND status = 'pending'`,
+        [
+          row.stripeSessionId,
+          row.reminderStep + 1,
+          nextReminderAt
+        ]
+      );
+    } catch (error) {
+      console.warn('Abandoned checkout email failed:', error instanceof Error ? error.message : error);
+      await queryDb(
+        `UPDATE sg_abandoned_checkouts
+         SET next_reminder_at = now() + interval '30 minutes',
+             updated_at = now()
+         WHERE stripe_session_id = $1 AND status = 'pending'`,
+        [row.stripeSessionId]
+      );
+    }
+  }
+}
+
+function startAbandonedCheckoutScheduler(): void {
+  if (abandonedCheckoutTimer) return;
+  abandonedCheckoutTimer = setTimeout(() => {
+    void processAbandonedCheckoutReminders();
+    abandonedCheckoutTimer = setInterval(() => {
+      void processAbandonedCheckoutReminders();
+    }, ABANDONED_CHECKOUT_CHECK_MS);
+    abandonedCheckoutTimer.unref?.();
+  }, ABANDONED_CHECKOUT_START_DELAY_MS);
+  abandonedCheckoutTimer.unref?.();
 }
 
 function isSpotifyConfigured(): boolean {
@@ -3109,6 +3346,9 @@ async function startServer() {
           if (billingCountry) {
             await queryDb('UPDATE sg_users SET country_code = COALESCE(country_code, $2), updated_at = now() WHERE id = $1', [userId, billingCountry]);
           }
+          await markCheckoutCompleted(userId, session.id).catch((error) => {
+            console.warn('Abandoned checkout completion marker failed:', error instanceof Error ? error.message : error);
+          });
           console.log(`Granted weekly Song Guess access until ${accessUntil} for ${userId}`);
         }
       }
@@ -3936,6 +4176,9 @@ async function startServer() {
         cancel_url: `${appUrl}/play?checkout=cancelled`,
         metadata: { userId: user.id }
       });
+      await recordAbandonedCheckoutStart(user, session).catch((error) => {
+        console.warn('Abandoned checkout tracker failed:', error instanceof Error ? error.message : error);
+      });
       res.json({ url: session.url });
     } catch (error) {
       res.status(500).json({ error: error instanceof Error ? error.message : 'Could not create Stripe Checkout session' });
@@ -4397,6 +4640,7 @@ async function startServer() {
   const server = http.createServer(app);
   attachMultiplayerServer(server);
   startArtistPackRefreshScheduler();
+  startAbandonedCheckoutScheduler();
 
   server.listen(PORT, HOST, () => {
     console.log(`Moroccan Heardle server running on http://${HOST}:${PORT}`);
