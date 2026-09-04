@@ -64,6 +64,8 @@ const ARTIST_PACK_REFRESH_CHECK_MS = 60 * 60 * 1000;
 const ARTIST_PACK_REFRESH_START_DELAY_MS = 15 * 60 * 1000;
 const ABANDONED_CHECKOUT_CHECK_MS = 5 * 60 * 1000;
 const ABANDONED_CHECKOUT_START_DELAY_MS = 60 * 1000;
+const ABANDONED_CHECKOUT_BACKFILL_DAYS = Math.max(1, Math.min(30, Number(process.env.ABANDONED_CHECKOUT_BACKFILL_DAYS || '7') || 7));
+const ABANDONED_CHECKOUT_BACKFILL_LIMIT = Math.max(25, Math.min(500, Number(process.env.ABANDONED_CHECKOUT_BACKFILL_LIMIT || '200') || 200));
 const SPOTIFY_ARTIST_ALBUM_LIMIT = Math.max(10, Math.min(50, Number(process.env.SPOTIFY_ARTIST_ALBUM_LIMIT || '20') || 20));
 const MAILERSEND_EMAIL_API_URL = 'https://api.mailersend.com/v1/email';
 const SPOTIFY_TOKEN_URL = 'https://accounts.spotify.com/api/token';
@@ -143,6 +145,7 @@ let dbPool: Pool | null = null;
 let dbUnavailableLogged = false;
 let spotifyAccessTokenCache: { token: string; expiresAt: number } | null = null;
 let abandonedCheckoutTimer: NodeJS.Timeout | null = null;
+let abandonedCheckoutBackfillStarted = false;
 
 class SpotifyApiError extends Error {
   status: number;
@@ -551,6 +554,81 @@ async function recordAbandonedCheckoutStart(user: UserSession, session: Stripe.C
   );
 }
 
+async function backfillAbandonedCheckoutsFromStripe(): Promise<void> {
+  if (abandonedCheckoutBackfillStarted || !isDatabaseConfigured()) return;
+  abandonedCheckoutBackfillStarted = true;
+
+  const stripe = getStripeClient();
+  if (!stripe) return;
+
+  const createdGte = Math.floor((Date.now() - ABANDONED_CHECKOUT_BACKFILL_DAYS * 24 * 60 * 60 * 1000) / 1000);
+  const sessions: Stripe.Checkout.Session[] = [];
+  let startingAfter: string | undefined;
+
+  while (sessions.length < ABANDONED_CHECKOUT_BACKFILL_LIMIT) {
+    const page = await stripe.checkout.sessions.list({
+      limit: Math.min(100, ABANDONED_CHECKOUT_BACKFILL_LIMIT - sessions.length),
+      created: { gte: createdGte },
+      ...(startingAfter ? { starting_after: startingAfter } : {})
+    });
+    sessions.push(...page.data);
+    if (!page.has_more || page.data.length === 0) break;
+    startingAfter = page.data[page.data.length - 1].id;
+  }
+
+  const seenUsers = new Set<string>();
+  let imported = 0;
+  for (const session of sessions) {
+    const userId = safeText(session.metadata?.userId, 80);
+    if (
+      !userId ||
+      seenUsers.has(userId) ||
+      session.mode !== 'payment' ||
+      session.payment_status === 'paid'
+    ) {
+      continue;
+    }
+    seenUsers.add(userId);
+
+    const users = await queryDb<{ id: string; email: string; name: string; hasAccess: boolean }>(
+      `SELECT u.id,
+              u.email,
+              u.name,
+              EXISTS (
+                SELECT 1 FROM sg_entitlements e
+                WHERE e.user_id = u.id AND e.access_until > now()
+              ) AS "hasAccess"
+       FROM sg_users u
+       WHERE u.id = $1
+       LIMIT 1`,
+      [userId]
+    );
+    const user = users[0];
+    if (!user || user.hasAccess) continue;
+
+    const checkoutUrl = safeText(session.url, MAX_URL_LENGTH) || `${getProductionAppUrl()}/play?unlock=1`;
+    await queryDb(
+      `INSERT INTO sg_abandoned_checkouts
+         (stripe_session_id, user_id, email, name, checkout_url, status, reminder_step, next_reminder_at, started_at)
+       VALUES ($1, $2, $3, $4, $5, 'pending', 0, $6, now())
+       ON CONFLICT (stripe_session_id) DO NOTHING`,
+      [
+        session.id,
+        user.id,
+        safeText(session.customer_details?.email || session.customer_email, 254) || user.email,
+        user.name || user.email.split('@')[0] || 'Player',
+        checkoutUrl,
+        new Date(Date.now() + ABANDONED_CHECKOUT_REMINDERS[0].delayMs)
+      ]
+    );
+    imported += 1;
+  }
+
+  if (imported > 0) {
+    console.log(`Backfilled ${imported} abandoned checkout reminder sequence${imported === 1 ? '' : 's'} from Stripe`);
+  }
+}
+
 async function markCheckoutCompleted(userId: string, stripeSessionId: string): Promise<void> {
   if (!isDatabaseConfigured()) return;
   await queryDb(
@@ -624,6 +702,9 @@ async function processAbandonedCheckoutReminders(): Promise<void> {
 function startAbandonedCheckoutScheduler(): void {
   if (abandonedCheckoutTimer) return;
   abandonedCheckoutTimer = setTimeout(() => {
+    void backfillAbandonedCheckoutsFromStripe().catch((error) => {
+      console.warn('Abandoned checkout backfill failed:', error instanceof Error ? error.message : error);
+    });
     void processAbandonedCheckoutReminders();
     abandonedCheckoutTimer = setInterval(() => {
       void processAbandonedCheckoutReminders();
