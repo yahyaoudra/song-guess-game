@@ -67,6 +67,7 @@ const ABANDONED_CHECKOUT_START_DELAY_MS = 60 * 1000;
 const ABANDONED_CHECKOUT_BACKFILL_DAYS = Math.max(1, Math.min(30, Number(process.env.ABANDONED_CHECKOUT_BACKFILL_DAYS || '7') || 7));
 const ABANDONED_CHECKOUT_BACKFILL_LIMIT = Math.max(25, Math.min(500, Number(process.env.ABANDONED_CHECKOUT_BACKFILL_LIMIT || '200') || 200));
 const SPOTIFY_ARTIST_ALBUM_LIMIT = Math.max(10, Math.min(50, Number(process.env.SPOTIFY_ARTIST_ALBUM_LIMIT || '20') || 20));
+const REQUESTED_ARTIST_MIN_SONGS = Math.max(10, Math.min(50, Number(process.env.REQUESTED_ARTIST_MIN_SONGS || '20') || 20));
 const MAILERSEND_EMAIL_API_URL = 'https://api.mailersend.com/v1/email';
 const SPOTIFY_TOKEN_URL = 'https://accounts.spotify.com/api/token';
 const SPOTIFY_API_URL = 'https://api.spotify.com/v1';
@@ -302,6 +303,22 @@ async function ensureDatabaseSchema(): Promise<void> {
       updated_at timestamptz NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS sg_artist_request_subscribers (
+      id uuid PRIMARY KEY,
+      spotify_artist_id text,
+      artist_slug text NOT NULL,
+      artist_name text NOT NULL,
+      artist_image_url text,
+      user_id uuid REFERENCES sg_users(id) ON DELETE SET NULL,
+      email text NOT NULL,
+      name text NOT NULL DEFAULT '',
+      status text NOT NULL DEFAULT 'queued',
+      created_at timestamptz NOT NULL DEFAULT now(),
+      ready_at timestamptz,
+      notified_at timestamptz,
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS sg_leaderboard_entries (
       id text PRIMARY KEY,
       user_id uuid REFERENCES sg_users(id) ON DELETE SET NULL,
@@ -331,7 +348,9 @@ async function ensureDatabaseSchema(): Promise<void> {
   await queryDb('ALTER TABLE sg_payments ADD COLUMN IF NOT EXISTS receipt_url text');
   await queryDb('ALTER TABLE sg_abandoned_checkouts ADD COLUMN IF NOT EXISTS name text NOT NULL DEFAULT \'\'');
   await queryDb('ALTER TABLE sg_abandoned_checkouts ADD COLUMN IF NOT EXISTS last_reminder_sent_at timestamptz');
+  await queryDb('ALTER TABLE sg_artist_request_subscribers ADD COLUMN IF NOT EXISTS artist_image_url text');
   await queryDb('ALTER TABLE sg_leaderboard_entries ADD COLUMN IF NOT EXISTS duration_seconds integer NOT NULL DEFAULT 0');
+  await queryDb('CREATE UNIQUE INDEX IF NOT EXISTS sg_artist_request_subscribers_email_artist_unique ON sg_artist_request_subscribers (lower(email), artist_slug)');
   await queryDb('CREATE UNIQUE INDEX IF NOT EXISTS sg_leaderboard_nickname_unique ON sg_leaderboard_entries (lower(nickname))');
 }
 
@@ -426,6 +445,114 @@ async function sendContactEmail(name: string, email: string, message: string): P
       `<p>${escapeHtml(message).replace(/\n/g, '<br>')}</p>`
     ].join('')
   );
+  return true;
+}
+
+function createEmailShell(title: string, preview: string, bodyHtml: string): string {
+  return `
+    <div style="margin:0;padding:0;background:#050806;color:#f5fff8;font-family:Arial,Helvetica,sans-serif;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#050806;padding:24px 12px;">
+        <tr>
+          <td align="center">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;max-width:640px;background:#0b120e;border:1px solid #1f3528;border-radius:18px;overflow:hidden;">
+              <tr>
+                <td style="padding:30px;background:linear-gradient(135deg,#071009 0%,#0f2719 62%,#111400 100%);">
+                  <p style="margin:0 0 16px;color:#00e676;font-size:12px;line-height:16px;font-weight:900;text-transform:uppercase;letter-spacing:.04em;">Song Guess Game</p>
+                  <h1 style="margin:0 0 12px;color:#ffffff;font-size:32px;line-height:39px;font-weight:900;">${escapeHtml(title)}</h1>
+                  <p style="margin:0;color:#b8c5bc;font-size:16px;line-height:25px;">${escapeHtml(preview)}</p>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:28px 30px 30px;">
+                  ${bodyHtml}
+                  <p style="margin:24px 0 0;color:#819087;font-size:12px;line-height:19px;">Song Guess Game is not affiliated with any artist, Spotify, Apple Music, or any record label.</p>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </div>
+  `;
+}
+
+function createPrimaryEmailButton(url: string, label: string): string {
+  return `<a href="${escapeHtml(url)}" style="display:block;text-align:center;background:#00e676;color:#00140a;text-decoration:none;border-radius:999px;padding:15px 20px;font-size:16px;line-height:20px;font-weight:900;">${escapeHtml(label)}</a>`;
+}
+
+async function sendWelcomeEmail(email: string, name: string): Promise<boolean> {
+  if (!isMailerSendConfigured()) return false;
+  const appUrl = `${getProductionAppUrl()}/play`;
+  const safeName = name || email.split('@')[0] || 'Player';
+  const text = [
+    `Hi ${safeName},`,
+    '',
+    'Welcome to Song Guess Game. Your account is ready, and your one-time extra free plays are available on your account.',
+    '',
+    `Play now: ${appUrl}`
+  ].join('\n');
+  const html = createEmailShell(
+    'Welcome to Song Guess Game',
+    'Your account is ready. Jump back in and keep guessing songs from short clips.',
+    [
+      `<p style="margin:0 0 14px;color:#f5fff8;font-size:16px;line-height:24px;">Hi ${escapeHtml(safeName)},</p>`,
+      '<p style="margin:0 0 18px;color:#a7b4ad;font-size:15px;line-height:24px;">Your account is ready, and your one-time extra free plays are available on your account.</p>',
+      createPrimaryEmailButton(appUrl, 'Play now')
+    ].join('')
+  );
+  await sendTransactionalEmail(email, safeName, 'Welcome to Song Guess Game', text, html);
+  return true;
+}
+
+async function sendArtistRequestReceivedEmail(user: UserSession, artist: RequestedArtist): Promise<boolean> {
+  if (!isMailerSendConfigured()) return false;
+  const safeName = user.name || user.email.split('@')[0] || 'Player';
+  const image = safePublicImageUrl(artist.coverImage);
+  const text = [
+    `Hi ${safeName},`,
+    '',
+    `We received your request for ${artist.name}. It is in the queue and we will email you when the Spotify pack is ready.`,
+    '',
+    'We are handling artist requests in order while respecting Spotify API limits.'
+  ].join('\n');
+  const html = createEmailShell(
+    `${artist.name} request received`,
+    'We added your artist request to the queue and will email you when it is ready.',
+    [
+      `<p style="margin:0 0 14px;color:#f5fff8;font-size:16px;line-height:24px;">Hi ${escapeHtml(safeName)},</p>`,
+      image ? `<img src="${escapeHtml(image)}" alt="${escapeHtml(artist.name)}" width="96" height="96" style="display:block;width:96px;height:96px;object-fit:cover;border-radius:16px;border:1px solid #244231;margin:0 0 18px;">` : '',
+      `<p style="margin:0 0 18px;color:#a7b4ad;font-size:15px;line-height:24px;">We received your request for <strong style="color:#ffffff;">${escapeHtml(artist.name)}</strong>. It is in the queue while we respect Spotify API limits.</p>`,
+      '<p style="margin:0;color:#a7b4ad;font-size:15px;line-height:24px;">We will send you a Play Now link as soon as the pack is built.</p>'
+    ].join('')
+  );
+  await sendTransactionalEmail(user.email, safeName, `${artist.name} request received`, text, html);
+  return true;
+}
+
+async function sendArtistReadyEmail(email: string, name: string, artist: RequestedArtist): Promise<boolean> {
+  if (!isMailerSendConfigured()) return false;
+  const safeName = name || email.split('@')[0] || 'Player';
+  const playUrl = `${getProductionAppUrl()}/artist/${encodeURIComponent(artist.slug)}`;
+  const image = safePublicImageUrl(artist.coverImage || artist.songs?.[0]?.artworkUrl);
+  const subject = `${artist.name} is ready to play`;
+  const text = [
+    `Hi ${safeName},`,
+    '',
+    `${artist.name} is ready on Song Guess Game with ${artist.songsCount} songs.`,
+    '',
+    `Play now: ${playUrl}`
+  ].join('\n');
+  const html = createEmailShell(
+    `${artist.name} is ready`,
+    `The Spotify artist pack is built with ${artist.songsCount} playable songs.`,
+    [
+      `<p style="margin:0 0 14px;color:#f5fff8;font-size:16px;line-height:24px;">Hi ${escapeHtml(safeName)},</p>`,
+      image ? `<img src="${escapeHtml(image)}" alt="${escapeHtml(artist.name)}" width="120" height="120" style="display:block;width:120px;height:120px;object-fit:cover;border-radius:18px;border:1px solid #244231;margin:0 0 18px;">` : '',
+      `<p style="margin:0 0 18px;color:#a7b4ad;font-size:15px;line-height:24px;"><strong style="color:#ffffff;">${escapeHtml(artist.name)}</strong> is ready with ${artist.songsCount} playable songs.</p>`,
+      createPrimaryEmailButton(playUrl, 'Play now')
+    ].join('')
+  );
+  await sendTransactionalEmail(email, safeName, subject, text, html);
   return true;
 }
 
@@ -1510,6 +1637,7 @@ async function getRequestedArtists(): Promise<RequestedArtist[]> {
             .slice(0, 50)
         : [];
       const hasSpotifyBuiltSongs = songs.length > 0;
+      const requestedStatus = artist.status === 'queued' || artist.status === 'pending' ? artist.status : undefined;
       return {
         ...artist,
         slug: slugifyChallenge(artist.slug),
@@ -1519,8 +1647,8 @@ async function getRequestedArtists(): Promise<RequestedArtist[]> {
         songIds: hasSpotifyBuiltSongs ? songs.map((song) => song.id) : [],
         songs: hasSpotifyBuiltSongs ? songs : undefined,
         songsCount: songs.length,
-        coverImage: hasSpotifyBuiltSongs ? safePublicImageUrl(artist.coverImage) || songs[0]?.artworkUrl || ALL_SONGS[0]?.artworkUrl || '' : '',
-        status: hasSpotifyBuiltSongs ? 'ready' : 'pending',
+        coverImage: safePublicImageUrl(artist.coverImage) || (hasSpotifyBuiltSongs ? songs[0]?.artworkUrl || ALL_SONGS[0]?.artworkUrl || '' : ''),
+        status: hasSpotifyBuiltSongs ? 'ready' : requestedStatus || 'pending',
         createdAt: safeText(artist.createdAt, 40) || new Date().toISOString(),
         updatedAt: safeText(artist.updatedAt, 40),
         nextRefreshAt: safeText(artist.nextRefreshAt, 40),
@@ -1560,6 +1688,88 @@ function dedupeRequestedArtists(artists: RequestedArtist[]): RequestedArtist[] {
 
 async function saveRequestedArtists(artists: RequestedArtist[]): Promise<void> {
   await writeJsonFile(getArtistRequestsPath(), dedupeRequestedArtists(artists));
+}
+
+function createQueuedRequestedArtist(name: string, spotifyArtistId = '', spotifyUrl = '', coverImage = ''): RequestedArtist {
+  const cleanName = safeText(name, 100);
+  const cleanSpotifyId = safeText(spotifyArtistId, 80);
+  const slugBase = slugifyChallenge(cleanName || cleanSpotifyId || 'artist');
+  const slug = cleanSpotifyId ? `${slugBase}-${cleanSpotifyId.slice(0, 8).toLowerCase()}` : slugBase;
+  const now = new Date().toISOString();
+  return {
+    slug,
+    name: cleanName || 'Requested artist',
+    spotifyArtistId: cleanSpotifyId,
+    spotifyUrl: safeHttpsUrl(spotifyUrl),
+    songIds: [],
+    songsCount: 0,
+    coverImage: safePublicImageUrl(coverImage),
+    status: 'queued',
+    createdAt: now,
+    updatedAt: now,
+    nextRefreshAt: now,
+    lastRefreshType: 'request'
+  };
+}
+
+async function subscribeToArtistRequest(user: UserSession, artist: RequestedArtist): Promise<boolean> {
+  if (!isDatabaseConfigured()) return false;
+  const rows = await queryDb<{ id: string }>(
+    `INSERT INTO sg_artist_request_subscribers
+       (id, spotify_artist_id, artist_slug, artist_name, artist_image_url, user_id, email, name, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued')
+     ON CONFLICT (lower(email), artist_slug) DO NOTHING
+     RETURNING id`,
+    [
+      randomUUID(),
+      safeText(artist.spotifyArtistId, 80),
+      artist.slug,
+      artist.name,
+      safePublicImageUrl(artist.coverImage),
+      user.id,
+      user.email,
+      user.name || user.email.split('@')[0] || 'Player'
+    ]
+  );
+  if (!rows[0]) return false;
+  await sendArtistRequestReceivedEmail(user, artist).catch((error) => {
+    console.warn('Artist request received email failed:', error instanceof Error ? error.message : error);
+    return false;
+  });
+  return true;
+}
+
+async function notifyArtistRequestReady(artist: RequestedArtist): Promise<void> {
+  if (!isDatabaseConfigured() || !isMailerSendConfigured()) return;
+  const rows = await queryDb<{ id: string; email: string; name: string }>(
+    `SELECT id, email, name
+     FROM sg_artist_request_subscribers
+     WHERE status = 'queued'
+       AND (artist_slug = $1 OR ($2 <> '' AND spotify_artist_id = $2))
+     ORDER BY created_at ASC
+     LIMIT 100`,
+    [artist.slug, safeText(artist.spotifyArtistId, 80)]
+  );
+
+  for (const row of rows) {
+    try {
+      await sendArtistReadyEmail(row.email, row.name || row.email, artist);
+      await queryDb(
+        `UPDATE sg_artist_request_subscribers
+         SET status = 'notified',
+             artist_slug = $2,
+             artist_name = $3,
+             artist_image_url = $4,
+             ready_at = COALESCE(ready_at, now()),
+             notified_at = now(),
+             updated_at = now()
+         WHERE id = $1`,
+        [row.id, artist.slug, artist.name, safePublicImageUrl(artist.coverImage)]
+      );
+    } catch (error) {
+      console.warn(`Artist ready email failed for ${artist.name}:`, error instanceof Error ? error.message : error);
+    }
+  }
 }
 
 function buildRequestedArtistPack(name: string): RequestedArtist {
@@ -1756,6 +1966,12 @@ async function refreshDueArtistPacks(): Promise<void> {
   const artists = await getRequestedArtists();
   const now = Date.now();
   const dueArtist = artists.find((artist) => {
+    if (!artist.spotifyArtistId) return false;
+    const nextRefresh = Date.parse(artist.nextRefreshAt || artist.updatedAt || artist.createdAt);
+    const due = !Number.isFinite(nextRefresh) || nextRefresh <= now;
+    if (!due) return false;
+    return artist.status !== 'ready' || (artist.songsCount || artist.songs?.length || 0) < REQUESTED_ARTIST_MIN_SONGS;
+  }) || artists.find((artist) => {
     if (artist.status !== 'ready' || !artist.spotifyArtistId) return false;
     const nextRefresh = Date.parse(artist.nextRefreshAt || artist.updatedAt || artist.createdAt);
     return !Number.isFinite(nextRefresh) || nextRefresh <= now;
@@ -1772,9 +1988,13 @@ async function refreshDueArtistPacks(): Promise<void> {
       refreshed,
       ...artists.filter((artist) => artist.spotifyArtistId !== dueArtist.spotifyArtistId && artist.slug !== dueArtist.slug)
     ]);
+    await notifyArtistRequestReady(refreshed);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const backoffMs = error instanceof SpotifyApiError && error.status === 429 ? 24 * 60 * 60 * 1000 : 6 * 60 * 60 * 1000;
+    const retryAfterMs = error instanceof SpotifyApiError && error.status === 429 && error.retryAfterSeconds
+      ? error.retryAfterSeconds * 1000
+      : 0;
+    const backoffMs = retryAfterMs || (error instanceof SpotifyApiError && error.status === 429 ? 24 * 60 * 60 * 1000 : 6 * 60 * 60 * 1000);
     console.warn(`Scheduled artist pack refresh deferred for ${dueArtist.name}: ${message}`);
     dueArtist.nextRefreshAt = new Date(Date.now() + backoffMs).toISOString();
     await saveRequestedArtists(artists);
@@ -3566,6 +3786,7 @@ async function startServer() {
   app.post('/api/artist-requests', createRateLimit(120, 5 * 60_000), async (req, res) => {
     const name = safeText(req.body?.artistName, 100);
     const spotifyArtistId = safeText(req.body?.spotifyArtistId, 80);
+    const spotifyArtistImageUrl = safePublicImageUrl(req.body?.spotifyArtistImageUrl);
     const slug = slugifyChallenge(name);
     if ((!slug || name.length < 2) && !spotifyArtistId) {
       res.status(400).json({ error: 'Artist name is required' });
@@ -3578,6 +3799,7 @@ async function startServer() {
     }
 
     const existingCatalogArtist = getArtistChallenge(slug);
+    const user = await getUserSession(req).catch(() => null);
     const artists = await getRequestedArtists();
     const existing = artists.find((artist) =>
       spotifyArtistId ? artist.spotifyArtistId === spotifyArtistId : artist.slug === slug
@@ -3587,16 +3809,47 @@ async function startServer() {
         res.json({ artist: existing });
         return;
       }
+      if (!user) {
+        res.status(401).json({
+          requiresAuth: true,
+          error: 'Create an account or log in to join the artist request queue and receive the Play Now email.'
+        });
+        return;
+      }
+      await subscribeToArtistRequest(user, existing);
+      const nextRefresh = Date.parse(existing.nextRefreshAt || '');
+      if (Number.isFinite(nextRefresh) && nextRefresh > Date.now()) {
+        res.json({
+          artist: existing,
+          queued: true,
+          message: `${existing.name} is already in the queue. We will email you when it is ready to play.`
+        });
+        return;
+      }
       try {
         const rebuilt = await buildRequestedArtistPackFromSpotify(name, spotifyArtistId);
         await saveRequestedArtists([
           rebuilt,
           ...artists.filter((artist) => spotifyArtistId ? artist.spotifyArtistId !== spotifyArtistId : artist.slug !== slug)
         ]);
+        await notifyArtistRequestReady(rebuilt);
         res.json({ artist: rebuilt });
         return;
       } catch (error) {
-        sendSpotifyError(res, error, 'Could not rebuild artist pack from Spotify');
+        const retryAfterMs = error instanceof SpotifyApiError && error.status === 429 && error.retryAfterSeconds
+          ? error.retryAfterSeconds * 1000
+          : error instanceof SpotifyApiError && error.status === 429
+            ? 24 * 60 * 60 * 1000
+            : 6 * 60 * 60 * 1000;
+        existing.status = 'queued';
+        existing.updatedAt = new Date().toISOString();
+        existing.nextRefreshAt = new Date(Date.now() + retryAfterMs).toISOString();
+        await saveRequestedArtists(artists);
+        res.json({
+          artist: existing,
+          queued: true,
+          message: `${existing.name} is in the queue. We will email you when it is ready to play.`
+        });
         return;
       }
     }
@@ -3617,6 +3870,25 @@ async function startServer() {
             status: 'ready',
             createdAt: new Date().toISOString()
           }
+        });
+        return;
+      }
+      if (error instanceof SpotifyApiError && error.status === 429 && spotifyArtistId) {
+        if (!user) {
+          res.status(401).json({
+            requiresAuth: true,
+            error: 'Create an account or log in to join the artist request queue and receive the Play Now email.'
+          });
+          return;
+        }
+        const queuedArtist = createQueuedRequestedArtist(name, spotifyArtistId, '', spotifyArtistImageUrl);
+        queuedArtist.nextRefreshAt = new Date(Date.now() + (error.retryAfterSeconds ? error.retryAfterSeconds * 1000 : 24 * 60 * 60 * 1000)).toISOString();
+        await saveRequestedArtists([queuedArtist, ...artists]);
+        await subscribeToArtistRequest(user, queuedArtist);
+        res.json({
+          artist: queuedArtist,
+          queued: true,
+          message: `${queuedArtist.name} has been added to the queue. We are handling thousands of requests while respecting Spotify API limits, and we will email you when it is ready.`
         });
         return;
       }
@@ -3658,6 +3930,7 @@ async function startServer() {
         )
       ];
       await saveRequestedArtists(nextArtists);
+      await notifyArtistRequestReady(refreshed);
       res.json({ artist: refreshed, artists: nextArtists });
     } catch (error) {
       sendSpotifyError(res, error, 'Could not refresh artist pack from Spotify');
@@ -4010,10 +4283,14 @@ async function startServer() {
       `UPDATE sg_users
        SET email_verified = true, email_verification_token_hash = null, email_verification_expires_at = null, updated_at = now()
        WHERE email_verification_token_hash = $1 AND email_verification_expires_at > now()
-       RETURNING email`,
+       RETURNING id, email, name`,
       [hashToken(token)]
     );
     if (rows[0]) {
+      await sendWelcomeEmail(String(rows[0].email), String(rows[0].name || '')).catch((error) => {
+        console.warn('Welcome email send failed:', error instanceof Error ? error.message : error);
+        return false;
+      });
       res.type('html').send(createAuthRedirectPage('Email verified', 'Redirecting you back to Song Guess Game...', '/play?auth=verified'));
     } else {
       res.status(400).type('html').send(createAuthRedirectPage('Verification failed', 'Verification link expired or invalid.', '/play?auth=login'));
@@ -4125,7 +4402,7 @@ async function startServer() {
       const email = safeText(profile.email, 254).toLowerCase();
       if (!googleSub || !email) throw new Error('Google profile is missing email or subject');
 
-      const rows = await queryDb<{ id: string }>(
+      const rows = await queryDb<{ id: string; created: boolean }>(
         `INSERT INTO sg_users (id, email, password_hash, name, email_verified, google_sub, updated_at, last_seen_at)
          VALUES ($1, $2, $3, $4, $5, $6, now(), now())
          ON CONFLICT (email) DO UPDATE
@@ -4134,7 +4411,7 @@ async function startServer() {
              name = CASE WHEN sg_users.name = '' THEN EXCLUDED.name ELSE sg_users.name END,
              updated_at = now(),
              last_seen_at = now()
-         RETURNING id`,
+         RETURNING id, (xmax = 0) AS created`,
         [
           randomUUID(),
           email,
@@ -4148,6 +4425,12 @@ async function startServer() {
       await markMailerSendRegistered(rows[0].id, 'google').catch((error) => {
         console.warn('MailerSend registration marker failed:', error instanceof Error ? error.message : error);
       });
+      if (rows[0].created) {
+        await sendWelcomeEmail(email, safeText(profile.name, 80) || email.split('@')[0] || 'Player').catch((error) => {
+          console.warn('Welcome email send failed:', error instanceof Error ? error.message : error);
+          return false;
+        });
+      }
       await createUserSession(req, res, rows[0].id);
       appendSetCookie(
         res,

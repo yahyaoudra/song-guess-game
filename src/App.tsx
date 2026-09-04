@@ -62,8 +62,8 @@ import {
   getSongsByArtistSlug,
   getSongsByGenreSlug
 } from './utils/challengeCatalog';
-import { AdminConfigState, AdminPageConfig, AuthSessionResponse, RequestedArtist } from './adminTypes';
-import { claimFreePlay, createCheckout, fetchRequestedArtists, getAccessStatus, getAuthSession, requestArtist } from './utils/authApi';
+import { AdminConfigState, AdminPageConfig, ArtistRequestResponse, AuthSessionResponse, RequestedArtist } from './adminTypes';
+import { ApiRequestError, claimFreePlay, createCheckout, fetchRequestedArtists, getAccessStatus, getAuthSession, requestArtist } from './utils/authApi';
 
 const HAS_SEEN_ONBOARDING_KEY = 'songspot_has_seen_onboarding_v2';
 const FREE_PLAY_DATE_KEY = 'song_guess_free_play_date_v1';
@@ -120,6 +120,7 @@ export default function App() {
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [authInitialMode, setAuthInitialMode] = useState<'login' | 'register'>('register');
+  const [pendingArtistRequest, setPendingArtistRequest] = useState<{ name: string; spotifyArtistId?: string; imageUrl?: string } | null>(null);
   const [isPaywallOpen, setIsPaywallOpen] = useState(false);
   const [isMultiplayerOpen, setIsMultiplayerOpen] = useState(false);
   const [initialMultiplayerRoomCode, setInitialMultiplayerRoomCode] = useState('');
@@ -1290,8 +1291,19 @@ export default function App() {
     startNewGame('collection', col, { clearChallenge: true });
   };
 
-  const handleRequestArtist = useCallback(async (artistName: string, spotifyArtistId?: string) => {
-    const artist = await requestArtist(artistName, spotifyArtistId);
+  const handleRequestArtist = useCallback(async (artistName: string, spotifyArtistId?: string, spotifyArtistImageUrl?: string): Promise<ArtistRequestResponse> => {
+    let response: ArtistRequestResponse;
+    try {
+      response = await requestArtist(artistName, spotifyArtistId, spotifyArtistImageUrl);
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.requiresAuth) {
+        setPendingArtistRequest({ name: artistName, spotifyArtistId, imageUrl: spotifyArtistImageUrl });
+        setAuthInitialMode('register');
+        setIsAuthOpen(true);
+      }
+      throw error;
+    }
+    const artist = response.artist;
     setRequestedArtists((current) => {
       const filtered = current.filter((item) => item.slug !== artist.slug);
       return [artist, ...filtered];
@@ -1321,7 +1333,7 @@ export default function App() {
       setWrongFeedback(null);
       setGameSessionKey(Date.now());
     }
-    return artist;
+    return response;
   }, []);
 
   const startMultiplayerSession = useCallback((session: MultiplayerSession) => {
@@ -1362,7 +1374,18 @@ export default function App() {
       setIsMultiplayerOpen(true);
       setMultiplayerAuthReturn(null);
     }
-  }, [multiplayerAuthReturn, refreshAccessState]);
+    if (pendingArtistRequest) {
+      const artistRequest = pendingArtistRequest;
+      setPendingArtistRequest(null);
+      void handleRequestArtist(artistRequest.name, artistRequest.spotifyArtistId, artistRequest.imageUrl)
+        .then((result) => {
+          if (result.queued || result.artist.status !== 'ready') {
+            setAccessNotice(`${result.artist.name} is in the queue. We will email you when it is ready to play.`);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [handleRequestArtist, multiplayerAuthReturn, pendingArtistRequest, refreshAccessState]);
 
   useEffect(() => {
     const socket = activeMultiplayerSession?.socket;

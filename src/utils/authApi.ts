@@ -1,4 +1,4 @@
-import { AuthSessionResponse, DailyAccessState, PaymentRecord, RequestedArtist, SpotifyArtistSuggestion } from '../adminTypes';
+import { ArtistRequestResponse, AuthSessionResponse, DailyAccessState, PaymentRecord, RequestedArtist, SpotifyArtistSuggestion } from '../adminTypes';
 import { LeaderboardEntry } from '../types';
 import { executeRecaptcha } from './recaptcha';
 
@@ -7,6 +7,18 @@ export interface RegisterUserResponse {
   email: string;
   emailSent?: boolean;
   verificationUrl?: string;
+}
+
+export class ApiRequestError extends Error {
+  status: number;
+  requiresAuth: boolean;
+
+  constructor(message: string, status: number, requiresAuth = false) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.status = status;
+    this.requiresAuth = requiresAuth;
+  }
 }
 
 async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -24,12 +36,14 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
 
   if (!response.ok) {
     let message = `Request failed with ${response.status}`;
+    let requiresAuth = response.status === 401;
     try {
       const body = await response.json();
       if (typeof body?.error === 'string') message = body.error;
       if (typeof body?.reason === 'string') message = body.reason;
+      if (body?.requiresAuth === true) requiresAuth = true;
     } catch {}
-    throw new Error(message);
+    throw new ApiRequestError(message, response.status, requiresAuth);
   }
 
   return (await response.json()) as T;
@@ -111,13 +125,12 @@ export async function searchSpotifyArtists(query: string): Promise<SpotifyArtist
   return body.artists;
 }
 
-export async function requestArtist(artistName: string, spotifyArtistId?: string): Promise<RequestedArtist> {
+export async function requestArtist(artistName: string, spotifyArtistId?: string, spotifyArtistImageUrl?: string): Promise<ArtistRequestResponse> {
   const recaptchaToken = await executeRecaptcha('artist_request');
-  const body = await requestJson<{ artist: RequestedArtist }>('/api/artist-requests', {
+  return requestJson<ArtistRequestResponse>('/api/artist-requests', {
     method: 'POST',
-    body: JSON.stringify({ artistName, spotifyArtistId, recaptchaToken })
+    body: JSON.stringify({ artistName, spotifyArtistId, spotifyArtistImageUrl, recaptchaToken })
   });
-  return body.artist;
 }
 
 export async function sendContactRequest(name: string, email: string, message: string): Promise<void> {

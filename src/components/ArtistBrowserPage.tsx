@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, ExternalLink, Loader2, Search, Star } from 'lucide-react';
 import { getArtistChallenges, orderArtistsByFeaturedPriority } from '../utils/challengeCatalog';
 import { getArtistPath } from '../utils/runtimeConfig';
-import { RequestedArtist, SpotifyArtistSuggestion } from '../adminTypes';
+import { ArtistRequestResponse, RequestedArtist, SpotifyArtistSuggestion } from '../adminTypes';
 import { searchSpotifyArtists } from '../utils/authApi';
 import { ALL_SONGS } from '../data/moroccanSongs';
 import { Song } from '../types';
@@ -23,7 +23,7 @@ function baseArtistSlug(slug: string): string {
 interface ArtistBrowserPageProps {
   onOpenArtist: (slug: string) => void;
   requestedArtists?: RequestedArtist[];
-  onRequestArtist?: (artistName: string, spotifyArtistId?: string) => Promise<RequestedArtist>;
+  onRequestArtist?: (artistName: string, spotifyArtistId?: string, spotifyArtistImageUrl?: string) => Promise<ArtistRequestResponse>;
 }
 
 interface ArtistBrowserCard {
@@ -43,8 +43,9 @@ export const ArtistBrowserPage: React.FC<ArtistBrowserPageProps> = ({
 }) => {
   const basePath = '/artist';
   const [query, setQuery] = useState('');
-  const [requestStatus, setRequestStatus] = useState<'idle' | 'searching' | 'building' | 'done'>('idle');
+  const [requestStatus, setRequestStatus] = useState<'idle' | 'searching' | 'building' | 'queued' | 'done'>('idle');
   const [requestError, setRequestError] = useState<string | null>(null);
+  const [requestNotice, setRequestNotice] = useState<string | null>(null);
   const [spotifySuggestions, setSpotifySuggestions] = useState<SpotifyArtistSuggestion[]>([]);
   const [selectedSpotifyArtist, setSelectedSpotifyArtist] = useState<SpotifyArtistSuggestion | null>(null);
   const didMountRef = useRef(false);
@@ -122,8 +123,15 @@ export const ArtistBrowserPage: React.FC<ArtistBrowserPageProps> = ({
     setSelectedSpotifyArtist(artistToBuild);
     setRequestStatus('building');
     setRequestError(null);
+    setRequestNotice(null);
     try {
-      const artist = await onRequestArtist(artistToBuild.name, artistToBuild.id);
+      const result = await onRequestArtist(artistToBuild.name, artistToBuild.id, artistToBuild.imageUrl);
+      const artist = result.artist;
+      if (result.queued || artist.status === 'queued' || artist.status === 'pending') {
+        setRequestStatus('queued');
+        setRequestNotice(result.message || `${artist.name} has been added to the queue. We will email you when it is ready to play.`);
+        return;
+      }
       setRequestStatus('done');
       onOpenArtist(artist.slug);
     } catch (error) {
@@ -147,6 +155,7 @@ export const ArtistBrowserPage: React.FC<ArtistBrowserPageProps> = ({
     pushArchivePage(basePath, 1, true);
     setSelectedSpotifyArtist(null);
     setRequestError(null);
+    setRequestNotice(null);
     setRequestStatus('idle');
   }, [query]);
 
@@ -221,6 +230,9 @@ export const ArtistBrowserPage: React.FC<ArtistBrowserPageProps> = ({
             </div>
             {requestError && (
               <p className="mt-3 rounded-lg border border-red-400/25 bg-red-400/10 p-2 text-xs text-red-100">{requestError}</p>
+            )}
+            {requestNotice && (
+              <p className="mt-3 rounded-lg border border-[#00e676]/25 bg-[#00e676]/10 p-3 text-sm font-bold text-[#b8ffd7]">{requestNotice}</p>
             )}
             <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
               {spotifySuggestions.map((artist) => {
@@ -299,6 +311,11 @@ export const ArtistBrowserPage: React.FC<ArtistBrowserPageProps> = ({
               <div className="mt-5 inline-flex items-center gap-2 rounded-lg border border-[#00e676]/25 bg-[#00e676]/10 px-4 py-2 text-sm font-black text-[#b8ffd7]">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Building {selectedSpotifyArtist.name} pack before opening the game...
+              </div>
+            )}
+            {requestStatus === 'queued' && selectedSpotifyArtist && (
+              <div className="mt-5 rounded-lg border border-[#00e676]/25 bg-[#00e676]/10 px-4 py-3 text-sm font-black text-[#b8ffd7]">
+                {selectedSpotifyArtist.name} is queued. Keep browsing; we will email you with a Play Now link when the Spotify pack is ready.
               </div>
             )}
           </section>

@@ -157,11 +157,18 @@ export interface RequestedArtist {
   songs?: Song[];
   songsCount: number;
   coverImage: string;
-  status: 'ready' | 'pending';
+  status: 'ready' | 'pending' | 'queued';
   createdAt: string;
   updatedAt?: string;
   nextRefreshAt?: string;
   lastRefreshType?: 'manual' | 'automatic' | 'request';
+}
+
+export interface ArtistRequestResponse {
+  artist: RequestedArtist;
+  queued?: boolean;
+  message?: string;
+  requiresAuth?: boolean;
 }
 
 export interface SpotifyArtistSuggestion {
