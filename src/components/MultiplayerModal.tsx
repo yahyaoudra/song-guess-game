@@ -384,6 +384,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
     hostHasUnlimited: Boolean(settingsOverride?.hostHasUnlimited || room?.settings?.hostHasUnlimited || (mode === 'party' && isUnlocked)),
     challengeTitle: settingsOverride?.challengeTitle || room?.settings?.challengeTitle || selectedChallenge?.title || 'Multiplayer',
     challengeType: (settingsOverride?.challengeType as ChallengeType | undefined) || (room?.settings?.challengeType as ChallengeType | undefined) || challengeType,
+    challengeSlug: settingsOverride?.challengeSlug || room?.settings?.challengeSlug || selectedChallenge?.slug || challengeSlug,
     turnsPerPlayer: settingsOverride?.turnsPerPlayer || room?.settings?.turnsPerPlayer || safeTurns,
     countdownSeconds: settingsOverride?.countdownSeconds || room?.settings?.countdownSeconds || Math.max(10, Math.min(300, countdownSeconds || 80)),
     players: sessionPlayers.map((player) => ({ ...player, score: 0, correct: 0, turnsPlayed: 0 })),

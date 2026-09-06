@@ -13,6 +13,7 @@ interface HeaderNavProps {
   mode: GameMode;
   onSelectMode: (mode: GameMode) => void;
   onOpenCollections: () => void;
+  onPackClick?: () => void;
   onOpenLeaderboard: () => void;
   onOpenFaq: () => void;
   selectedCountryCode: string;
@@ -53,6 +54,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   mode,
   onSelectMode,
   onOpenCollections,
+  onPackClick,
   onOpenLeaderboard,
   onOpenFaq,
   selectedCountryCode,
@@ -440,7 +442,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
       <div>
         <button
           id="browse-quizzes-btn"
-          onClick={onOpenCollections}
+          onClick={onPackClick || onOpenCollections}
           className="group flex items-center gap-2 px-4 py-1 rounded-full border border-white/15 bg-[#121815]/80 hover:bg-[#1a231f] transition-colors text-xs font-semibold backdrop-blur-sm cursor-pointer shadow-sm"
         >
           {browsePillIcon}

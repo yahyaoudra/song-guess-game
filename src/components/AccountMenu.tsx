@@ -81,11 +81,8 @@ export const AccountMenu: React.FC<AccountMenuProps> = ({ session, onOpenAuth, o
       setNotice(
         result.emailSent
           ? 'Verification email sent. Open it to confirm the new address.'
-          : 'Email sending is not configured yet. Opening the local verification link.'
+          : 'We could not send the verification email right now. Please try again later or contact support.'
       );
-      if (!result.emailSent) {
-        window.open(result.verificationUrl, '_blank', 'noopener,noreferrer');
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not start email verification');
     } finally {

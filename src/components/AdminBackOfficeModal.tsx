@@ -49,7 +49,7 @@ import { getSafeImageUrl } from '../utils/safeUrl';
 
 type AdminTab = 'overview' | 'seo' | 'ads' | 'integrations' | 'packs' | 'monetization' | 'activity' | 'robots' | 'security';
 type SeoTargetType = 'home' | 'country' | 'genre' | 'artist';
-type ArtistPackSort = 'name-asc' | 'name-desc' | 'songs-desc' | 'songs-asc' | 'updated-desc' | 'updated-asc';
+type ArtistPackSort = 'name-asc' | 'name-desc' | 'songs-desc' | 'songs-asc' | 'updated-desc' | 'updated-asc' | 'played-desc';
 type ArtistPackStatusFilter = 'all' | 'ready' | 'queued' | 'pending' | 'needs-update';
 type ArtistPackSourceFilter = 'all' | 'spotify' | 'catalog';
 
@@ -206,6 +206,22 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
   }, [requestedArtists]);
   const artistPackRows = useMemo(() => {
     const query = artistPackSearch.trim().toLowerCase();
+    const playedCounts = new Map<string, number>();
+    activityLogs.forEach((log) => {
+      const source = `${log.collectionTitle || ''} ${log.path || ''}`.toLowerCase();
+      artistChallenges.forEach((artist) => {
+        const base = baseArtistSlug(artist.slug);
+        if (source.includes(base) || source.includes(artist.name.toLowerCase())) {
+          playedCounts.set(base, (playedCounts.get(base) || 0) + 1);
+        }
+      });
+      requestedArtists.forEach((artist) => {
+        const base = baseArtistSlug(artist.slug);
+        if (source.includes(base) || source.includes(artist.name.toLowerCase())) {
+          playedCounts.set(base, (playedCounts.get(base) || 0) + 1);
+        }
+      });
+    });
     const requestedRows = requestedArtists.map((artist) => ({
       slug: artist.slug,
       name: artist.name,
@@ -216,6 +232,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
       status: artist.status || 'pending',
       updatedAt: artist.updatedAt || artist.createdAt || '',
       nextRefreshAt: artist.nextRefreshAt || '',
+      playedCount: playedCounts.get(baseArtistSlug(artist.slug)) || 0,
       sampleText: artist.songs?.slice(0, 4).map((song) => song.title).join(' • ') || ''
     }));
     const requestedBaseSlugs = new Set(requestedRows.map((artist) => baseArtistSlug(artist.slug)));
@@ -231,6 +248,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
         status: 'catalog',
         updatedAt: '',
         nextRefreshAt: '',
+        playedCount: playedCounts.get(baseArtistSlug(artist.slug)) || 0,
         sampleText: ''
       }));
     return [...requestedRows, ...catalogRows]
@@ -252,13 +270,14 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
         if (artistPackSort === 'name-desc') return right.name.localeCompare(left.name);
         if (artistPackSort === 'songs-desc') return right.songsCount - left.songsCount || left.name.localeCompare(right.name);
         if (artistPackSort === 'songs-asc') return left.songsCount - right.songsCount || left.name.localeCompare(right.name);
+        if (artistPackSort === 'played-desc') return right.playedCount - left.playedCount || left.name.localeCompare(right.name);
         const leftTime = left.updatedAt ? new Date(left.updatedAt).getTime() : 0;
         const rightTime = right.updatedAt ? new Date(right.updatedAt).getTime() : 0;
         return artistPackSort === 'updated-asc'
           ? leftTime - rightTime || left.name.localeCompare(right.name)
           : rightTime - leftTime || left.name.localeCompare(right.name);
       });
-  }, [artistChallenges, artistPackSearch, artistPackSort, artistPackSourceFilter, artistPackStatusFilter, requestedArtists]);
+  }, [activityLogs, artistChallenges, artistPackSearch, artistPackSort, artistPackSourceFilter, artistPackStatusFilter, requestedArtists]);
 
   const artistPackTotalPages = Math.max(1, Math.ceil(artistPackRows.length / artistPackPageSize));
   const safeArtistPackPage = Math.min(artistPackPage, artistPackTotalPages);
@@ -1361,6 +1380,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                   <option value="updated-desc">Newest update</option>
                   <option value="updated-asc">Oldest update</option>
                   <option value="songs-desc">Most songs</option>
+                  <option value="played-desc">Most played</option>
                   <option value="songs-asc">Fewest songs</option>
                   <option value="name-asc">Name A-Z</option>
                   <option value="name-desc">Name Z-A</option>
@@ -1425,7 +1445,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                                   {artist.source === 'spotify' ? 'Spotify' : 'Catalog'}
                                 </span>
                               </div>
-                              <p className="mt-1 text-xs text-white/45">{artist.songsCount} songs • {sourceLabel} update</p>
+                              <p className="mt-1 text-xs text-white/45">{artist.songsCount} songs • {artist.playedCount} plays • {sourceLabel} update</p>
                               <p className="mt-1 truncate font-mono text-[10px] text-white/30">{artist.slug}</p>
                             </div>
                             <button

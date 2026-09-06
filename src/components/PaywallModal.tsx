@@ -108,13 +108,17 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
           <div className="relative min-h-[190px] overflow-hidden border-t border-white/10 bg-[#101713] sm:min-h-[320px] lg:border-l lg:border-t-0">
             <div className="absolute inset-0 opacity-35 bg-[radial-gradient(circle_at_30%_20%,rgba(0,230,118,0.28),transparent_35%),radial-gradient(circle_at_80%_65%,rgba(255,214,0,0.18),transparent_32%)]" />
             <div className="relative flex h-full flex-col justify-center gap-3 p-5">
-              {[0, 1].map((row) => (
+              {[0, 1].map((row) => {
+                const rowArtists = row === 0
+                  ? carouselArtists
+                  : [...carouselArtists.slice(Math.ceil(carouselArtists.length / 2)), ...carouselArtists.slice(0, Math.ceil(carouselArtists.length / 2))];
+                return (
                 <div
                   key={row}
-                  className={`flex gap-3 ${row === 1 ? 'translate-x-10' : ''} animate-[paywall-slide_24s_linear_infinite]`}
+                  className={`flex gap-3 ${row === 1 ? 'translate-x-20' : ''} animate-[paywall-slide_24s_linear_infinite]`}
                   aria-hidden="true"
                 >
-                  {[...carouselArtists, ...carouselArtists].map((artist, index) => (
+                  {[...rowArtists, ...rowArtists].map((artist, index) => (
                     <div key={`${artist.slug}-${row}-${index}`} className="w-28 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-black/30 shadow-xl sm:w-36">
                       <img
                         src={artist.displayImage}
@@ -129,7 +133,8 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
                     </div>
                   ))}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>

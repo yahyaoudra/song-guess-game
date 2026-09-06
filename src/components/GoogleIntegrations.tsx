@@ -9,7 +9,7 @@ interface GoogleIntegrationsProps {
 
 function ensureScript(id: string, src: string, crossOrigin?: string): void {
   if (typeof document === 'undefined') return;
-  if (document.getElementById(id)) return;
+  if (document.getElementById(id) || document.querySelector(`script[src="${src}"]`)) return;
 
   const script = document.createElement('script');
   script.id = id;

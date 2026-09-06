@@ -129,7 +129,8 @@ export default function App() {
   const [multiplayerAuthReturn, setMultiplayerAuthReturn] = useState<'online-create' | 'online-join' | null>(null);
   const [activeMultiplayerSession, setActiveMultiplayerSession] = useState<MultiplayerSession | null>(null);
   const [isMultiplayerInfoOpen, setIsMultiplayerInfoOpen] = useState(false);
-  const [multiplayerConfirmAction, setMultiplayerConfirmAction] = useState<'quit' | 'new-room' | null>(null);
+  const [multiplayerConfirmAction, setMultiplayerConfirmAction] = useState<'quit' | 'new-room' | 'change-pack' | null>(null);
+  const [multiplayerLeaderboardScope, setMultiplayerLeaderboardScope] = useState<'room' | 'pack'>('room');
   const [authSession, setAuthSession] = useState<AuthSessionResponse>({
     authenticated: false,
     entitlement: { active: false },
@@ -348,7 +349,7 @@ export default function App() {
         const authAction = urlParams.get('auth');
         if (authAction === 'verified' || authAction === 'login') {
           if (authAction === 'verified') {
-            trackEvent('email_verified', {
+            trackEventOnce('email_verified', urlParams.get('email') || pathname, {
               method: 'email'
             });
           }
@@ -362,7 +363,7 @@ export default function App() {
 
         const loginMethod = urlParams.get('login');
         if (loginMethod === 'google') {
-          trackEvent('login', {
+          trackEventOnce('login', `google:${pathname}:${Date.now().toString().slice(0, -4)}`, {
             method: 'google'
           });
           urlParams.delete('login');
@@ -701,6 +702,19 @@ export default function App() {
 
       const state = await claimFreePlay(scope.type, scope.slug);
       if (!state.allowed && !state.unlimited) {
+        if (activeMultiplayerSession) {
+          const message = `${currentMultiplayerPlayer?.name || 'A player'} reached the free Daily 5 limit. The room is paused until the creator has unlimited access or the group continues without that player.`;
+          setMultiplayerRoundEndsAt(null);
+          setMultiplayerSecondsLeft(null);
+          setActiveMultiplayerSession((current) => current ? { ...current, activity: message } : current);
+          if (activeMultiplayerSession.mode === 'online' && activeMultiplayerSession.socket?.readyState === WebSocket.OPEN && activeMultiplayerSession.roomCode) {
+            activeMultiplayerSession.socket.send(JSON.stringify({
+              type: 'room-event',
+              roomCode: activeMultiplayerSession.roomCode,
+              payload: { type: 'activity', message, stepIndex: currentStepIndex, roundIndex }
+            }));
+          }
+        }
         setAccessNotice(
           activeMultiplayerSession
             ? 'Your free Daily 5 is used for today. To keep playing in this room, the room creator needs unlimited access.'
@@ -730,7 +744,7 @@ export default function App() {
       }
       return false;
     }
-  }, [activeMultiplayerSession, authSession, gameSessionKey, getCurrentScope, isAuthLoading, isMultiplayerGuestTurn, refreshAccessState, roundIndex]);
+  }, [activeMultiplayerSession, authSession, currentMultiplayerPlayer?.name, currentStepIndex, gameSessionKey, getCurrentScope, isAuthLoading, isMultiplayerGuestTurn, refreshAccessState, roundIndex]);
 
   const handleUnlock = useCallback(async () => {
     if (checkoutInFlightRef.current) return;
@@ -1591,6 +1605,15 @@ export default function App() {
     setIsMultiplayerOpen(true);
   }, [activeMultiplayerSession]);
 
+  const requestMultiplayerPackChange = useCallback(() => {
+    if (!activeMultiplayerSession) return;
+    if (activeMultiplayerSession.mode === 'online' && activeMultiplayerSession.isHost) {
+      setMultiplayerConfirmAction('change-pack');
+      return;
+    }
+    setIsMultiplayerInfoOpen(true);
+  }, [activeMultiplayerSession]);
+
   const renderMultiplayerStatusBar = () => {
     if (!activeMultiplayerSession || !currentMultiplayerPlayer) return null;
     const secondsLeft = multiplayerSecondsLeft ?? multiplayerCountdownSeconds;
@@ -1650,12 +1673,15 @@ export default function App() {
   const renderMultiplayerConfirmModal = () => {
     if (!multiplayerConfirmAction) return null;
     const isNewRoom = multiplayerConfirmAction === 'new-room';
+    const isChangePack = multiplayerConfirmAction === 'change-pack';
     return (
       <div className="fixed inset-0 z-[220] flex items-center justify-center bg-black/85 p-3 backdrop-blur-md">
         <div className="w-full max-w-md rounded-lg border border-white/12 bg-[#0d1410] p-4 shadow-2xl">
-          <h2 className="text-xl font-black text-white">{isNewRoom ? 'Create a new room?' : 'Quit multiplayer?'}</h2>
+          <h2 className="text-xl font-black text-white">{isChangePack ? 'Change room pack?' : isNewRoom ? 'Create a new room?' : 'Quit multiplayer?'}</h2>
           <p className="mt-2 text-sm leading-6 text-white/55">
-            {isNewRoom
+            {isChangePack
+              ? 'Changing the pack will restart this room for everyone. Continue?'
+              : isNewRoom
               ? 'Creating a new room will quit your current multiplayer game. Continue?'
               : 'Quit this multiplayer game? Your current room progress will be left.'}
           </p>
@@ -1672,6 +1698,18 @@ export default function App() {
               onClick={() => {
                 const action = multiplayerConfirmAction;
                 setMultiplayerConfirmAction(null);
+                if (action === 'change-pack') {
+                  setInitialMultiplayerRoomCode(activeMultiplayerSession?.roomCode || '');
+                  setMultiplayerInitialMode('online');
+                  setMultiplayerInitialStep('pack');
+                  setIsMultiplayerInfoOpen(false);
+                  setIsMultiplayerOpen(true);
+                  void recordFeatureEvent('online_room_change_pack_requested', 'Host opened room pack change flow', {
+                    roomCode: activeMultiplayerSession?.roomCode,
+                    challengeTitle: activeMultiplayerSession?.challengeTitle
+                  });
+                  return;
+                }
                 performQuitMultiplayerSession();
                 if (action === 'new-room') {
                   setInitialMultiplayerRoomCode('');
@@ -1682,7 +1720,7 @@ export default function App() {
               }}
               className="h-11 rounded-lg bg-[#00e676] text-sm font-black text-black hover:bg-[#1fe682]"
             >
-              {isNewRoom ? 'Quit and create' : 'Quit game'}
+              {isChangePack ? 'Change pack' : isNewRoom ? 'Quit and create' : 'Quit game'}
             </button>
           </div>
         </div>
@@ -1706,12 +1744,17 @@ export default function App() {
         difficulty={currentDifficulty}
         currentPoints={totalPoints}
         themeOverride={settings.accentColorOverride}
-        collectionTitle={activeChallenge?.title || activeCollection?.title}
+        collectionTitle={activeMultiplayerSession?.challengeTitle || activeChallenge?.title || activeCollection?.title}
         streakData={streakData}
         featuredArtistSlugs={publicConfig.featuredArtistSlugs}
         requestedArtists={requestedArtists}
-        activeChallengeType={activeChallenge?.type || null}
-        activeChallengeSlug={activeChallenge?.slug || null}
+        activeChallengeType={
+          activeMultiplayerSession?.challengeType === 'artist' || activeMultiplayerSession?.challengeType === 'genre'
+            ? activeMultiplayerSession.challengeType
+            : activeChallenge?.type || null
+        }
+        activeChallengeSlug={activeMultiplayerSession?.challengeSlug || activeChallenge?.slug || null}
+        onPackClick={activeMultiplayerSession ? requestMultiplayerPackChange : undefined}
         onSelectCountry={(code) => handleSelectCountry(code)}
         onOpenCountryArchive={() => navigateToPage('/play/country')}
         onOpenArtist={(slug) => navigateToPage(getArtistPath(slug))}
@@ -1801,6 +1844,7 @@ export default function App() {
           initialStep={multiplayerInitialStep}
           activeCollection={activeCollection}
           existingSession={activeMultiplayerSession}
+          requestedArtists={requestedArtists}
         />
       )}
 
@@ -1824,6 +1868,19 @@ export default function App() {
                 <div className="mt-1 font-mono text-2xl font-black text-white">{activeMultiplayerSession.roomCode}</div>
               </div>
             )}
+            <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-center">
+              <select
+                value={multiplayerLeaderboardScope}
+                onChange={(event) => setMultiplayerLeaderboardScope(event.target.value as 'room' | 'pack')}
+                className="h-10 rounded-lg border border-white/10 bg-[#101812] px-3 text-xs font-black text-white outline-none focus:border-[#00e676]"
+              >
+                <option value="room">Room leaderboard</option>
+                <option value="pack">{activeMultiplayerSession.challengeTitle} pack</option>
+              </select>
+              <span className="text-[11px] font-bold text-white/40">
+                {multiplayerLeaderboardScope === 'pack' ? 'Current room scores for this pack' : 'Current room scores'}
+              </span>
+            </div>
             <div className="mt-4 space-y-2">
               {[...activeMultiplayerSession.players]
                 .sort((left, right) => right.score - left.score || left.name.localeCompare(right.name))
@@ -1848,16 +1905,12 @@ export default function App() {
               {activeMultiplayerSession.isHost && activeMultiplayerSession.mode === 'online' && (
                 <button
                   type="button"
-                  onClick={() => {
-                    setInitialMultiplayerRoomCode(activeMultiplayerSession.roomCode || '');
-                    setMultiplayerInitialMode('online');
-                    setMultiplayerInitialStep('pack');
-                    setIsMultiplayerInfoOpen(false);
-                    setIsMultiplayerOpen(true);
-                  }}
+	                  onClick={() => {
+	                    requestMultiplayerPackChange();
+	                  }}
                   className="h-11 rounded-lg bg-[#00e676] text-sm font-black text-black hover:bg-[#1fe682]"
                 >
-                  Change pack / restart
+	                  Change pack
                 </button>
               )}
               <button type="button" onClick={quitMultiplayerSession} className="h-11 rounded-lg border border-red-400/25 bg-red-400/10 text-sm font-black text-red-200 hover:bg-red-400/20">
@@ -2445,6 +2498,19 @@ export default function App() {
                 <div className="mt-1 font-mono text-2xl font-black text-white">{activeMultiplayerSession.roomCode}</div>
               </div>
             )}
+            <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-center">
+              <select
+                value={multiplayerLeaderboardScope}
+                onChange={(event) => setMultiplayerLeaderboardScope(event.target.value as 'room' | 'pack')}
+                className="h-10 rounded-lg border border-white/10 bg-[#101812] px-3 text-xs font-black text-white outline-none focus:border-[#00e676]"
+              >
+                <option value="room">Room leaderboard</option>
+                <option value="pack">{activeMultiplayerSession.challengeTitle} pack</option>
+              </select>
+              <span className="text-[11px] font-bold text-white/40">
+                {multiplayerLeaderboardScope === 'pack' ? 'Current room scores for this pack' : 'Current room scores'}
+              </span>
+            </div>
             <div className="mt-4 space-y-2">
               {[...activeMultiplayerSession.players]
                 .sort((left, right) => right.score - left.score || left.name.localeCompare(right.name))
@@ -2468,17 +2534,13 @@ export default function App() {
             <div className="mt-4 grid gap-2 sm:grid-cols-2">
               {activeMultiplayerSession.isHost && activeMultiplayerSession.mode === 'online' && (
                 <button
-                  type="button"
-                  onClick={() => {
-                    setInitialMultiplayerRoomCode(activeMultiplayerSession.roomCode || '');
-                    setMultiplayerInitialMode('online');
-                    setMultiplayerInitialStep('pack');
-                    setIsMultiplayerInfoOpen(false);
-                    setIsMultiplayerOpen(true);
-                  }}
+	                  type="button"
+	                  onClick={() => {
+	                    requestMultiplayerPackChange();
+	                  }}
                   className="h-11 rounded-lg bg-[#00e676] text-sm font-black text-black hover:bg-[#1fe682]"
                 >
-                  Change pack / restart
+	                  Change pack
                 </button>
               )}
               <button type="button" onClick={quitMultiplayerSession} className="h-11 rounded-lg border border-red-400/25 bg-red-400/10 text-sm font-black text-red-200 hover:bg-red-400/20">

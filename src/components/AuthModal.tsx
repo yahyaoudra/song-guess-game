@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Lock, Mail, X } from 'lucide-react';
 import { AuthSessionResponse } from '../adminTypes';
 import { loginUser, registerUser } from '../utils/authApi';
-import { setAnalyticsUser, trackEvent } from '../utils/analytics';
+import { setAnalyticsUser, trackEventOnce } from '../utils/analytics';
 
 interface AuthModalProps {
   onClose: () => void;
@@ -22,38 +22,33 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [verificationUrl, setVerificationUrl] = useState<string | null>(null);
   const [verificationNotice, setVerificationNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError(null);
-    setVerificationUrl(null);
     setVerificationNotice(null);
     setLoading(true);
 
     try {
       if (mode === 'register') {
         const result = await registerUser(email.trim(), password, name.trim());
-        trackEvent('sign_up', {
+        trackEventOnce('sign_up', email.trim().toLowerCase(), {
           method: 'email',
           email_sent: Boolean(result.emailSent)
         });
         setVerificationNotice(
           result.emailSent
             ? 'Check your email to verify your account. After verification, sign in to play with your account benefits.'
-            : 'Account created. Email sending is not configured, so use the local verification link below.'
+            : 'Account created. We could not send the verification email right now. Please try signing in later or contact support.'
         );
-        if (result.verificationUrl && result.emailSent === false) {
-          setVerificationUrl(result.verificationUrl);
-        }
         return;
       }
 
       const session = await loginUser(email.trim(), password);
       setAnalyticsUser(session.user?.id);
-      trackEvent('login', {
+      trackEventOnce('login', session.user?.id || email.trim().toLowerCase(), {
         method: 'email',
         user_id: session.user?.id
       });
@@ -152,15 +147,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           {verificationNotice && (
             <div className="rounded-lg border border-[#00e676]/30 bg-[#00e676]/10 p-3 text-xs leading-5 text-white/75">
               {verificationNotice}
-            </div>
-          )}
-
-          {verificationUrl && (
-            <div className="rounded-lg border border-[#00e676]/30 bg-[#00e676]/10 p-3 text-xs text-white/70">
-              Email sending is not configured yet. For local testing, open:
-              <a className="mt-1 block break-all font-mono text-[#00e676]" href={verificationUrl}>
-                {verificationUrl}
-              </a>
             </div>
           )}
 

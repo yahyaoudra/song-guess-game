@@ -120,6 +120,7 @@ export interface MultiplayerSession {
   hostHasUnlimited?: boolean;
   challengeTitle: string;
   challengeType: 'country' | 'artist' | 'genre' | 'collection';
+  challengeSlug?: string;
   turnsPerPlayer: number;
   countdownSeconds?: number;
   players: MultiplayerPlayer[];
