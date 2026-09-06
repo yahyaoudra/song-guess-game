@@ -5368,8 +5368,17 @@ async function startServer() {
         res.status(404).json({ error: 'User not found' });
         return;
       }
+      const optionalProfileQuery = async <T extends Record<string, unknown>>(label: string, sql: string, params: unknown[]): Promise<T[]> => {
+        try {
+          return await queryDb<T>(sql, params);
+        } catch (error) {
+          console.warn(`Admin user profile ${label} query failed:`, error);
+          return [];
+        }
+      };
       const [payments, journey, emails, queuedRequests, leaderboard] = await Promise.all([
-        queryDb(
+        optionalProfileQuery<PaymentRecord>(
+          'payments',
           `SELECT id, user_id AS "userId", email, amount_cents AS "amountCents", currency, status,
                   stripe_session_id AS "stripeSessionId", stripe_payment_intent_id AS "stripePaymentIntentId",
                   refunded_at AS "refundedAt", receipt_url AS "receiptUrl", failure_reason AS "failureReason",
@@ -5380,7 +5389,8 @@ async function startServer() {
            LIMIT 100`,
           [userId]
         ),
-        queryDb(
+        optionalProfileQuery<AdminUserJourneyEvent>(
+          'journey',
           `SELECT id, user_id AS "userId", email, event_type AS "eventType", status, detail, metadata, created_at AS "createdAt"
            FROM sg_user_journey_events
            WHERE user_id = $1 OR lower(email) = lower($2)
@@ -5388,7 +5398,8 @@ async function startServer() {
            LIMIT 200`,
           [userId, user.email]
         ),
-        queryDb(
+        optionalProfileQuery<AdminEmailEvent>(
+          'emails',
           `SELECT id, user_id AS "userId", email, name, subject, category, status,
                   provider_message_id AS "providerMessageId", error,
                   text_body AS "textBody", html_body AS "htmlBody",
@@ -5399,7 +5410,8 @@ async function startServer() {
            LIMIT 100`,
           [userId, user.email]
         ),
-        queryDb(
+        optionalProfileQuery<AdminQueuedArtistRequest>(
+          'queued artist requests',
           `SELECT id, spotify_artist_id AS "spotifyArtistId", artist_slug AS "artistSlug",
                   artist_name AS "artistName", artist_image_url AS "artistImageUrl",
                   email, name, status, created_at AS "createdAt", ready_at AS "readyAt", notified_at AS "notifiedAt"
@@ -5409,7 +5421,8 @@ async function startServer() {
            LIMIT 100`,
           [userId, user.email]
         ),
-        queryDb<{ points: number }>(
+        optionalProfileQuery<{ points: number }>(
+          'leaderboard',
           'SELECT max(points)::int AS points FROM sg_leaderboard_entries WHERE user_id = $1',
           [userId]
         )
@@ -5424,7 +5437,8 @@ async function startServer() {
         !user.emailVerified ? 'Unverified' : ''
       ].filter(Boolean);
       res.json({ user, segments, payments, journey, emails, queuedRequests });
-    } catch {
+    } catch (error) {
+      console.error('Admin user profile load error:', error);
       res.status(503).json({ error: 'Could not load user profile' });
     }
   });

@@ -1785,72 +1785,81 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
               </div>
 
               {selectedAdminUserProfile && (
-                <div className="rounded-2xl border border-[#00e676]/25 bg-[#0d1a13] p-4">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <h3 className="text-lg font-black text-white">{selectedAdminUserProfile.user.name || 'Player profile'}</h3>
-                      <p className="text-xs text-white/55">{selectedAdminUserProfile.user.email}</p>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {selectedAdminUserProfile.segments.map((segment) => (
-                          <span key={segment} className="rounded-full bg-[#00e676]/10 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-[#00e676]">{segment}</span>
-                        ))}
+                <div className="fixed inset-0 z-[260] flex items-center justify-center bg-black/85 p-3 backdrop-blur-md">
+                  <div className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-2xl border border-[#00e676]/25 bg-[#0d1a13] p-4 shadow-2xl">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <h3 className="text-lg font-black text-white">{selectedAdminUserProfile.user.name || 'Player profile'}</h3>
+                        <p className="text-xs text-white/55">{selectedAdminUserProfile.user.email}</p>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {selectedAdminUserProfile.segments.map((segment) => (
+                            <span key={segment} className="rounded-full bg-[#00e676]/10 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-[#00e676]">{segment}</span>
+                          ))}
+                          {selectedAdminUserProfile.segments.length === 0 && (
+                            <span className="rounded-full bg-white/5 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-white/40">No segment yet</span>
+                          )}
+                        </div>
                       </div>
+                      <button type="button" onClick={() => setSelectedAdminUserProfile(null)} className="rounded-lg bg-white/5 px-3 py-1.5 text-xs font-bold text-white/60 hover:text-white">
+                        Close profile
+                      </button>
                     </div>
-                    <button type="button" onClick={() => setSelectedAdminUserProfile(null)} className="rounded-lg bg-white/5 px-3 py-1.5 text-xs font-bold text-white/60 hover:text-white">
-                      Close profile
-                    </button>
-                  </div>
 
-                  <div className="mt-4 grid gap-3 xl:grid-cols-3">
-                    <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                      <h4 className="text-xs font-black uppercase tracking-wide text-white/45">Journey</h4>
-                      <div className="mt-2 max-h-72 overflow-y-auto space-y-2">
-                        {selectedAdminUserProfile.journey.map((event) => (
-                          <div key={event.id} className="rounded-lg bg-white/[0.04] p-2 text-[11px]">
-                            <p className="font-black text-white">{event.eventType} · {event.status}</p>
-                            <p className="text-white/45">{formatIsoDate(event.createdAt)}</p>
-                            {event.detail && <p className="mt-1 text-white/60">{event.detail}</p>}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                      <h4 className="text-xs font-black uppercase tracking-wide text-white/45">Queued artist requests</h4>
-                      <div className="mt-2 max-h-72 overflow-y-auto space-y-2">
-                        {selectedAdminUserProfile.queuedRequests.length === 0 ? <p className="text-xs text-white/40">No queued requests.</p> : selectedAdminUserProfile.queuedRequests.map((request) => (
-                          <div key={request.id} className="rounded-lg bg-white/[0.04] p-2 text-[11px]">
-                            <div className="flex items-center gap-2">
-                              {getSafeImageUrl(request.artistImageUrl) && <img src={getSafeImageUrl(request.artistImageUrl) || ''} alt="" className="h-8 w-8 rounded-md object-cover" referrerPolicy="no-referrer" />}
-                              <div className="min-w-0 flex-1">
-                                <p className="truncate font-black text-white">{request.artistName}</p>
-                                <p className="text-white/45">{request.status} • {formatIsoDate(request.createdAt)}</p>
-                              </div>
+                    <div className="mt-4 grid gap-3 xl:grid-cols-3">
+                      <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                        <h4 className="text-xs font-black uppercase tracking-wide text-white/45">Journey</h4>
+                        <div className="mt-2 max-h-72 overflow-y-auto space-y-2">
+                          {selectedAdminUserProfile.journey.length === 0 ? (
+                            <p className="rounded-lg bg-white/[0.04] p-3 text-xs text-white/40">No journey events recorded for this player yet.</p>
+                          ) : selectedAdminUserProfile.journey.map((event) => (
+                            <div key={event.id} className="rounded-lg bg-white/[0.04] p-2 text-[11px]">
+                              <p className="font-black text-white">{event.eventType} · {event.status}</p>
+                              <p className="text-white/45">{formatIsoDate(event.createdAt)}</p>
+                              {event.detail && <p className="mt-1 text-white/60">{event.detail}</p>}
                             </div>
-                            {request.status === 'queued' && (
-                              <button
-                                type="button"
-                                onClick={() => void handleExecuteQueuedArtist(request.artistSlug)}
-                                disabled={refreshingArtistSlug === request.artistSlug}
-                                className="mt-2 rounded-lg bg-[#00e676] px-2.5 py-1.5 text-[11px] font-black text-black disabled:cursor-wait disabled:opacity-50"
-                              >
-                                {refreshingArtistSlug === request.artistSlug ? 'Executing' : 'Execute now'}
-                              </button>
-                            )}
-                          </div>
-                        ))}
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                    <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                      <h4 className="text-xs font-black uppercase tracking-wide text-white/45">Emails</h4>
-                      <div className="mt-2 max-h-72 overflow-y-auto space-y-2">
-                        {selectedAdminUserProfile.emails.map((email) => (
-                          <div key={email.id} className="rounded-lg bg-white/[0.04] p-2 text-[11px]">
-                            <p className="font-black text-white">{email.subject}</p>
-                            <p className="text-white/45">{email.status} • {email.category} • {formatIsoDate(email.sentAt || email.createdAt)}</p>
-                            {email.error && <p className="mt-1 text-red-200">{email.error}</p>}
-                            <button type="button" onClick={() => void handleRetryEmail(email.id)} className="mt-2 rounded-md border border-[#00e676]/25 px-2 py-1 text-[10px] font-black text-[#00e676]">Retry</button>
-                          </div>
-                        ))}
+                      <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                        <h4 className="text-xs font-black uppercase tracking-wide text-white/45">Queued artist requests</h4>
+                        <div className="mt-2 max-h-72 overflow-y-auto space-y-2">
+                          {selectedAdminUserProfile.queuedRequests.length === 0 ? <p className="rounded-lg bg-white/[0.04] p-3 text-xs text-white/40">No queued requests.</p> : selectedAdminUserProfile.queuedRequests.map((request) => (
+                            <div key={request.id} className="rounded-lg bg-white/[0.04] p-2 text-[11px]">
+                              <div className="flex items-center gap-2">
+                                {getSafeImageUrl(request.artistImageUrl) && <img src={getSafeImageUrl(request.artistImageUrl) || ''} alt="" className="h-8 w-8 rounded-md object-cover" referrerPolicy="no-referrer" />}
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate font-black text-white">{request.artistName}</p>
+                                  <p className="text-white/45">{request.status} • {formatIsoDate(request.createdAt)}</p>
+                                </div>
+                              </div>
+                              {request.status === 'queued' && (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleExecuteQueuedArtist(request.artistSlug)}
+                                  disabled={refreshingArtistSlug === request.artistSlug}
+                                  className="mt-2 rounded-lg bg-[#00e676] px-2.5 py-1.5 text-[11px] font-black text-black disabled:cursor-wait disabled:opacity-50"
+                                >
+                                  {refreshingArtistSlug === request.artistSlug ? 'Executing' : 'Execute now'}
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                        <h4 className="text-xs font-black uppercase tracking-wide text-white/45">Emails</h4>
+                        <div className="mt-2 max-h-72 overflow-y-auto space-y-2">
+                          {selectedAdminUserProfile.emails.length === 0 ? (
+                            <p className="rounded-lg bg-white/[0.04] p-3 text-xs text-white/40">No email attempts recorded for this player yet.</p>
+                          ) : selectedAdminUserProfile.emails.map((email) => (
+                            <div key={email.id} className="rounded-lg bg-white/[0.04] p-2 text-[11px]">
+                              <p className="font-black text-white">{email.subject}</p>
+                              <p className="text-white/45">{email.status} • {email.category} • {formatIsoDate(email.sentAt || email.createdAt)}</p>
+                              {email.error && <p className="mt-1 text-red-200">{email.error}</p>}
+                              <button type="button" onClick={() => void handleRetryEmail(email.id)} className="mt-2 rounded-md border border-[#00e676]/25 px-2 py-1 text-[10px] font-black text-[#00e676]">Retry</button>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   </div>
