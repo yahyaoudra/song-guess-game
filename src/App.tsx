@@ -1593,6 +1593,8 @@ export default function App() {
 
   const renderMultiplayerStatusBar = () => {
     if (!activeMultiplayerSession || !currentMultiplayerPlayer) return null;
+    const secondsLeft = multiplayerSecondsLeft ?? multiplayerCountdownSeconds;
+    const countdownProgress = Math.max(0, Math.min(100, (secondsLeft / multiplayerCountdownSeconds) * 100));
     return (
       <div className="mb-3 w-full max-w-3xl rounded-lg border border-[#00e676]/25 bg-[#07120c]/90 p-2.5 shadow-[0_14px_45px_rgba(0,0,0,0.22)]">
         <div className="flex flex-wrap items-center justify-center gap-2 text-[11px] font-black">
@@ -1609,9 +1611,6 @@ export default function App() {
           >
             {activeMultiplayerSession.activity}
           </button>
-          <span className="rounded-full border border-yellow-300/25 bg-yellow-300/10 px-3 py-1 font-mono text-yellow-200">
-            {multiplayerSecondsLeft ?? multiplayerCountdownSeconds}s left
-          </span>
           <button
             type="button"
             onClick={() => setIsMultiplayerInfoOpen(true)}
@@ -1629,6 +1628,17 @@ export default function App() {
           <button type="button" onClick={quitMultiplayerSession} className="rounded-full border border-red-400/25 bg-red-400/10 px-3 py-1 text-red-200 hover:bg-red-400/20">
             Quit
           </button>
+        </div>
+        <div className="mt-2 grid grid-cols-[1fr_auto] items-center gap-3">
+          <div className="h-2 overflow-hidden rounded-full border border-yellow-300/20 bg-yellow-300/10">
+            <div
+              className="h-full rounded-full bg-yellow-300 transition-[width] duration-200 ease-linear"
+              style={{ width: `${countdownProgress}%` }}
+            />
+          </div>
+          <span className="font-mono text-[11px] font-black text-yellow-200">
+            {secondsLeft}s
+          </span>
         </div>
         {isMultiplayerGuestTurn && (
           <p className="mt-2 text-center text-[11px] font-bold text-white/45">Listen along. Only {currentMultiplayerPlayer.name} can guess this round.</p>
