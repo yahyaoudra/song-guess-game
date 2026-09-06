@@ -147,6 +147,20 @@ export async function retryAdminEmail(emailEventId: string): Promise<void> {
   });
 }
 
+export async function resendUnverifiedUserEmails(limit = 200): Promise<{ matched: number; sent: number; failed: number }> {
+  return requestJson<{ ok: true; matched: number; sent: number; failed: number }>('/api/admin/email-backfill/unverified-verification', {
+    method: 'POST',
+    body: JSON.stringify({ limit })
+  });
+}
+
+export async function resendAbandonedCheckoutEmails(limit = 200): Promise<{ matched: number; sent: number; failed: number }> {
+  return requestJson<{ ok: true; matched: number; sent: number; failed: number }>('/api/admin/email-backfill/abandoned-checkouts', {
+    method: 'POST',
+    body: JSON.stringify({ limit })
+  });
+}
+
 export async function executeQueuedArtistRequest(slug: string): Promise<{ artist: RequestedArtist; artists: RequestedArtist[] }> {
   return requestJson<{ artist: RequestedArtist; artists: RequestedArtist[] }>(`/api/admin/artist-requests/${encodeURIComponent(slug)}/execute`, {
     method: 'POST'

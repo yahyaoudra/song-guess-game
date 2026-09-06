@@ -699,6 +699,36 @@ async function sendVerificationEmail(email: string, name: string, verificationUr
   return true;
 }
 
+async function sendVerificationReminderEmail(email: string, name: string, verificationUrl: string): Promise<boolean> {
+  if (!isEmailProviderConfigured()) return false;
+  const safeName = name || email.split('@')[0] || 'Player';
+  const appUrl = `${getProductionAppUrl()}/play`;
+  const text = [
+    `Hi ${safeName},`,
+    '',
+    'You can still verify your Song Guess Game account.',
+    '',
+    'Verify your email to keep your player identity, account benefits, and game history connected.',
+    '',
+    `Verify email: ${verificationUrl}`,
+    `Play Song Guess Game: ${appUrl}`,
+    '',
+    'This verification link expires in 48 hours.'
+  ].join('\n');
+  const html = createEmailShell(
+    'You can still verify your account',
+    'Verify your email to keep your Song Guess Game account benefits connected.',
+    [
+      `<p style="margin:0 0 14px;color:#f5fff8;font-size:16px;line-height:24px;">Hi ${escapeHtml(safeName)},</p>`,
+      '<p style="margin:0 0 18px;color:#a7b4ad;font-size:15px;line-height:24px;">You can still verify your Song Guess Game account. This keeps your player identity, account benefits, and game history connected.</p>',
+      createPrimaryEmailButton(verificationUrl, 'Verify email'),
+      `<p style="margin:16px 0 0;color:#819087;font-size:12px;line-height:19px;">This verification link expires in 48 hours. You can also return to <a href="${escapeHtml(appUrl)}" style="color:#00e676;text-decoration:underline;">Song Guess Game</a>.</p>`
+    ].join('')
+  );
+  await sendTransactionalEmail(email, safeName, 'Verify your Song Guess Game account', text, html, 'email_verification_reminder');
+  return true;
+}
+
 async function sendContactEmail(name: string, email: string, message: string): Promise<boolean> {
   if (!isEmailProviderConfigured()) return false;
   await sendTransactionalEmail(
@@ -1066,7 +1096,7 @@ async function processAbandonedCheckoutReminders(): Promise<void> {
       const nextReminder = ABANDONED_CHECKOUT_REMINDERS[row.reminderStep + 1];
       const startedAt = Date.parse(row.startedAt);
       const nextReminderAt = nextReminder
-        ? new Date((Number.isFinite(startedAt) ? startedAt : Date.now()) + nextReminder.delayMs)
+        ? new Date(Math.max((Number.isFinite(startedAt) ? startedAt : Date.now()) + nextReminder.delayMs, Date.now() + nextReminder.delayMs))
         : null;
       await queryDb(
         `UPDATE sg_abandoned_checkouts
@@ -5382,6 +5412,142 @@ async function startServer() {
       res.json({ ok: true });
     } catch (error) {
       res.status(500).json({ error: error instanceof Error ? error.message : 'Email retry failed' });
+    }
+  });
+
+  app.post('/api/admin/email-backfill/unverified-verification', requireAdmin, requireAdminCsrf, async (req, res) => {
+    if (!isDatabaseConfigured()) {
+      res.status(503).json({ error: 'Postgres DATABASE_URL is required for verification resends' });
+      return;
+    }
+    if (!isEmailProviderConfigured()) {
+      res.status(503).json({ error: 'Email provider is not configured. Set RESEND_API_KEY and RESEND_FROM_EMAIL.' });
+      return;
+    }
+
+    const limit = Math.max(1, Math.min(500, Number(req.body?.limit || 200) || 200));
+    try {
+      const users = await queryDb<{ id: string; email: string; name: string }>(
+        `SELECT u.id, u.email, u.name
+         FROM sg_users u
+         WHERE u.email_verified = false
+           AND NOT EXISTS (
+             SELECT 1
+             FROM sg_email_events e
+             WHERE e.user_id = u.id
+               AND e.category = 'email_verification_reminder'
+               AND e.status = 'sent'
+               AND e.created_at > now() - interval '12 hours'
+           )
+         ORDER BY u.created_at ASC
+         LIMIT $1`,
+        [limit]
+      );
+
+      let sent = 0;
+      let failed = 0;
+      for (const user of users) {
+        const rawVerifyToken = randomBytes(32).toString('base64url');
+        await queryDb(
+          `UPDATE sg_users
+           SET email_verification_token_hash = $2,
+               email_verification_expires_at = now() + interval '48 hours',
+               updated_at = now()
+           WHERE id = $1 AND email_verified = false`,
+          [user.id, hashToken(rawVerifyToken)]
+        );
+        const verificationUrl = `${getProductionAppUrl()}/api/auth/verify?token=${encodeURIComponent(rawVerifyToken)}`;
+        try {
+          await sendVerificationReminderEmail(user.email, user.name, verificationUrl);
+          sent += 1;
+        } catch (error) {
+          failed += 1;
+          console.warn('Verification reminder resend failed:', error instanceof Error ? error.message : error);
+        }
+      }
+
+      res.json({ ok: true, matched: users.length, sent, failed });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Verification resend failed' });
+    }
+  });
+
+  app.post('/api/admin/email-backfill/abandoned-checkouts', requireAdmin, requireAdminCsrf, async (req, res) => {
+    if (!isDatabaseConfigured()) {
+      res.status(503).json({ error: 'Postgres DATABASE_URL is required for abandoned checkout resends' });
+      return;
+    }
+    if (!isEmailProviderConfigured()) {
+      res.status(503).json({ error: 'Email provider is not configured. Set RESEND_API_KEY and RESEND_FROM_EMAIL.' });
+      return;
+    }
+
+    const limit = Math.max(1, Math.min(500, Number(req.body?.limit || 200) || 200));
+    try {
+      const rows = await queryDb<AbandonedCheckoutRow>(
+        `SELECT a.stripe_session_id AS "stripeSessionId",
+                a.user_id AS "userId",
+                a.email,
+                a.name,
+                a.checkout_url AS "checkoutUrl",
+                a.reminder_step AS "reminderStep",
+                a.started_at AS "startedAt"
+         FROM sg_abandoned_checkouts a
+         LEFT JOIN sg_entitlements e ON e.user_id = a.user_id AND e.access_until > now()
+         WHERE a.status = 'pending'
+           AND a.started_at <= now() - interval '30 minutes'
+           AND e.user_id IS NULL
+           AND NOT EXISTS (
+             SELECT 1
+             FROM sg_email_events ev
+             WHERE lower(ev.email) = lower(a.email)
+               AND ev.category LIKE 'abandoned_checkout_%'
+               AND ev.status = 'sent'
+               AND ev.created_at >= a.started_at
+           )
+         ORDER BY a.started_at ASC
+         LIMIT $1`,
+        [limit]
+      );
+
+      let sent = 0;
+      let failed = 0;
+      for (const row of rows) {
+        const reminderIndex = Math.max(0, Math.min(row.reminderStep || 0, ABANDONED_CHECKOUT_REMINDERS.length - 1));
+        const reminder = ABANDONED_CHECKOUT_REMINDERS[reminderIndex];
+        const startedAt = Date.parse(row.startedAt);
+        const isExpiredCheckoutLink = Number.isFinite(startedAt) && Date.now() - startedAt > 20 * 60 * 60 * 1000;
+        const safeRow = {
+          ...row,
+          checkoutUrl: isExpiredCheckoutLink ? `${getProductionAppUrl()}/play?unlock=1` : row.checkoutUrl
+        };
+        try {
+          const email = createAbandonedCheckoutEmail(safeRow, reminder.key);
+          await sendTransactionalEmail(row.email, row.name || row.email, email.subject, email.text, email.html, `abandoned_checkout_${reminder.key}`);
+          const nextReminder = ABANDONED_CHECKOUT_REMINDERS[reminderIndex + 1];
+          const nextReminderAt = nextReminder
+            ? new Date(Math.max((Number.isFinite(startedAt) ? startedAt : Date.now()) + nextReminder.delayMs, Date.now() + nextReminder.delayMs))
+            : null;
+          await queryDb(
+            `UPDATE sg_abandoned_checkouts
+             SET reminder_step = GREATEST(reminder_step, $2),
+                 last_reminder_sent_at = now(),
+                 next_reminder_at = $3,
+                 status = CASE WHEN $3::timestamptz IS NULL THEN 'finished' ELSE status END,
+                 updated_at = now()
+             WHERE stripe_session_id = $1 AND status = 'pending'`,
+            [row.stripeSessionId, reminderIndex + 1, nextReminderAt]
+          );
+          sent += 1;
+        } catch (error) {
+          failed += 1;
+          console.warn('Abandoned checkout resend failed:', error instanceof Error ? error.message : error);
+        }
+      }
+
+      res.json({ ok: true, matched: rows.length, sent, failed });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Abandoned checkout resend failed' });
     }
   });
 

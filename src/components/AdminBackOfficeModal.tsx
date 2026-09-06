@@ -36,6 +36,8 @@ import {
   loginAdmin,
   logoutAdmin,
   refundAdminPayment,
+  resendAbandonedCheckoutEmails,
+  resendUnverifiedUserEmails,
   refreshAdminArtistPack,
   retryAdminEmail,
   saveAdminConfig,
@@ -140,6 +142,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
   const [selectedAdminUserProfile, setSelectedAdminUserProfile] = useState<AdminUserProfile | null>(null);
   const [loadingUserProfileId, setLoadingUserProfileId] = useState('');
   const [retryingEmailId, setRetryingEmailId] = useState('');
+  const [emailBackfillAction, setEmailBackfillAction] = useState<'verification' | 'abandoned' | ''>('');
   const [requestedArtists, setRequestedArtists] = useState<RequestedArtist[]>([]);
   const [paymentMeta, setPaymentMeta] = useState({ databaseConfigured: false, stripeConfigured: false });
   const [selectedCountryCode, setSelectedCountryCode] = useState('GLOBAL');
@@ -500,6 +503,22 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
       setAuthError(error instanceof Error ? error.message : 'Email retry failed');
     } finally {
       setRetryingEmailId('');
+    }
+  };
+
+  const handleEmailBackfill = async (action: 'verification' | 'abandoned') => {
+    setEmailBackfillAction(action);
+    setAuthError(null);
+    try {
+      const result = action === 'verification'
+        ? await resendUnverifiedUserEmails()
+        : await resendAbandonedCheckoutEmails();
+      setAdminEmailEvents(await fetchAdminEmailEvents());
+      showToast(`${result.sent} emails sent, ${result.failed} failed, ${result.matched} matched`);
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Email resend failed');
+    } finally {
+      setEmailBackfillAction('');
     }
   };
 
@@ -1754,8 +1773,33 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-4">
-                <h3 className="text-sm font-black text-white mb-1">Email delivery log</h3>
-                <p className="mb-3 text-[11px] text-white/45">Latest transactional emails with delivery attempts, failures, previews, and retry actions.</p>
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <h3 className="text-sm font-black text-white mb-1">Email delivery log</h3>
+                    <p className="text-[11px] text-white/45">Latest transactional emails with delivery attempts, failures, previews, and retry actions.</p>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => void handleEmailBackfill('verification')}
+                      disabled={Boolean(emailBackfillAction)}
+                      className="h-9 rounded-lg border border-[#00e676]/25 bg-[#00e676]/10 px-3 text-[11px] font-black text-[#00e676] hover:bg-[#00e676]/20 disabled:cursor-wait disabled:opacity-50"
+                    >
+                      {emailBackfillAction === 'verification' ? 'Sending...' : 'Resend verification'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleEmailBackfill('abandoned')}
+                      disabled={Boolean(emailBackfillAction)}
+                      className="h-9 rounded-lg border border-yellow-300/25 bg-yellow-300/10 px-3 text-[11px] font-black text-yellow-100 hover:bg-yellow-300/20 disabled:cursor-wait disabled:opacity-50"
+                    >
+                      {emailBackfillAction === 'abandoned' ? 'Sending...' : 'Resume checkout emails'}
+                    </button>
+                  </div>
+                </div>
+                <p className="mb-3 mt-2 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-[11px] leading-5 text-white/45">
+                  Recovery actions are rate-safe: verification sends one fresh link per unverified account, and abandoned checkout recovery sends only one reminder per old checkout that has no successful abandoned-checkout email.
+                </p>
                 {adminEmailEvents.length === 0 ? (
                   <p className="rounded-xl bg-white/5 p-4 text-xs text-white/45">No email attempts have been logged yet.</p>
                 ) : (
