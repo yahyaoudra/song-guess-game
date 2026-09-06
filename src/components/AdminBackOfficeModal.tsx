@@ -49,6 +49,9 @@ import { getSafeImageUrl } from '../utils/safeUrl';
 
 type AdminTab = 'overview' | 'seo' | 'ads' | 'integrations' | 'packs' | 'monetization' | 'activity' | 'robots' | 'security';
 type SeoTargetType = 'home' | 'country' | 'genre' | 'artist';
+type ArtistPackSort = 'name-asc' | 'name-desc' | 'songs-desc' | 'songs-asc' | 'updated-desc' | 'updated-asc';
+type ArtistPackStatusFilter = 'all' | 'ready' | 'queued' | 'pending' | 'needs-update';
+type ArtistPackSourceFilter = 'all' | 'spotify' | 'catalog';
 
 interface AdminBackOfficeModalProps {
   onClose: () => void;
@@ -147,6 +150,11 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
   const [selectedGenreSlug, setSelectedGenreSlug] = useState('k-pop');
   const [selectedArtistSlug, setSelectedArtistSlug] = useState('');
   const [artistPackSearch, setArtistPackSearch] = useState('');
+  const [artistPackSort, setArtistPackSort] = useState<ArtistPackSort>('updated-desc');
+  const [artistPackStatusFilter, setArtistPackStatusFilter] = useState<ArtistPackStatusFilter>('all');
+  const [artistPackSourceFilter, setArtistPackSourceFilter] = useState<ArtistPackSourceFilter>('all');
+  const [artistPackPage, setArtistPackPage] = useState(1);
+  const [artistPackPageSize, setArtistPackPageSize] = useState(24);
   const [refreshingArtistSlug, setRefreshingArtistSlug] = useState('');
 
   const genreChallenges = useMemo(() => getGenreChallenges(), []);
@@ -198,19 +206,70 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
   }, [requestedArtists]);
   const artistPackRows = useMemo(() => {
     const query = artistPackSearch.trim().toLowerCase();
-    return artistChoices
-      .map((artist) => {
-        const requested = requestedArtistByBaseSlug.get(artist.slug) || requestedArtistByBaseSlug.get(baseArtistSlug(artist.slug));
-        return {
-          ...artist,
-          requested,
-          songsCount: requested?.songsCount || artist.songsCount || 0,
-          coverImage: requested?.coverImage || artist.coverImage
-        };
+    const requestedRows = requestedArtists.map((artist) => ({
+      slug: artist.slug,
+      name: artist.name,
+      songsCount: artist.songsCount || artist.songs?.length || 0,
+      coverImage: artist.coverImage || artist.songs?.[0]?.artworkUrl || '',
+      requested: artist,
+      source: 'spotify' as const,
+      status: artist.status || 'pending',
+      updatedAt: artist.updatedAt || artist.createdAt || '',
+      nextRefreshAt: artist.nextRefreshAt || '',
+      sampleText: artist.songs?.slice(0, 4).map((song) => song.title).join(' • ') || ''
+    }));
+    const requestedBaseSlugs = new Set(requestedRows.map((artist) => baseArtistSlug(artist.slug)));
+    const catalogRows = artistChallenges
+      .filter((artist) => !requestedBaseSlugs.has(baseArtistSlug(artist.slug)))
+      .map((artist) => ({
+        slug: artist.slug,
+        name: artist.name,
+        songsCount: artist.songsCount || artist.songIds.length || 0,
+        coverImage: artist.coverImage,
+        requested: undefined as RequestedArtist | undefined,
+        source: 'catalog' as const,
+        status: 'catalog',
+        updatedAt: '',
+        nextRefreshAt: '',
+        sampleText: ''
+      }));
+    return [...requestedRows, ...catalogRows]
+      .filter((artist) => {
+        const sourceMatches = artistPackSourceFilter === 'all'
+          || (artistPackSourceFilter === 'spotify' && artist.source === 'spotify')
+          || (artistPackSourceFilter === 'catalog' && artist.source === 'catalog');
+        const statusMatches = artistPackStatusFilter === 'all'
+          || (artistPackStatusFilter === 'needs-update' ? artist.songsCount < 10 : artist.status === artistPackStatusFilter);
+        const queryMatches = !query
+          || artist.name.toLowerCase().includes(query)
+          || artist.slug.toLowerCase().includes(query)
+          || artist.sampleText.toLowerCase().includes(query)
+          || artist.requested?.spotifyArtistId?.toLowerCase().includes(query);
+        return sourceMatches && statusMatches && queryMatches;
       })
-      .filter((artist) => !query || artist.name.toLowerCase().includes(query))
-      .slice(0, 80);
-  }, [artistChoices, artistPackSearch, requestedArtistByBaseSlug]);
+      .sort((left, right) => {
+        if (artistPackSort === 'name-asc') return left.name.localeCompare(right.name);
+        if (artistPackSort === 'name-desc') return right.name.localeCompare(left.name);
+        if (artistPackSort === 'songs-desc') return right.songsCount - left.songsCount || left.name.localeCompare(right.name);
+        if (artistPackSort === 'songs-asc') return left.songsCount - right.songsCount || left.name.localeCompare(right.name);
+        const leftTime = left.updatedAt ? new Date(left.updatedAt).getTime() : 0;
+        const rightTime = right.updatedAt ? new Date(right.updatedAt).getTime() : 0;
+        return artistPackSort === 'updated-asc'
+          ? leftTime - rightTime || left.name.localeCompare(right.name)
+          : rightTime - leftTime || left.name.localeCompare(right.name);
+      });
+  }, [artistChallenges, artistPackSearch, artistPackSort, artistPackSourceFilter, artistPackStatusFilter, requestedArtists]);
+
+  const artistPackTotalPages = Math.max(1, Math.ceil(artistPackRows.length / artistPackPageSize));
+  const safeArtistPackPage = Math.min(artistPackPage, artistPackTotalPages);
+  const paginatedArtistPackRows = useMemo(() => {
+    const start = (safeArtistPackPage - 1) * artistPackPageSize;
+    return artistPackRows.slice(start, start + artistPackPageSize);
+  }, [artistPackPageSize, artistPackRows, safeArtistPackPage]);
+
+  useEffect(() => {
+    setArtistPackPage(1);
+  }, [artistPackSearch, artistPackSort, artistPackSourceFilter, artistPackStatusFilter, artistPackPageSize]);
 
   useEffect(() => {
     if (!selectedArtistSlug && artistChoices[0]) {
@@ -1259,23 +1318,82 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                     </p>
                   </div>
                   <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-white/55">
-                    {requestedArtists.filter((artist) => artist.status === 'ready').length} Spotify-built packs
+                    {artistPackRows.length} shown • {requestedArtists.length + artistChallenges.length} total sources
                   </div>
                 </div>
               </div>
 
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/35" />
-                <input
-                  value={artistPackSearch}
-                  onChange={(event) => setArtistPackSearch(event.target.value)}
-                  placeholder="Search artist packs..."
-                  className="h-11 w-full rounded-xl border border-white/10 bg-[#0b100d] pl-10 pr-3 text-sm text-white outline-none focus:border-[#00e676]"
-                />
+              <div className="grid gap-2 lg:grid-cols-[minmax(240px,1fr)_160px_150px_180px_110px]">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/35" />
+                  <input
+                    value={artistPackSearch}
+                    onChange={(event) => setArtistPackSearch(event.target.value)}
+                    placeholder="Search name, song, slug, Spotify ID..."
+                    className="h-11 w-full rounded-xl border border-white/10 bg-[#0b100d] pl-10 pr-3 text-sm text-white outline-none focus:border-[#00e676]"
+                  />
+                </div>
+                <select
+                  value={artistPackStatusFilter}
+                  onChange={(event) => setArtistPackStatusFilter(event.target.value as ArtistPackStatusFilter)}
+                  className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-xs font-bold text-white outline-none focus:border-[#00e676]"
+                >
+                  <option value="all">All statuses</option>
+                  <option value="ready">Ready</option>
+                  <option value="queued">Queued</option>
+                  <option value="pending">Pending</option>
+                  <option value="needs-update">Needs update</option>
+                </select>
+                <select
+                  value={artistPackSourceFilter}
+                  onChange={(event) => setArtistPackSourceFilter(event.target.value as ArtistPackSourceFilter)}
+                  className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-xs font-bold text-white outline-none focus:border-[#00e676]"
+                >
+                  <option value="all">All sources</option>
+                  <option value="spotify">Spotify built</option>
+                  <option value="catalog">Catalog only</option>
+                </select>
+                <select
+                  value={artistPackSort}
+                  onChange={(event) => setArtistPackSort(event.target.value as ArtistPackSort)}
+                  className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-xs font-bold text-white outline-none focus:border-[#00e676]"
+                >
+                  <option value="updated-desc">Newest update</option>
+                  <option value="updated-asc">Oldest update</option>
+                  <option value="songs-desc">Most songs</option>
+                  <option value="songs-asc">Fewest songs</option>
+                  <option value="name-asc">Name A-Z</option>
+                  <option value="name-desc">Name Z-A</option>
+                </select>
+                <select
+                  value={artistPackPageSize}
+                  onChange={(event) => setArtistPackPageSize(Number(event.target.value) || 24)}
+                  className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-xs font-bold text-white outline-none focus:border-[#00e676]"
+                >
+                  <option value={12}>12/page</option>
+                  <option value={24}>24/page</option>
+                  <option value={48}>48/page</option>
+                  <option value={96}>96/page</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+                {[
+                  ['All', requestedArtists.length + artistChallenges.length],
+                  ['Spotify built', requestedArtists.filter((artist) => artist.status === 'ready').length],
+                  ['Queued', requestedArtists.filter((artist) => artist.status === 'queued').length],
+                  ['Pending', requestedArtists.filter((artist) => artist.status === 'pending').length],
+                  ['Needs update', artistPackRows.filter((artist) => artist.songsCount < 10).length]
+                ].map(([label, value]) => (
+                  <div key={String(label)} className="rounded-xl border border-white/10 bg-[#0b100d] p-3">
+                    <p className="text-[10px] font-black uppercase tracking-wide text-white/35">{label}</p>
+                    <p className="mt-1 font-mono text-lg font-black text-[#00e676]">{value}</p>
+                  </div>
+                ))}
               </div>
 
               <div className="grid gap-3 xl:grid-cols-2">
-                {artistPackRows.map((artist) => {
+                {paginatedArtistPackRows.map((artist) => {
                   const isRefreshing = refreshingArtistSlug === artist.slug;
                   const sourceLabel = artist.requested
                     ? artist.requested.lastRefreshType === 'manual'
@@ -1296,10 +1414,19 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                         <div className="min-w-0">
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
-                              <h4 className="truncate text-sm font-black text-white">{artist.name}</h4>
-                              <p className="mt-1 text-xs text-white/45">
-                                {artist.songsCount} songs • {sourceLabel} update
-                              </p>
+                              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                <h4 className="truncate text-sm font-black text-white">{artist.name}</h4>
+                                <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-black uppercase text-white/45">
+                                  {artist.status}
+                                </span>
+                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-black uppercase ${
+                                  artist.source === 'spotify' ? 'bg-[#00e676]/10 text-[#00e676]' : 'bg-white/5 text-white/45'
+                                }`}>
+                                  {artist.source === 'spotify' ? 'Spotify' : 'Catalog'}
+                                </span>
+                              </div>
+                              <p className="mt-1 text-xs text-white/45">{artist.songsCount} songs • {sourceLabel} update</p>
+                              <p className="mt-1 truncate font-mono text-[10px] text-white/30">{artist.slug}</p>
                             </div>
                             <button
                               onClick={() => void handleManualArtistPackRefresh(artist)}
@@ -1320,9 +1447,18 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                               <strong className="font-bold text-white/75">{formatIsoDate(artist.requested?.nextRefreshAt)}</strong>
                             </div>
                           </div>
-                          {artist.requested?.songs && artist.requested.songs.length > 0 && (
+                          {artist.requested?.albumPacks && artist.requested.albumPacks.length > 0 && (
+                            <div className="mt-2 flex gap-1">
+                              {artist.requested.albumPacks.slice(0, 5).map((pack) => (
+                                <span key={pack.id} title={`${pack.title} • ${pack.songsCount} songs`} className="h-7 w-7 overflow-hidden rounded-md bg-black/30">
+                                  {getSafeImageUrl(pack.coverImage) && <img src={getSafeImageUrl(pack.coverImage) || ''} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {artist.sampleText && (
                             <p className="mt-2 truncate text-[11px] text-white/40">
-                              {artist.requested.songs.slice(0, 4).map((song) => song.title).join(' • ')}
+                              {artist.sampleText}
                             </p>
                           )}
                         </div>
@@ -1335,6 +1471,35 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
               {artistPackRows.length === 0 && (
                 <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-8 text-center text-xs text-white/45">
                   No artist packs match that search.
+                </div>
+              )}
+
+              {artistPackRows.length > 0 && (
+                <div className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-[#0b100d] p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs font-semibold text-white/45">
+                    Showing {(safeArtistPackPage - 1) * artistPackPageSize + 1}-{Math.min(safeArtistPackPage * artistPackPageSize, artistPackRows.length)} of {artistPackRows.length}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setArtistPackPage((page) => Math.max(1, page - 1))}
+                      disabled={safeArtistPackPage <= 1}
+                      className="h-9 rounded-lg border border-white/10 px-3 text-xs font-black text-white/60 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-35"
+                    >
+                      Previous
+                    </button>
+                    <span className="rounded-lg bg-white/5 px-3 py-2 font-mono text-xs text-white/70">
+                      Page {safeArtistPackPage} / {artistPackTotalPages}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setArtistPackPage((page) => Math.min(artistPackTotalPages, page + 1))}
+                      disabled={safeArtistPackPage >= artistPackTotalPages}
+                      className="h-9 rounded-lg bg-[#00e676] px-3 text-xs font-black text-black hover:bg-[#1fe682] disabled:cursor-not-allowed disabled:opacity-35"
+                    >
+                      Next
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
