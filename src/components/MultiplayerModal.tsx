@@ -1,17 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Crown, Gamepad2, Globe2, Loader2, Lock, Mail, Mic2, Play, Plus, Share2, Tags, Users, Wifi, X } from 'lucide-react';
-import { AuthSessionResponse } from '../adminTypes';
+import { Check, Crown, Gamepad2, Globe2, Loader2, Lock, Mail, Mic2, Play, Plus, Search, Share2, Tags, Users, Wifi, X } from 'lucide-react';
+import { AuthSessionResponse, RequestedArtist } from '../adminTypes';
 import { COUNTRIES } from '../data/countries';
 import { ALL_SONGS, getSongsForCountry } from '../data/moroccanSongs';
 import { QUIZ_COLLECTIONS } from '../data/quizCollections';
 import { MultiplayerPlayer, MultiplayerRound, MultiplayerSession, QuizCollection, Song } from '../types';
 import {
+  baseArtistSlug,
   getArtistChallenges,
   getGenreChallenges,
   getSongsByArtistSlug,
   getSongsByGenreSlug,
   orderArtistsByFeaturedPriority
 } from '../utils/challengeCatalog';
+import { recordFeatureEvent } from '../utils/adminApi';
 
 interface MultiplayerModalProps {
   onClose: () => void;
@@ -25,6 +27,7 @@ interface MultiplayerModalProps {
   initialStep?: SetupStep;
   activeCollection?: QuizCollection | null;
   existingSession?: MultiplayerSession | null;
+  requestedArtists?: RequestedArtist[];
 }
 
 type MultiplayerMode = 'party' | 'online';
@@ -38,6 +41,11 @@ interface ChallengeOption {
   subtitle: string;
   image?: string;
   songIds?: string[];
+  songs?: Song[];
+  songsCount: number;
+  albumCount?: number;
+  albumImages?: string[];
+  description?: string;
 }
 
 interface OnlineRoom {
@@ -96,7 +104,8 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
   initialMode = 'party',
   initialStep,
   activeCollection = null,
-  existingSession = null
+  existingSession = null,
+  requestedArtists = []
 }) => {
   const existingOnlineRoom = existingSession?.mode === 'online' && existingSession.roomCode
     ? {
@@ -145,47 +154,137 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
   const [isRoomInfoOpen, setIsRoomInfoOpen] = useState(false);
   const [packError, setPackError] = useState('');
+  const [packSearchQuery, setPackSearchQuery] = useState('');
   const socketRef = useRef<WebSocket | null>(existingSession?.socket || null);
   const handoffSocketRef = useRef(false);
   const ownsSocketRef = useRef(!existingSession?.socket);
 
+  const getAlbumImages = (songs: Song[], fallback?: string): string[] => {
+    const images = songs.map((song) => song.artworkUrl).filter(Boolean);
+    if (fallback) images.unshift(fallback);
+    return Array.from(new Set(images)).slice(0, 4);
+  };
+
+  const getAlbumCount = (songs: Song[]): number => (
+    new Set(songs.map((song) => song.album).filter(Boolean)).size
+  );
+
   const challengeOptions = useMemo<ChallengeOption[]>(() => {
     if (challengeType === 'country') {
-      const collectionOptions = QUIZ_COLLECTIONS.map((collection) => ({
-        type: 'collection' as const,
-        slug: collection.id,
-        title: collection.title,
-        subtitle: `${collection.songIds.length || collection.songsCount || 0} songs`,
-        image: collection.coverImage,
-        songIds: collection.songIds
-      }));
-      const countryOptions = COUNTRIES.map((country) => ({
-        type: 'country' as const,
-        slug: country.code,
-        title: country.name,
-        subtitle: `${getSongsForCountry(country.code).length} songs`
-      }));
-      return [...collectionOptions, ...countryOptions];
+      const countryOptions = COUNTRIES.map((country) => {
+        const songs = getSongsForCountry(country.code);
+        return {
+          type: 'country' as const,
+          slug: country.code,
+          title: country.name,
+          subtitle: `${songs.length} songs`,
+          image: getAlbumImages(songs)[0],
+          songs,
+          songsCount: songs.length,
+          albumCount: getAlbumCount(songs),
+          albumImages: getAlbumImages(songs),
+          description: `${country.flag} ${country.name} archive pack`
+        };
+      });
+      if (activeCollection && activeCollection.id === challengeSlug) {
+        const songs = activeCollection.songs?.length
+          ? activeCollection.songs
+          : ALL_SONGS.filter((song) => activeCollection.songIds.includes(song.id));
+        return [{
+          type: 'collection' as const,
+          slug: activeCollection.id,
+          title: activeCollection.title,
+          subtitle: `${songs.length || activeCollection.songsCount || activeCollection.songIds.length} songs`,
+          image: activeCollection.coverImage || songs[0]?.artworkUrl,
+          songIds: activeCollection.songIds,
+          songs,
+          songsCount: songs.length || activeCollection.songsCount || activeCollection.songIds.length,
+          albumCount: getAlbumCount(songs),
+          albumImages: getAlbumImages(songs, activeCollection.coverImage),
+          description: activeCollection.description
+        }, ...countryOptions];
+      }
+      return countryOptions;
     }
     if (challengeType === 'artist') {
-      return orderArtistsByFeaturedPriority(getArtistChallenges()).map((artist) => ({
-        type: 'artist',
-        slug: artist.slug,
-        title: artist.name,
-        subtitle: `${artist.songsCount} songs`,
-        image: artist.coverImage,
-        songIds: artist.songIds
-      }));
+      const requestedBaseSlugs = new Set(
+        requestedArtists
+          .filter((artist) => artist.status === 'ready' && artist.songsCount > 0)
+          .map((artist) => baseArtistSlug(artist.slug))
+      );
+      const requestedOptions = requestedArtists
+        .filter((artist) => artist.status === 'ready' && artist.songsCount > 0)
+        .map((artist) => {
+          const songs = artist.songs || ALL_SONGS.filter((song) => artist.songIds.includes(song.id));
+          const albumCount = artist.albumPacks?.filter((pack) => pack.type !== 'singles').length || getAlbumCount(songs);
+          return {
+            type: 'artist' as const,
+            slug: artist.slug,
+            title: artist.name,
+            subtitle: `${albumCount} albums • ${artist.songsCount} songs`,
+            image: artist.coverImage || songs[0]?.artworkUrl,
+            songIds: artist.songIds,
+            songs,
+            songsCount: artist.songsCount,
+            albumCount,
+            albumImages: artist.albumPacks?.map((pack) => pack.coverImage || '').filter(Boolean).slice(0, 4) || getAlbumImages(songs, artist.coverImage),
+            description: 'Spotify artist discography'
+          };
+        });
+      const staticOptions = orderArtistsByFeaturedPriority(getArtistChallenges())
+        .filter((artist) => !requestedBaseSlugs.has(baseArtistSlug(artist.slug)))
+        .map((artist) => {
+          const songs = getSongsByArtistSlug(artist.slug);
+          const albumCount = getAlbumCount(songs);
+          return {
+            type: 'artist' as const,
+            slug: artist.slug,
+            title: artist.name,
+            subtitle: `${albumCount || 1} albums • ${songs.length || artist.songsCount} songs`,
+            image: artist.coverImage || songs[0]?.artworkUrl,
+            songIds: artist.songIds,
+            songs,
+            songsCount: songs.length || artist.songsCount,
+            albumCount,
+            albumImages: getAlbumImages(songs, artist.coverImage),
+            description: 'Artist archive pack'
+          };
+        });
+      return [...requestedOptions, ...staticOptions];
     }
-    return getGenreChallenges().map((genre) => ({
-      type: 'genre',
-      slug: genre.slug,
-      title: genre.name,
-      subtitle: genre.description,
-      image: genre.coverImage,
-      songIds: genre.songIds
-    }));
-  }, [activeCollection, challengeSlug, challengeType]);
+    return getGenreChallenges().map((genre) => {
+      const songs = getSongsByGenreSlug(genre.slug);
+      return {
+        type: 'genre' as const,
+        slug: genre.slug,
+        title: genre.name,
+        subtitle: `${songs.length || genre.songsCount} songs`,
+        image: genre.coverImage || songs[0]?.artworkUrl,
+        songIds: genre.songIds,
+        songs,
+        songsCount: songs.length || genre.songsCount,
+        albumCount: getAlbumCount(songs),
+        albumImages: getAlbumImages(songs, genre.coverImage),
+        description: genre.description
+      };
+    });
+  }, [activeCollection, challengeSlug, challengeType, requestedArtists]);
+
+  const filteredChallengeOptions = useMemo(() => {
+    const query = packSearchQuery.trim().toLowerCase();
+    if (!query) return challengeOptions;
+    return challengeOptions.filter((option) => (
+      option.title.toLowerCase().includes(query) ||
+      option.subtitle.toLowerCase().includes(query) ||
+      option.description?.toLowerCase().includes(query) ||
+      option.songs?.some((song) =>
+        song.title.toLowerCase().includes(query) ||
+        song.artist.toLowerCase().includes(query) ||
+        song.album.toLowerCase().includes(query) ||
+        song.genre.toLowerCase().includes(query)
+      )
+    ));
+  }, [challengeOptions, packSearchQuery]);
 
   const selectedChallenge = useMemo(
     () => challengeOptions.find((item) => item.slug === challengeSlug) || null,
@@ -233,6 +332,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
   const getSongPool = (): Song[] => {
     if (!selectedChallenge) return ALL_SONGS;
     if (selectedChallenge.type === 'country') return getSongsForCountry(selectedChallenge.slug);
+    if (selectedChallenge.songs?.length) return selectedChallenge.songs;
     if (selectedChallenge.type === 'collection') {
       const collection = QUIZ_COLLECTIONS.find((item) => item.id === selectedChallenge.slug) || activeCollection;
       const byIds = ALL_SONGS.filter((song) => collection?.songIds.includes(song.id));
@@ -388,6 +488,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
       email: authSession.user?.email || '',
       settings: buildRoomSettings()
     });
+    void recordFeatureEvent('online_room_create_clicked', 'Clicked create online room', buildRoomSettings());
   };
 
   const joinOnlineRoom = () => {
@@ -407,6 +508,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
       name: authSession.user?.name || 'Player',
       email: authSession.user?.email || ''
     });
+    void recordFeatureEvent('online_room_join_clicked', `Clicked join room ${code}`, { roomCode: code });
   };
 
   const enterStartedOnlineGame = () => {
@@ -443,6 +545,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
       roomCode: room.code,
       payload: { type: 'start-game', rounds, settings, players: sessionPlayers }
     });
+    void recordFeatureEvent('online_room_start_clicked', `Started room ${room.code}`, { roomCode: room.code, settings, playerCount: sessionPlayers.length });
     setRoom((current) => current ? { ...current, settings, status: 'playing', startedPayload: { type: 'start-game', rounds, settings, players: sessionPlayers } } : current);
     handoffSocketRef.current = true;
     onStartSession(createSession(sessionPlayers, rounds, room.code, settings));
@@ -455,6 +558,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
     navigator.clipboard.writeText(text).then(() => {
       setCopiedInvite(true);
       window.setTimeout(() => setCopiedInvite(false), 1800);
+      void recordFeatureEvent('online_room_invite_copied', `Copied room invite ${code}`, { roomCode: code });
     }).catch(() => undefined);
   };
 
@@ -520,27 +624,58 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
                   </button>
                 ))}
               </div>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/35" />
+                <input
+                  value={packSearchQuery}
+                  onChange={(event) => setPackSearchQuery(event.target.value)}
+                  placeholder="Search by artist, country, genre, album, or song..."
+                  className="h-11 w-full rounded-lg border border-white/10 bg-[#111915] pl-10 pr-3 text-sm text-white outline-none focus:border-[#00e676]"
+                />
+              </div>
               <div className="grid max-h-[54vh] gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
-                {challengeOptions.map((option) => (
+                {filteredChallengeOptions.map((option) => (
                   <button
                     key={`${option.type}-${option.slug}`}
                     onClick={() => {
                       setChallengeSlug(option.slug);
                       setPackError('');
                     }}
-                    className={`grid grid-cols-[52px_minmax(0,1fr)] items-center gap-3 rounded-lg border p-2 text-left ${
+                    className={`grid grid-cols-[58px_minmax(0,1fr)] items-center gap-3 rounded-lg border p-2 text-left ${
                       selectedChallenge?.slug === option.slug ? 'border-[#00e676] bg-[#00e676]/12' : 'border-white/10 bg-white/[0.04] hover:border-white/20'
                     }`}
                   >
-                    <div className="flex h-[52px] w-[52px] items-center justify-center overflow-hidden rounded-lg bg-black/30 text-xl">
+                    <div className="flex h-[58px] w-[58px] items-center justify-center overflow-hidden rounded-lg bg-black/30 text-xl">
                       {option.image ? <img src={option.image} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" /> : option.slug === 'GLOBAL' ? '🌍' : COUNTRIES.find((country) => country.code === option.slug)?.flag || '♪'}
                     </div>
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-black text-white">{option.title}</div>
-                      <div className="truncate text-[11px] text-white/45">{option.subtitle}</div>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <div className="truncate text-sm font-black text-white">{option.title}</div>
+                        <span className="shrink-0 rounded-full bg-white/8 px-2 py-0.5 text-[10px] font-bold text-white/50">
+                          {option.songsCount} songs
+                        </span>
+                      </div>
+                      <div className="mt-0.5 truncate text-[11px] text-white/45">{option.subtitle}</div>
+                      {option.albumCount ? (
+                        <div className="mt-1 text-[10px] font-bold text-[#00e676]/75">{option.albumCount} albums</div>
+                      ) : null}
+                      {option.albumImages && option.albumImages.length > 0 && (
+                        <div className="mt-2 flex gap-1">
+                          {option.albumImages.map((image) => (
+                            <span key={image} className="h-5 w-5 overflow-hidden rounded bg-black/30">
+                              <img src={image} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </button>
                 ))}
+                {filteredChallengeOptions.length === 0 && (
+                  <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4 text-sm font-bold text-white/45 sm:col-span-2">
+                    No matching packs found.
+                  </div>
+                )}
               </div>
               {packError && <div className="rounded-lg border border-red-400/25 bg-red-400/10 p-3 text-xs font-bold text-red-100">{packError}</div>}
               <div className="flex flex-col gap-2 sm:flex-row">

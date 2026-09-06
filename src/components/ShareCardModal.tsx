@@ -6,6 +6,7 @@ import { getDailyStreak } from '../utils/storage';
 import { getPublicHost, getShareUrl } from '../utils/domain';
 import { getArtistPath, getCountryPath, getGenrePath } from '../utils/runtimeConfig';
 import { downloadScoreCardImage, copyScoreCardImageToClipboard } from '../utils/scoreCardCanvas';
+import { recordFeatureEvent } from '../utils/adminApi';
 
 interface ShareCardModalProps {
   result: GameResult;
@@ -34,6 +35,11 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = ({ result, onClose 
       setIsGenerating(true);
       const success = await downloadScoreCardImage(result);
       if (success) {
+        void recordFeatureEvent('social_card_downloaded', 'Downloaded generated social media card', {
+          points: result.totalPoints,
+          correct: correctCount,
+          challenge: result.collectionTitle || result.challengeSlug || result.countryCode
+        });
         setDownloadSuccess(true);
         setTimeout(() => setDownloadSuccess(false), 3000);
       }
@@ -49,6 +55,11 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = ({ result, onClose 
       setIsGenerating(true);
       const success = await copyScoreCardImageToClipboard(result);
       if (success) {
+        void recordFeatureEvent('social_card_image_copied', 'Copied generated social media card image', {
+          points: result.totalPoints,
+          correct: correctCount,
+          challenge: result.collectionTitle || result.challengeSlug || result.countryCode
+        });
         setCopiedImage(true);
         setTimeout(() => setCopiedImage(false), 2500);
       } else {
@@ -73,6 +84,11 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = ({ result, onClose 
     const shareLink = getShareUrl(sharePath);
     const text = `🎵 Song Guess Game: ${result.totalPoints} PTS (${correctCount}/${result.rounds.length})\n🔥 Daily Streak: ${streak.currentStreak} days\n${symbols}\nCan you beat me? Play at: ${shareLink}`;
     navigator.clipboard.writeText(text);
+    void recordFeatureEvent('social_card_text_copied', 'Copied social share text', {
+      points: result.totalPoints,
+      correct: correctCount,
+      challenge: result.collectionTitle || result.challengeSlug || result.countryCode
+    });
     setCopiedText(true);
     setTimeout(() => setCopiedText(false), 2500);
   };

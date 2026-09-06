@@ -209,6 +209,57 @@ export interface AdminUserSegments {
   unverified: number;
 }
 
+export interface AdminFeatureUsage {
+  feature: string;
+  count: number;
+  uniqueUsers: number;
+  lastUsedAt?: string;
+}
+
+export interface AdminFeatureEvent {
+  id: string;
+  feature: string;
+  status: 'completed' | 'failed' | 'pending';
+  detail?: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  userId?: string;
+  userName?: string;
+  email?: string;
+}
+
+export interface AdminRoomHistory {
+  code: string;
+  hostUserId?: string;
+  hostEmail?: string;
+  hostName: string;
+  challengeType?: string;
+  challengeSlug?: string;
+  challengeTitle?: string;
+  turnsPerPlayer: number;
+  countdownSeconds: number;
+  hostHasUnlimited: boolean;
+  status: 'lobby' | 'playing' | 'finished' | string;
+  playerCount: number;
+  createdAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  updatedAt: string;
+}
+
+export interface AdminFeatureAnalytics {
+  features: AdminFeatureUsage[];
+  recentEvents: AdminFeatureEvent[];
+  rooms: AdminRoomHistory[];
+  roomStats: {
+    totalCreated: number;
+    activeNow: number;
+    activePersisted: number;
+    finished: number;
+  };
+  databaseConfigured: boolean;
+}
+
 export interface RequestedArtist {
   slug: string;
   name: string;

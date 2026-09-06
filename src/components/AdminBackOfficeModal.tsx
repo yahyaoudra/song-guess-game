@@ -20,13 +20,14 @@ import {
   Trash2,
   Users
 } from 'lucide-react';
-import { AdminAdSlot, AdminConfigState, AdminEmailEvent, AdminPageConfig, AdminUserProfile, AdminUserSegments, AdPlacementLocation, AdminUserRecord, PaymentRecord, RequestedArtist } from '../adminTypes';
+import { AdminAdSlot, AdminConfigState, AdminEmailEvent, AdminFeatureAnalytics, AdminPageConfig, AdminUserProfile, AdminUserSegments, AdPlacementLocation, AdminUserRecord, PaymentRecord, RequestedArtist } from '../adminTypes';
 import { COUNTRIES } from '../data/countries';
 import {
   clearAdminActivity,
   fetchAdminActivity,
   fetchAdminConfig,
   fetchAdminEmailEvents,
+  fetchAdminFeatureAnalytics,
   fetchAdminUserProfile,
   fetchAdminUserSegments,
   fetchAdminPayments,
@@ -132,6 +133,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
   const [adminPayments, setAdminPayments] = useState<PaymentRecord[]>([]);
   const [adminEmailEvents, setAdminEmailEvents] = useState<AdminEmailEvent[]>([]);
   const [adminSegments, setAdminSegments] = useState<AdminUserSegments | null>(null);
+  const [adminFeatureAnalytics, setAdminFeatureAnalytics] = useState<AdminFeatureAnalytics | null>(null);
   const [selectedAdminUserProfile, setSelectedAdminUserProfile] = useState<AdminUserProfile | null>(null);
   const [loadingUserProfileId, setLoadingUserProfileId] = useState('');
   const [retryingEmailId, setRetryingEmailId] = useState('');
@@ -249,14 +251,15 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
   );
 
   const loadProtectedData = async () => {
-    const [nextConfig, nextActivity, usersBody, paymentsBody, requestedBody, segmentsBody, emailEvents] = await Promise.all([
+    const [nextConfig, nextActivity, usersBody, paymentsBody, requestedBody, segmentsBody, emailEvents, featureAnalytics] = await Promise.all([
       fetchAdminConfig(),
       fetchAdminActivity(),
       fetchAdminUsers().catch(() => ({ users: [], totalUsers: 0, databaseConfigured: false })),
       fetchAdminPayments().catch(() => ({ payments: [], databaseConfigured: false, stripeConfigured: false })),
       fetchRequestedArtists().catch(() => []),
       fetchAdminUserSegments().catch(() => null),
-      fetchAdminEmailEvents().catch(() => [])
+      fetchAdminEmailEvents().catch(() => []),
+      fetchAdminFeatureAnalytics().catch(() => null)
     ]);
     setConfig(nextConfig);
     setActivityLogs(nextActivity);
@@ -265,6 +268,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
     setAdminPayments(paymentsBody.payments);
     setAdminSegments(segmentsBody);
     setAdminEmailEvents(emailEvents);
+    setAdminFeatureAnalytics(featureAnalytics);
     setRequestedArtists(requestedBody);
     onRequestedArtistsChanged?.(requestedBody);
     setPaymentMeta({
@@ -369,17 +373,19 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
 
   const handleRefreshMonetization = async () => {
     try {
-      const [usersBody, paymentsBody, segmentsBody, emailEvents] = await Promise.all([
+      const [usersBody, paymentsBody, segmentsBody, emailEvents, featureAnalytics] = await Promise.all([
         fetchAdminUsers(),
         fetchAdminPayments(),
         fetchAdminUserSegments(),
-        fetchAdminEmailEvents()
+        fetchAdminEmailEvents(),
+        fetchAdminFeatureAnalytics()
       ]);
       setAdminUsers(usersBody.users);
       setAdminUserTotal(usersBody.totalUsers || usersBody.users.length);
       setAdminPayments(paymentsBody.payments);
       setAdminSegments(segmentsBody);
       setAdminEmailEvents(emailEvents);
+      setAdminFeatureAnalytics(featureAnalytics);
       setPaymentMeta({
         databaseConfigured: usersBody.databaseConfigured && paymentsBody.databaseConfigured,
         stripeConfigured: paymentsBody.stripeConfigured
@@ -1398,6 +1404,96 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                       <p className="mt-1 text-lg font-black text-[#00e676]">{value}</p>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {adminFeatureAnalytics && (
+                <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1.15fr]">
+                  <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-black text-white">Feature usage</h3>
+                        <p className="mt-1 text-[11px] text-white/45">Most used actions and who used them recently.</p>
+                      </div>
+                      <span className="rounded-full bg-[#00e676]/10 px-3 py-1 text-[11px] font-black text-[#00e676]">
+                        {adminFeatureAnalytics.features.reduce((sum, item) => sum + Number(item.count || 0), 0)} events
+                      </span>
+                    </div>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      {adminFeatureAnalytics.features.slice(0, 8).map((feature) => (
+                        <div key={feature.feature} className="rounded-xl border border-white/10 bg-[#121915] p-3">
+                          <p className="truncate text-xs font-black text-white">{feature.feature.replace(/_/g, ' ')}</p>
+                          <p className="mt-1 font-mono text-lg font-black text-[#00e676]">{feature.count}</p>
+                          <p className="text-[10px] text-white/40">{feature.uniqueUsers} users • {feature.lastUsedAt ? formatIsoDate(feature.lastUsedAt) : 'no date'}</p>
+                        </div>
+                      ))}
+                      {adminFeatureAnalytics.features.length === 0 && (
+                        <p className="rounded-xl bg-white/5 p-4 text-xs text-white/45 sm:col-span-2">No feature events recorded yet.</p>
+                      )}
+                    </div>
+                    <div className="mt-3 max-h-56 space-y-2 overflow-y-auto">
+                      {adminFeatureAnalytics.recentEvents.slice(0, 20).map((event) => (
+                        <button
+                          key={event.id}
+                          type="button"
+                          onClick={() => event.userId && void handleOpenUserProfile(event.userId)}
+                          className="w-full rounded-xl border border-white/10 bg-white/[0.035] p-3 text-left text-xs hover:border-[#00e676]/35"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="truncate font-black text-white">{event.userName || event.email || 'Guest'}</span>
+                            <span className="shrink-0 text-[10px] text-white/35">{formatIsoDate(event.createdAt)}</span>
+                          </div>
+                          <p className="mt-1 text-[#00e676]/80">{event.feature.replace(/_/g, ' ')} • {event.status}</p>
+                          {event.detail && <p className="mt-1 truncate text-white/45">{event.detail}</p>}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-black text-white">Online rooms</h3>
+                        <p className="mt-1 text-[11px] text-white/45">Created rooms, live active count, and pass history.</p>
+                      </div>
+                      <div className="flex gap-1.5">
+                        <span className="rounded-full bg-[#00e676]/10 px-2.5 py-1 text-[10px] font-black text-[#00e676]">Live {adminFeatureAnalytics.roomStats.activeNow}</span>
+                        <span className="rounded-full bg-white/5 px-2.5 py-1 text-[10px] font-black text-white/50">Total {adminFeatureAnalytics.roomStats.totalCreated}</span>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                      {[
+                        ['Active recent', adminFeatureAnalytics.roomStats.activePersisted],
+                        ['Finished', adminFeatureAnalytics.roomStats.finished],
+                        ['History rows', adminFeatureAnalytics.rooms.length]
+                      ].map(([label, value]) => (
+                        <div key={String(label)} className="rounded-xl bg-white/[0.04] p-3">
+                          <p className="text-[10px] font-black uppercase tracking-wide text-white/35">{label}</p>
+                          <p className="mt-1 font-mono text-lg font-black text-white">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-3 max-h-80 space-y-2 overflow-y-auto">
+                      {adminFeatureAnalytics.rooms.map((room) => (
+                        <div key={room.code} className="rounded-xl border border-white/10 bg-[#121915] p-3 text-xs">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="font-mono font-black text-[#00e676]">{room.code}</p>
+                              <p className="truncate text-white/65">{room.challengeTitle || 'No pack selected'}</p>
+                              <p className="mt-1 text-white/40">{room.hostName || room.hostEmail || 'Host'} • {room.playerCount}/10 players</p>
+                            </div>
+                            <span className="rounded-full bg-white/5 px-2 py-1 text-[10px] font-black uppercase text-white/50">{room.status}</span>
+                          </div>
+                          <p className="mt-2 text-[10px] text-white/35">
+                            {room.turnsPerPlayer} songs each • {room.countdownSeconds}s • {room.hostHasUnlimited ? 'unlimited host' : 'free host'} • {formatIsoDate(room.updatedAt)}
+                          </p>
+                        </div>
+                      ))}
+                      {adminFeatureAnalytics.rooms.length === 0 && (
+                        <p className="rounded-xl bg-white/5 p-4 text-xs text-white/45">No room history recorded yet.</p>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
 

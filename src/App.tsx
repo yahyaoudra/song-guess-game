@@ -40,7 +40,7 @@ import {
 } from './utils/storage';
 import { audioEngine } from './utils/audioPlayer';
 import { cacheSongsMetadata, preCacheGameAudioSnippets } from './utils/offlineCache';
-import { recordActivity } from './utils/adminApi';
+import { recordActivity, recordFeatureEvent } from './utils/adminApi';
 import { setAnalyticsUser, trackEvent, trackEventOnce, trackPurchaseOnce, trackReturningUser } from './utils/analytics';
 import { getArchivePageHref, parseArchivePage } from './utils/archivePagination';
 import { getPublicHost, getShareUrl } from './utils/domain';
@@ -2202,6 +2202,11 @@ export default function App() {
                 durationSeconds: Math.floor((Date.now() - gameStartTime) / 1000),
                 nickname: settings.nickname
               };
+              void recordFeatureEvent('social_card_opened', 'Opened round social card', {
+                challenge: activeChallenge?.title || activeCollection?.title || settings.selectedCountry,
+                points: res.totalPoints,
+                correct: res.rounds.filter((round) => round.isCorrect).length
+              });
               setShareCardResult(res);
             }}
           />
@@ -2392,6 +2397,7 @@ export default function App() {
           initialStep={multiplayerInitialStep}
           activeCollection={activeCollection}
           existingSession={activeMultiplayerSession}
+          requestedArtists={requestedArtists}
         />
       )}
 
@@ -2514,6 +2520,11 @@ export default function App() {
             setIsLeaderboardOpen(true);
           }}
           onOpenShareCard={(res) => {
+            void recordFeatureEvent('social_card_opened', 'Opened game result social card', {
+              challenge: res.collectionTitle || res.countryCode || res.challengeSlug,
+              points: res.totalPoints,
+              correct: res.rounds.filter((round) => round.isCorrect).length
+            });
             setShareCardResult(res);
           }}
           onSettingsChanged={setSettings}

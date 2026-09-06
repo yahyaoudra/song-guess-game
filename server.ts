@@ -346,6 +346,25 @@ async function ensureDatabaseSchema(): Promise<void> {
       created_at timestamptz NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS sg_multiplayer_rooms (
+      code text PRIMARY KEY,
+      host_user_id uuid REFERENCES sg_users(id) ON DELETE SET NULL,
+      host_email text,
+      host_name text NOT NULL DEFAULT '',
+      challenge_type text,
+      challenge_slug text,
+      challenge_title text,
+      turns_per_player integer NOT NULL DEFAULT 3,
+      countdown_seconds integer NOT NULL DEFAULT 80,
+      host_has_unlimited boolean NOT NULL DEFAULT false,
+      status text NOT NULL DEFAULT 'lobby',
+      player_count integer NOT NULL DEFAULT 1,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      started_at timestamptz,
+      finished_at timestamptz,
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS sg_leaderboard_entries (
       id text PRIMARY KEY,
       user_id uuid REFERENCES sg_users(id) ON DELETE SET NULL,
@@ -382,6 +401,7 @@ async function ensureDatabaseSchema(): Promise<void> {
   await queryDb('CREATE UNIQUE INDEX IF NOT EXISTS sg_payments_payment_intent_unique ON sg_payments (stripe_payment_intent_id) WHERE stripe_payment_intent_id IS NOT NULL AND stripe_payment_intent_id <> \'\'');
   await queryDb('CREATE INDEX IF NOT EXISTS sg_email_events_user_created_idx ON sg_email_events (user_id, created_at DESC)');
   await queryDb('CREATE INDEX IF NOT EXISTS sg_user_journey_events_user_created_idx ON sg_user_journey_events (user_id, created_at DESC)');
+  await queryDb('CREATE INDEX IF NOT EXISTS sg_multiplayer_rooms_updated_idx ON sg_multiplayer_rooms (updated_at DESC)');
   await queryDb('CREATE UNIQUE INDEX IF NOT EXISTS sg_leaderboard_nickname_unique ON sg_leaderboard_entries (lower(nickname))');
 }
 
@@ -491,6 +511,64 @@ async function logUserJourneyEvent(event: {
     ]
   ).catch((error) => {
     console.warn('Journey event log failed:', error instanceof Error ? error.message : error);
+    return [];
+  });
+}
+
+function getUserIdFromMultiplayerPlayerId(playerId?: string): string | undefined {
+  const clean = safeText(playerId, 100);
+  const userId = clean.startsWith('user-') ? clean.slice(5) : '';
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId)
+    ? userId
+    : undefined;
+}
+
+async function upsertMultiplayerRoomHistory(room: MultiplayerRoom, statusOverride?: 'lobby' | 'playing' | 'finished'): Promise<void> {
+  if (!isDatabaseConfigured()) return;
+  const status = statusOverride || room.status || 'lobby';
+  const settings = room.settings || {};
+  const host = room.players[0];
+  await queryDb(
+    `INSERT INTO sg_multiplayer_rooms
+       (code, host_user_id, host_email, host_name, challenge_type, challenge_slug, challenge_title,
+        turns_per_player, countdown_seconds, host_has_unlimited, status, player_count, created_at,
+        started_at, finished_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, to_timestamp($13 / 1000.0),
+        CASE WHEN $11 = 'playing' THEN now() ELSE NULL END,
+        CASE WHEN $11 = 'finished' THEN now() ELSE NULL END,
+        now())
+     ON CONFLICT (code) DO UPDATE SET
+       host_user_id = COALESCE(sg_multiplayer_rooms.host_user_id, EXCLUDED.host_user_id),
+       host_email = COALESCE(NULLIF(EXCLUDED.host_email, ''), sg_multiplayer_rooms.host_email),
+       host_name = COALESCE(NULLIF(EXCLUDED.host_name, ''), sg_multiplayer_rooms.host_name),
+       challenge_type = COALESCE(NULLIF(EXCLUDED.challenge_type, ''), sg_multiplayer_rooms.challenge_type),
+       challenge_slug = COALESCE(NULLIF(EXCLUDED.challenge_slug, ''), sg_multiplayer_rooms.challenge_slug),
+       challenge_title = COALESCE(NULLIF(EXCLUDED.challenge_title, ''), sg_multiplayer_rooms.challenge_title),
+       turns_per_player = EXCLUDED.turns_per_player,
+       countdown_seconds = EXCLUDED.countdown_seconds,
+       host_has_unlimited = EXCLUDED.host_has_unlimited,
+       status = EXCLUDED.status,
+       player_count = EXCLUDED.player_count,
+       started_at = CASE WHEN EXCLUDED.status = 'playing' THEN COALESCE(sg_multiplayer_rooms.started_at, now()) ELSE sg_multiplayer_rooms.started_at END,
+       finished_at = CASE WHEN EXCLUDED.status = 'finished' THEN COALESCE(sg_multiplayer_rooms.finished_at, now()) ELSE sg_multiplayer_rooms.finished_at END,
+       updated_at = now()`,
+    [
+      room.code,
+      getUserIdFromMultiplayerPlayerId(host?.id),
+      safeText(host?.email, 254).toLowerCase(),
+      safeText(room.hostName || host?.name, 80),
+      safeText(settings.challengeType, 40),
+      safeText(settings.challengeSlug, 160),
+      safeText(settings.challengeTitle, 180),
+      Math.max(1, Math.min(100, Number(settings.turnsPerPlayer) || 3)),
+      Math.max(10, Math.min(300, Number(settings.countdownSeconds) || 80)),
+      Boolean(settings.hostHasUnlimited),
+      status,
+      room.players.length,
+      room.createdAt || Date.now()
+    ]
+  ).catch((error) => {
+    console.warn('Multiplayer room history log failed:', error instanceof Error ? error.message : error);
     return [];
   });
 }
@@ -3289,6 +3367,15 @@ function attachMultiplayerServer(server: http.Server): void {
           multiplayerRooms.set(code, room);
           typedSocket.roomCode = code;
           typedSocket.playerId = playerId;
+          void upsertMultiplayerRoomHistory(room, 'lobby');
+          void logUserJourneyEvent({
+            userId: getUserIdFromMultiplayerPlayerId(playerId),
+            email: playerEmail,
+            eventType: 'feature:online_room_created',
+            status: 'completed',
+            detail: `Created online room ${code}`,
+            metadata: { roomCode: code, settings: room.settings }
+          });
           socket.send(JSON.stringify({ type: 'room-created', room, playerId }));
           return;
         }
@@ -3330,6 +3417,15 @@ function attachMultiplayerServer(server: http.Server): void {
           }
           typedSocket.roomCode = room.code;
           typedSocket.playerId = playerId;
+          void upsertMultiplayerRoomHistory(room, room.status || 'lobby');
+          void logUserJourneyEvent({
+            userId: getUserIdFromMultiplayerPlayerId(playerId),
+            email: playerEmail,
+            eventType: 'feature:online_room_joined',
+            status: 'completed',
+            detail: `${playerName} joined room ${room.code}`,
+            metadata: { roomCode: room.code, playerCount: room.players.length }
+          });
           socket.send(JSON.stringify({ type: 'room-joined', room, playerId }));
           if (room.status === 'playing' && room.startedPayload) {
             socket.send(JSON.stringify({ type: 'room-event', payload: room.startedPayload }));
@@ -3367,8 +3463,28 @@ function attachMultiplayerServer(server: http.Server): void {
             room.startedPayload = payload;
             room.settings = sanitizeMultiplayerSettings(payload.settings) || room.settings;
             room.activity = 'Room game started';
+            void upsertMultiplayerRoomHistory(room, 'playing');
+            void logUserJourneyEvent({
+              userId: getUserIdFromMultiplayerPlayerId(typedSocket.playerId),
+              email: room.players.find((player) => player.id === typedSocket.playerId)?.email,
+              eventType: 'feature:online_room_started',
+              status: 'completed',
+              detail: `Started online room ${room.code}`,
+              metadata: { roomCode: room.code, settings: room.settings, playerCount: room.players.length }
+            });
           }
-          if (payloadType === 'finish') room.status = 'finished';
+          if (payloadType === 'finish') {
+            room.status = 'finished';
+            void upsertMultiplayerRoomHistory(room, 'finished');
+            void logUserJourneyEvent({
+              userId: getUserIdFromMultiplayerPlayerId(typedSocket.playerId),
+              email: room.players.find((player) => player.id === typedSocket.playerId)?.email,
+              eventType: 'feature:online_room_finished',
+              status: 'completed',
+              detail: `Finished online room ${room.code}`,
+              metadata: { roomCode: room.code, playerCount: room.players.length }
+            });
+          }
           if (payloadType === 'activity') room.activity = safeText(payload.message, 160);
           if (Array.isArray(payload.players)) {
             room.players = payload.players.slice(0, 10).map((player) => {
@@ -4230,6 +4346,33 @@ async function startServer() {
     }
   });
 
+  app.post('/api/feature-event', async (req, res) => {
+    try {
+      const user = await getUserSession(req).catch(() => null);
+      const feature = safeText(req.body?.feature, 80).toLowerCase().replace(/[^a-z0-9:_-]/g, '');
+      if (!feature) {
+        res.status(400).json({ error: 'Feature is required' });
+        return;
+      }
+      await logUserJourneyEvent({
+        userId: user?.id,
+        email: user?.email,
+        eventType: feature.startsWith('feature:') ? feature : `feature:${feature}`,
+        status: safeText(req.body?.status, 20) === 'failed' ? 'failed' : 'completed',
+        detail: safeText(req.body?.detail, 240),
+        metadata: {
+          path: safeText(req.body?.path, 300) || safeText(req.headers.referer, 300),
+          referrer: safeText(req.headers.referer, 300),
+          ...((req.body?.metadata && typeof req.body.metadata === 'object') ? req.body.metadata : {})
+        }
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Feature event log error:', error);
+      res.status(500).json({ error: 'Failed to record feature event' });
+    }
+  });
+
   app.get('/api/leaderboard', async (req, res) => {
     if (!isDatabaseConfigured()) {
       res.json({ entries: [], databaseConfigured: false });
@@ -5070,6 +5213,80 @@ async function startServer() {
       res.json({ segments: rows[0] || {} });
     } catch {
       res.status(503).json({ error: 'Could not load user segments' });
+    }
+  });
+
+  app.get('/api/admin/feature-analytics', requireAdmin, async (_req, res) => {
+    if (!isDatabaseConfigured()) {
+      res.json({
+        features: [],
+        recentEvents: [],
+        rooms: [],
+        roomStats: {
+          totalCreated: 0,
+        activeNow: Array.from(multiplayerRooms.values()).filter((room) => room.status !== 'finished').length,
+          activePersisted: 0,
+          finished: 0
+        },
+        databaseConfigured: false
+      });
+      return;
+    }
+    try {
+      const [features, recentEvents, roomStatsRows, rooms] = await Promise.all([
+        queryDb<Record<string, unknown>>(
+          `SELECT replace(event_type, 'feature:', '') AS feature, count(*)::int AS count,
+                  count(DISTINCT user_id)::int AS "uniqueUsers",
+                  max(created_at) AS "lastUsedAt"
+           FROM sg_user_journey_events
+           WHERE event_type LIKE 'feature:%'
+           GROUP BY event_type
+           ORDER BY count(*) DESC, max(created_at) DESC
+           LIMIT 30`
+        ),
+        queryDb<Record<string, unknown>>(
+          `SELECT e.id, replace(e.event_type, 'feature:', '') AS feature, e.status, e.detail,
+                  e.metadata, e.created_at AS "createdAt",
+                  u.id AS "userId", COALESCE(u.name, e.email, 'Guest') AS "userName", COALESCE(u.email, e.email, '') AS email
+           FROM sg_user_journey_events e
+           LEFT JOIN sg_users u ON u.id = e.user_id
+           WHERE e.event_type LIKE 'feature:%'
+           ORDER BY e.created_at DESC
+           LIMIT 80`
+        ),
+        queryDb<Record<string, unknown>>(
+          `SELECT
+             count(*)::int AS "totalCreated",
+             count(*) FILTER (WHERE status IN ('lobby', 'playing') AND updated_at > now() - interval '2 hours')::int AS "activePersisted",
+             count(*) FILTER (WHERE status = 'finished')::int AS finished
+           FROM sg_multiplayer_rooms`
+        ),
+        queryDb<Record<string, unknown>>(
+          `SELECT code, host_user_id AS "hostUserId", host_email AS "hostEmail", host_name AS "hostName",
+                  challenge_type AS "challengeType", challenge_slug AS "challengeSlug", challenge_title AS "challengeTitle",
+                  turns_per_player AS "turnsPerPlayer", countdown_seconds AS "countdownSeconds",
+                  host_has_unlimited AS "hostHasUnlimited", status, player_count AS "playerCount",
+                  created_at AS "createdAt", started_at AS "startedAt", finished_at AS "finishedAt", updated_at AS "updatedAt"
+           FROM sg_multiplayer_rooms
+           ORDER BY updated_at DESC
+           LIMIT 80`
+        )
+      ]);
+      res.json({
+        features,
+        recentEvents,
+        rooms,
+        roomStats: {
+          totalCreated: Number(roomStatsRows[0]?.totalCreated || 0),
+          activeNow: Array.from(multiplayerRooms.values()).filter((room) => room.status !== 'finished').length,
+          activePersisted: Number(roomStatsRows[0]?.activePersisted || 0),
+          finished: Number(roomStatsRows[0]?.finished || 0)
+        },
+        databaseConfigured: true
+      });
+    } catch (error) {
+      console.error('Admin feature analytics load error:', error);
+      res.status(503).json({ error: 'Could not load feature analytics' });
     }
   });
 

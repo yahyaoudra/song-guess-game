@@ -2,6 +2,7 @@ import {
   ActivityLogEntry,
   AdminConfigState,
   AdminEmailEvent,
+  AdminFeatureAnalytics,
   AdminSessionResponse,
   AdminUserProfile,
   AdminUserRecord,
@@ -99,6 +100,17 @@ export async function recordActivity(
   }
 }
 
+export async function recordFeatureEvent(feature: string, detail?: string, metadata?: Record<string, unknown>): Promise<void> {
+  try {
+    await requestJson<{ ok: true }>('/api/feature-event', {
+      method: 'POST',
+      body: JSON.stringify({ feature, detail, metadata, path: window.location.pathname + window.location.search })
+    });
+  } catch (error) {
+    console.debug('Feature logging skipped', error);
+  }
+}
+
 export async function uploadBannerAsset(dataUrl: string): Promise<string> {
   const body = await requestJson<{ url: string }>('/api/admin/uploads/banner', {
     method: 'POST',
@@ -118,6 +130,10 @@ export async function fetchAdminUserProfile(userId: string): Promise<AdminUserPr
 export async function fetchAdminUserSegments(): Promise<AdminUserSegments> {
   const body = await requestJson<{ segments: AdminUserSegments }>('/api/admin/user-segments');
   return body.segments;
+}
+
+export async function fetchAdminFeatureAnalytics(): Promise<AdminFeatureAnalytics> {
+  return requestJson<AdminFeatureAnalytics>('/api/admin/feature-analytics');
 }
 
 export async function fetchAdminEmailEvents(): Promise<AdminEmailEvent[]> {
