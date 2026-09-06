@@ -13,6 +13,7 @@ interface GuessAutocompleteProps {
   titleDisplayMode: TitleDisplayMode;
   isLastStep?: boolean;
   nextStepLabel?: string;
+  prioritySongs?: Song[];
 }
 
 export const GuessAutocomplete: React.FC<GuessAutocompleteProps> = ({
@@ -23,7 +24,8 @@ export const GuessAutocomplete: React.FC<GuessAutocompleteProps> = ({
   showArabicTitles = true,
   titleDisplayMode,
   isLastStep = false,
-  nextStepLabel
+  nextStepLabel,
+  prioritySongs = []
 }) => {
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState<Song[]>([]);
@@ -47,7 +49,7 @@ export const GuessAutocomplete: React.FC<GuessAutocompleteProps> = ({
 
     const timer = setTimeout(async () => {
       try {
-        const results = await searchGlobalSongs(query, countryCode);
+        const results = await searchGlobalSongs(query, countryCode, prioritySongs);
         if (isMounted) {
           setSuggestions(results);
           setIsOpen(results.length > 0);
@@ -64,7 +66,7 @@ export const GuessAutocomplete: React.FC<GuessAutocompleteProps> = ({
       isMounted = false;
       clearTimeout(timer);
     };
-  }, [query, countryCode]);
+  }, [query, countryCode, prioritySongs]);
 
   // Click outside to close dropdown
   useEffect(() => {

@@ -1,4 +1,14 @@
-import { ActivityLogEntry, AdminConfigState, AdminSessionResponse, AdminUserRecord, PaymentRecord, RequestedArtist } from '../adminTypes';
+import {
+  ActivityLogEntry,
+  AdminConfigState,
+  AdminEmailEvent,
+  AdminSessionResponse,
+  AdminUserProfile,
+  AdminUserRecord,
+  AdminUserSegments,
+  PaymentRecord,
+  RequestedArtist
+} from '../adminTypes';
 
 let csrfToken = '';
 
@@ -99,6 +109,32 @@ export async function uploadBannerAsset(dataUrl: string): Promise<string> {
 
 export async function fetchAdminUsers(): Promise<{ users: AdminUserRecord[]; totalUsers: number; databaseConfigured: boolean }> {
   return requestJson<{ users: AdminUserRecord[]; totalUsers: number; databaseConfigured: boolean }>('/api/admin/users');
+}
+
+export async function fetchAdminUserProfile(userId: string): Promise<AdminUserProfile> {
+  return requestJson<AdminUserProfile>(`/api/admin/users/${encodeURIComponent(userId)}`);
+}
+
+export async function fetchAdminUserSegments(): Promise<AdminUserSegments> {
+  const body = await requestJson<{ segments: AdminUserSegments }>('/api/admin/user-segments');
+  return body.segments;
+}
+
+export async function fetchAdminEmailEvents(): Promise<AdminEmailEvent[]> {
+  const body = await requestJson<{ emails: AdminEmailEvent[]; mailerSendConfigured: boolean }>('/api/admin/email-events');
+  return body.emails;
+}
+
+export async function retryAdminEmail(emailEventId: string): Promise<void> {
+  await requestJson<{ ok: true }>(`/api/admin/email-events/${encodeURIComponent(emailEventId)}/retry`, {
+    method: 'POST'
+  });
+}
+
+export async function executeQueuedArtistRequest(slug: string): Promise<{ artist: RequestedArtist; artists: RequestedArtist[] }> {
+  return requestJson<{ artist: RequestedArtist; artists: RequestedArtist[] }>(`/api/admin/artist-requests/${encodeURIComponent(slug)}/execute`, {
+    method: 'POST'
+  });
 }
 
 export async function fetchAdminPayments(): Promise<{

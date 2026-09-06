@@ -319,6 +319,33 @@ async function ensureDatabaseSchema(): Promise<void> {
       updated_at timestamptz NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS sg_email_events (
+      id uuid PRIMARY KEY,
+      user_id uuid REFERENCES sg_users(id) ON DELETE SET NULL,
+      email text NOT NULL,
+      name text NOT NULL DEFAULT '',
+      subject text NOT NULL,
+      category text NOT NULL DEFAULT 'transactional',
+      status text NOT NULL,
+      provider_message_id text,
+      error text,
+      text_body text,
+      html_body text,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      sent_at timestamptz
+    );
+
+    CREATE TABLE IF NOT EXISTS sg_user_journey_events (
+      id uuid PRIMARY KEY,
+      user_id uuid REFERENCES sg_users(id) ON DELETE SET NULL,
+      email text,
+      event_type text NOT NULL,
+      status text NOT NULL,
+      detail text,
+      metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS sg_leaderboard_entries (
       id text PRIMARY KEY,
       user_id uuid REFERENCES sg_users(id) ON DELETE SET NULL,
@@ -349,8 +376,12 @@ async function ensureDatabaseSchema(): Promise<void> {
   await queryDb('ALTER TABLE sg_abandoned_checkouts ADD COLUMN IF NOT EXISTS name text NOT NULL DEFAULT \'\'');
   await queryDb('ALTER TABLE sg_abandoned_checkouts ADD COLUMN IF NOT EXISTS last_reminder_sent_at timestamptz');
   await queryDb('ALTER TABLE sg_artist_request_subscribers ADD COLUMN IF NOT EXISTS artist_image_url text');
+  await queryDb('ALTER TABLE sg_payments ADD COLUMN IF NOT EXISTS failure_reason text');
   await queryDb('ALTER TABLE sg_leaderboard_entries ADD COLUMN IF NOT EXISTS duration_seconds integer NOT NULL DEFAULT 0');
   await queryDb('CREATE UNIQUE INDEX IF NOT EXISTS sg_artist_request_subscribers_email_artist_unique ON sg_artist_request_subscribers (lower(email), artist_slug)');
+  await queryDb('CREATE UNIQUE INDEX IF NOT EXISTS sg_payments_payment_intent_unique ON sg_payments (stripe_payment_intent_id) WHERE stripe_payment_intent_id IS NOT NULL AND stripe_payment_intent_id <> \'\'');
+  await queryDb('CREATE INDEX IF NOT EXISTS sg_email_events_user_created_idx ON sg_email_events (user_id, created_at DESC)');
+  await queryDb('CREATE INDEX IF NOT EXISTS sg_user_journey_events_user_created_idx ON sg_user_journey_events (user_id, created_at DESC)');
   await queryDb('CREATE UNIQUE INDEX IF NOT EXISTS sg_leaderboard_nickname_unique ON sg_leaderboard_entries (lower(nickname))');
 }
 
@@ -366,6 +397,14 @@ function getStripeClient(): Stripe | null {
 
 function isStripeConfigured(): boolean {
   return Boolean(process.env.STRIPE_SECRET_KEY?.trim());
+}
+
+function getStripeFailureMessage(rawCode?: string, rawMessage?: string): string {
+  const code = safeText(rawCode, 80);
+  if (code === 'card_declined' || code === 'insufficient_funds') {
+    return 'Payment failed because of insufficient funds. Try a different payment method, or retry the payment later.';
+  }
+  return safeText(rawMessage, 500) || 'Payment failed. Try a different payment method, or retry the payment later.';
 }
 
 function isMailerSendConfigured(): boolean {
@@ -387,31 +426,141 @@ async function markMailerSendRegistered(userId: string, source: 'password' | 'go
   );
 }
 
-async function sendTransactionalEmail(toEmail: string, toName: string, subject: string, text: string, html: string): Promise<void> {
+async function logEmailEvent(event: {
+  email: string;
+  name?: string;
+  subject: string;
+  category?: string;
+  status: 'sent' | 'failed' | 'retrying';
+  providerMessageId?: string;
+  error?: string;
+  textBody?: string;
+  htmlBody?: string;
+}): Promise<string> {
+  if (!isDatabaseConfigured()) return '';
+  const users = await queryDb<{ id: string }>(
+    'SELECT id FROM sg_users WHERE lower(email) = lower($1) LIMIT 1',
+    [event.email]
+  ).catch(() => []);
+  const id = randomUUID();
+  await queryDb(
+    `INSERT INTO sg_email_events
+       (id, user_id, email, name, subject, category, status, provider_message_id, error, text_body, html_body, sent_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CASE WHEN $7 = 'sent' THEN now() ELSE NULL END)`,
+    [
+      id,
+      users[0]?.id || null,
+      safeText(event.email, 254).toLowerCase(),
+      safeText(event.name, 120),
+      safeText(event.subject, 220),
+      safeText(event.category, 80) || 'transactional',
+      event.status,
+      safeText(event.providerMessageId, 180),
+      safeText(event.error, 500),
+      safeText(event.textBody, 4000),
+      safeText(event.htmlBody, 50_000)
+    ]
+  ).catch((error) => {
+    console.warn('Email event log failed:', error instanceof Error ? error.message : error);
+    return [];
+  });
+  return id;
+}
+
+async function logUserJourneyEvent(event: {
+  userId?: string;
+  email?: string;
+  eventType: string;
+  status: 'completed' | 'failed' | 'pending';
+  detail?: string;
+  metadata?: Record<string, unknown>;
+}): Promise<void> {
+  if (!isDatabaseConfigured()) return;
+  await queryDb(
+    `INSERT INTO sg_user_journey_events
+       (id, user_id, email, event_type, status, detail, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+    [
+      randomUUID(),
+      event.userId || null,
+      safeText(event.email, 254).toLowerCase(),
+      safeText(event.eventType, 100),
+      event.status,
+      safeText(event.detail, 500),
+      JSON.stringify(event.metadata || {})
+    ]
+  ).catch((error) => {
+    console.warn('Journey event log failed:', error instanceof Error ? error.message : error);
+    return [];
+  });
+}
+
+async function sendTransactionalEmail(toEmail: string, toName: string, subject: string, text: string, html: string, category = 'transactional'): Promise<void> {
   const apiKey = process.env.MAILERSEND_API_KEY?.trim();
   const fromEmail = process.env.MAILERSEND_FROM_EMAIL?.trim();
   const fromName = process.env.MAILERSEND_FROM_NAME?.trim() || 'Song Guess Game';
-  if (!apiKey || !fromEmail) return;
-
-  const response = await fetch(MAILERSEND_EMAIL_API_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json'
-    },
-    body: JSON.stringify({
-      from: { email: fromEmail, name: fromName },
-      to: [{ email: toEmail, name: toName || toEmail }],
+  if (!apiKey || !fromEmail) {
+    await logEmailEvent({
+      email: toEmail,
+      name: toName,
       subject,
-      text,
-      html
-    })
-  });
+      category,
+      status: 'failed',
+      error: 'MailerSend is not configured. Set MAILERSEND_API_KEY and MAILERSEND_FROM_EMAIL.',
+      textBody: text,
+      htmlBody: html
+    });
+    return;
+  }
 
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`MailerSend returned ${response.status}: ${body.slice(0, 300)}`);
+  try {
+    const response = await fetch(MAILERSEND_EMAIL_API_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json'
+      },
+      body: JSON.stringify({
+        from: { email: fromEmail, name: fromName },
+        to: [{ email: toEmail, name: toName || toEmail }],
+        subject,
+        text,
+        html
+      })
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      const message = `MailerSend returned ${response.status}: ${body.slice(0, 300)}`;
+      await logEmailEvent({ email: toEmail, name: toName, subject, category, status: 'failed', error: message, textBody: text, htmlBody: html });
+      throw new Error(message);
+    }
+
+    await logEmailEvent({
+      email: toEmail,
+      name: toName,
+      subject,
+      category,
+      status: 'sent',
+      providerMessageId: response.headers.get('x-message-id') || response.headers.get('x-request-id') || '',
+      textBody: text,
+      htmlBody: html
+    });
+  } catch (error) {
+    if (!(error instanceof Error && error.message.startsWith('MailerSend returned'))) {
+      await logEmailEvent({
+        email: toEmail,
+        name: toName,
+        subject,
+        category,
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+        textBody: text,
+        htmlBody: html
+      });
+    }
+    throw error;
   }
 }
 
@@ -426,7 +575,8 @@ async function sendVerificationEmail(email: string, name: string, verificationUr
     name,
     title,
     `${intro}\n\n${verificationUrl}\n\nThis link expires in 24 hours.`,
-    `<p>${escapeHtml(intro)}</p><p><a href="${escapeHtml(verificationUrl)}">Verify email</a></p><p>This link expires in 24 hours.</p>`
+    `<p>${escapeHtml(intro)}</p><p><a href="${escapeHtml(verificationUrl)}">Verify email</a></p><p>This link expires in 24 hours.</p>`,
+    mode === 'email-change' ? 'email_change_verification' : 'email_verification'
   );
   return true;
 }
@@ -443,7 +593,8 @@ async function sendContactEmail(name: string, email: string, message: string): P
       `<p><strong>Name:</strong> ${escapeHtml(name)}</p>`,
       `<p><strong>Email:</strong> ${escapeHtml(email)}</p>`,
       `<p>${escapeHtml(message).replace(/\n/g, '<br>')}</p>`
-    ].join('')
+    ].join(''),
+    'contact'
   );
   return true;
 }
@@ -500,7 +651,7 @@ async function sendWelcomeEmail(email: string, name: string): Promise<boolean> {
       createPrimaryEmailButton(appUrl, 'Play now')
     ].join('')
   );
-  await sendTransactionalEmail(email, safeName, 'Welcome to Song Guess Game', text, html);
+  await sendTransactionalEmail(email, safeName, 'Welcome to Song Guess Game', text, html, 'welcome');
   return true;
 }
 
@@ -525,7 +676,7 @@ async function sendArtistRequestReceivedEmail(user: UserSession, artist: Request
       '<p style="margin:0;color:#a7b4ad;font-size:15px;line-height:24px;">We will send you a Play Now link as soon as the pack is built.</p>'
     ].join('')
   );
-  await sendTransactionalEmail(user.email, safeName, `${artist.name} request received`, text, html);
+  await sendTransactionalEmail(user.email, safeName, `${artist.name} request received`, text, html, 'artist_request_received');
   return true;
 }
 
@@ -552,7 +703,7 @@ async function sendArtistReadyEmail(email: string, name: string, artist: Request
       createPrimaryEmailButton(playUrl, 'Play now')
     ].join('')
   );
-  await sendTransactionalEmail(email, safeName, subject, text, html);
+  await sendTransactionalEmail(email, safeName, subject, text, html, 'artist_ready');
   return true;
 }
 
@@ -793,7 +944,7 @@ async function processAbandonedCheckoutReminders(): Promise<void> {
     if (!reminder) continue;
     try {
       const email = createAbandonedCheckoutEmail(row, reminder.key);
-      await sendTransactionalEmail(row.email, row.name || row.email, email.subject, email.text, email.html);
+      await sendTransactionalEmail(row.email, row.name || row.email, email.subject, email.text, email.html, `abandoned_checkout_${reminder.key}`);
       const nextReminder = ABANDONED_CHECKOUT_REMINDERS[row.reminderStep + 1];
       const startedAt = Date.parse(row.startedAt);
       const nextReminderAt = nextReminder
@@ -1654,6 +1805,17 @@ async function getRequestedArtists(): Promise<RequestedArtist[]> {
         nextRefreshAt: safeText(artist.nextRefreshAt, 40),
         lastRefreshType: artist.lastRefreshType === 'manual' || artist.lastRefreshType === 'automatic' || artist.lastRefreshType === 'request'
           ? artist.lastRefreshType
+          : undefined,
+        albumPacks: Array.isArray(artist.albumPacks)
+          ? artist.albumPacks.map((pack) => ({
+              id: slugifyChallenge(pack.id || pack.title),
+              title: safeText(pack.title, 160),
+              type: (pack.type === 'single' || pack.type === 'compilation' || pack.type === 'appears_on' || pack.type === 'singles' ? pack.type : 'album') as RequestedArtistAlbumPack['type'],
+              coverImage: safePublicImageUrl(pack.coverImage),
+              songIds: Array.isArray(pack.songIds) ? pack.songIds.map((id) => safeText(id, 120)).filter(Boolean).slice(0, 80) : [],
+              songsCount: Math.max(0, Math.min(80, Number(pack.songsCount) || 0)),
+              releaseYear: Number.isFinite(Number(pack.releaseYear)) ? Number(pack.releaseYear) : undefined
+            })).filter((pack) => pack.id && pack.title && pack.songIds.length > 0)
           : undefined
       };
     });
@@ -1663,6 +1825,10 @@ async function getRequestedArtists(): Promise<RequestedArtist[]> {
 function getRequestedArtistDedupeKey(artist: RequestedArtist): string {
   const baseSlug = slugifyChallenge(artist.slug.replace(/-[a-z0-9]{8}$/i, '')) || slugifyChallenge(artist.name);
   return baseSlug || artist.spotifyArtistId || artist.slug;
+}
+
+function getBaseArtistSlugValue(slug: string): string {
+  return slugifyChallenge(slug.replace(/-[a-z0-9]{8}$/i, ''));
 }
 
 function requestedArtistRank(artist: RequestedArtist): number {
@@ -1718,7 +1884,7 @@ async function subscribeToArtistRequest(user: UserSession, artist: RequestedArti
     `INSERT INTO sg_artist_request_subscribers
        (id, spotify_artist_id, artist_slug, artist_name, artist_image_url, user_id, email, name, status)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued')
-     ON CONFLICT (lower(email), artist_slug) DO NOTHING
+     ON CONFLICT DO NOTHING
      RETURNING id`,
     [
       randomUUID(),
@@ -1732,6 +1898,14 @@ async function subscribeToArtistRequest(user: UserSession, artist: RequestedArti
     ]
   );
   if (!rows[0]) return false;
+  await logUserJourneyEvent({
+    userId: user.id,
+    email: user.email,
+    eventType: 'artist_request_queued',
+    status: 'pending',
+    detail: `${artist.name} added to artist request queue`,
+    metadata: { artistSlug: artist.slug, spotifyArtistId: artist.spotifyArtistId }
+  });
   await sendArtistRequestReceivedEmail(user, artist).catch((error) => {
     console.warn('Artist request received email failed:', error instanceof Error ? error.message : error);
     return false;
@@ -1741,8 +1915,8 @@ async function subscribeToArtistRequest(user: UserSession, artist: RequestedArti
 
 async function notifyArtistRequestReady(artist: RequestedArtist): Promise<void> {
   if (!isDatabaseConfigured() || !isMailerSendConfigured()) return;
-  const rows = await queryDb<{ id: string; email: string; name: string }>(
-    `SELECT id, email, name
+  const rows = await queryDb<{ id: string; userId?: string; email: string; name: string }>(
+    `SELECT id, user_id AS "userId", email, name
      FROM sg_artist_request_subscribers
      WHERE status = 'queued'
        AND (artist_slug = $1 OR ($2 <> '' AND spotify_artist_id = $2))
@@ -1754,6 +1928,14 @@ async function notifyArtistRequestReady(artist: RequestedArtist): Promise<void> 
   for (const row of rows) {
     try {
       await sendArtistReadyEmail(row.email, row.name || row.email, artist);
+      await logUserJourneyEvent({
+        userId: row.userId || undefined,
+        email: row.email,
+        eventType: 'artist_request_ready',
+        status: 'completed',
+        detail: `${artist.name} is ready to play`,
+        metadata: { artistSlug: artist.slug, spotifyArtistId: artist.spotifyArtistId, songsCount: artist.songsCount }
+      });
       await queryDb(
         `UPDATE sg_artist_request_subscribers
          SET status = 'notified',
@@ -1807,6 +1989,63 @@ type SpotifyArtistApiItem = {
   popularity?: number;
   genres?: string[];
 };
+
+type RequestedArtistAlbumPack = NonNullable<RequestedArtist['albumPacks']>[number];
+
+function interleaveSpotifyTracksByAlbum(items: Array<{ track: any; album: any }>): Array<{ track: any; album: any }> {
+  const groups = new Map<string, Array<{ track: any; album: any }>>();
+  items.forEach((item) => {
+    const key = safeText(item.album?.id || item.album?.name || 'unknown', 180);
+    groups.set(key, [...(groups.get(key) || []), item]);
+  });
+  const queues = Array.from(groups.values());
+  const interleaved: Array<{ track: any; album: any }> = [];
+  let hasItems = true;
+  while (hasItems && interleaved.length < items.length) {
+    hasItems = false;
+    for (const queue of queues) {
+      const next = queue.shift();
+      if (next) {
+        interleaved.push(next);
+        hasItems = true;
+      }
+    }
+  }
+  return interleaved;
+}
+
+function buildRequestedArtistAlbumPacks(artistName: string, songs: Song[]): RequestedArtistAlbumPack[] {
+  const albumGroups = new Map<string, Song[]>();
+  songs.forEach((song) => {
+    const key = safeText(song.album, 160) || `${artistName} Essentials`;
+    albumGroups.set(key, [...(albumGroups.get(key) || []), song]);
+  });
+  const albumPacks: RequestedArtistAlbumPack[] = Array.from(albumGroups.entries())
+    .filter(([, albumSongs]) => albumSongs.length >= 2)
+    .map(([title, albumSongs]) => ({
+      id: slugifyChallenge(title),
+      title,
+      type: albumSongs.some((song) => song.albumType === 'single') ? 'single' : 'album',
+      coverImage: albumSongs[0]?.artworkUrl || '',
+      songIds: albumSongs.map((song) => song.id),
+      songsCount: albumSongs.length,
+      releaseYear: albumSongs.find((song) => Number.isFinite(song.releaseYear))?.releaseYear
+    }));
+
+  const singles = songs.filter((song) => song.albumType === 'single' || (albumGroups.get(song.album)?.length || 0) === 1);
+  if (singles.length > 0) {
+    albumPacks.unshift({
+      id: 'all-singles',
+      title: `All ${artistName} singles`,
+      type: 'singles',
+      coverImage: singles[0]?.artworkUrl || '',
+      songIds: singles.map((song) => song.id),
+      songsCount: singles.length,
+      releaseYear: singles.find((song) => Number.isFinite(song.releaseYear))?.releaseYear
+    });
+  }
+  return albumPacks.slice(0, 30);
+}
 
 function normalizeSpotifyArtistSuggestion(artist: SpotifyArtistApiItem): SpotifyArtistSuggestion | null {
   const id = safeText(artist.id, 80);
@@ -1901,7 +2140,7 @@ async function buildRequestedArtistPackFromSpotify(name: string, spotifyArtistId
   }
 
   const seen = new Set<string>();
-  const spotifyTracks = [
+  const spotifyTracks = interleaveSpotifyTracksByAlbum([
     ...(topTracksResponse.tracks || []).map((track) => ({ track, album: track.album })),
     ...albumTracks
   ].filter(({ track }) => {
@@ -1911,7 +2150,7 @@ async function buildRequestedArtistPackFromSpotify(name: string, spotifyArtistId
     if (!title || seen.has(key)) return false;
     seen.add(key);
     return true;
-  }).slice(0, 50);
+  })).slice(0, 50);
 
   if (spotifyTracks.length === 0) {
     throw new Error(`Spotify did not return playable tracks for "${spotifyArtist.name || name}".`);
@@ -1932,6 +2171,7 @@ async function buildRequestedArtistPackFromSpotify(name: string, spotifyArtistId
       title,
       artist,
       album: safeText(album?.name, 160) || `${artist} Essentials`,
+      albumType: album?.album_type === 'single' || album?.album_type === 'compilation' || album?.album_type === 'appears_on' ? album.album_type : 'album',
       genre: 'Spotify Artist Catalog',
       countryCode: 'GLOBAL',
       releaseYear: Number.isFinite(releaseYear) ? releaseYear : undefined,
@@ -1944,9 +2184,10 @@ async function buildRequestedArtistPackFromSpotify(name: string, spotifyArtistId
     };
   });
 
+  const artistName = safeText(spotifyArtist.name, 100) || safeText(name, 100);
   return {
     slug,
-    name: safeText(spotifyArtist.name, 100) || safeText(name, 100),
+    name: artistName,
     spotifyArtistId: safeText(spotifyArtist.id, 80),
     spotifyUrl: safeHttpsUrl(spotifyArtist.external_urls?.spotify),
     songIds: songs.map((song) => song.id),
@@ -1957,7 +2198,8 @@ async function buildRequestedArtistPackFromSpotify(name: string, spotifyArtistId
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     nextRefreshAt: getNextArtistPackRefreshAt(),
-    lastRefreshType: 'request'
+    lastRefreshType: 'request',
+    albumPacks: buildRequestedArtistAlbumPacks(artistName, songs)
   };
 }
 
@@ -3650,8 +3892,47 @@ async function startServer() {
           await markCheckoutCompleted(userId, session.id).catch((error) => {
             console.warn('Abandoned checkout completion marker failed:', error instanceof Error ? error.message : error);
           });
+          await logUserJourneyEvent({
+            userId,
+            email: session.customer_details?.email || session.customer_email || '',
+            eventType: 'purchase_unlimited',
+            status: 'completed',
+            detail: `Weekly access granted until ${accessUntil}`,
+            metadata: { stripeSessionId: session.id, amountTotal: session.amount_total, currency: session.currency }
+          });
           console.log(`Granted weekly Song Guess access until ${accessUntil} for ${userId}`);
         }
+      } else if (event.type === 'payment_intent.payment_failed') {
+        const intent = event.data.object as Stripe.PaymentIntent;
+        const userId = String(intent.metadata?.userId || '');
+        const email = safeText(String(intent.receipt_email || ''), 254);
+        const failure = getStripeFailureMessage(intent.last_payment_error?.code, intent.last_payment_error?.message || undefined);
+        await queryDb(
+          `INSERT INTO sg_payments (id, user_id, email, amount_cents, currency, status, stripe_payment_intent_id, failure_reason)
+           VALUES ($1, NULLIF($2, '')::uuid, $3, $4, $5, 'failed', $6, $7)
+           ON CONFLICT (stripe_payment_intent_id) WHERE stripe_payment_intent_id IS NOT NULL AND stripe_payment_intent_id <> ''
+           DO UPDATE SET status = 'failed', failure_reason = EXCLUDED.failure_reason, updated_at = now()`,
+          [
+            randomUUID(),
+            userId,
+            email,
+            intent.amount || WEEKLY_UNLOCK_AMOUNT_CENTS,
+            intent.currency || 'usd',
+            intent.id,
+            failure
+          ]
+        ).catch((error) => {
+          console.warn('Failed payment record failed:', error instanceof Error ? error.message : error);
+          return [];
+        });
+        await logUserJourneyEvent({
+          userId: userId || undefined,
+          email,
+          eventType: 'payment_failed',
+          status: 'failed',
+          detail: failure,
+          metadata: { stripePaymentIntentId: intent.id, code: intent.last_payment_error?.code }
+        });
       }
       res.json({ received: true });
     } catch (error) {
@@ -4131,6 +4412,14 @@ async function startServer() {
       await markMailerSendRegistered(userId, 'password').catch((error) => {
         console.warn('MailerSend registration marker failed:', error instanceof Error ? error.message : error);
       });
+      await logUserJourneyEvent({
+        userId,
+        email,
+        eventType: 'signup',
+        status: 'pending',
+        detail: 'Password account created; email verification required',
+        metadata: { source: 'password', referrer: safeText(req.headers.referer, 2048), userAgent: safeText(req.headers['user-agent'], 240) }
+      });
       const appUrl = getEffectiveAppUrl(req);
       const verificationUrl = `${appUrl}/api/auth/verify?token=${encodeURIComponent(rawVerifyToken)}`;
       const emailSent = await sendVerificationEmail(email, name, verificationUrl, 'new-account').catch((error) => {
@@ -4180,6 +4469,13 @@ async function startServer() {
         return;
       }
       await createUserSession(req, res, String(row.id));
+      await logUserJourneyEvent({
+        userId: String(row.id),
+        email: String(row.email),
+        eventType: 'login',
+        status: 'completed',
+        detail: 'Password login completed'
+      });
       res.json(await buildAuthSessionResponseForUser({
         id: String(row.id),
         email: String(row.email),
@@ -4287,6 +4583,13 @@ async function startServer() {
       [hashToken(token)]
     );
     if (rows[0]) {
+      await logUserJourneyEvent({
+        userId: String(rows[0].id),
+        email: String(rows[0].email),
+        eventType: 'email_verified',
+        status: 'completed',
+        detail: 'Account email verified'
+      });
       await sendWelcomeEmail(String(rows[0].email), String(rows[0].name || '')).catch((error) => {
         console.warn('Welcome email send failed:', error instanceof Error ? error.message : error);
         return false;
@@ -4426,12 +4729,27 @@ async function startServer() {
         console.warn('MailerSend registration marker failed:', error instanceof Error ? error.message : error);
       });
       if (rows[0].created) {
+        await logUserJourneyEvent({
+          userId: rows[0].id,
+          email,
+          eventType: 'signup',
+          status: 'completed',
+          detail: 'Google account created',
+          metadata: { source: 'google' }
+        });
         await sendWelcomeEmail(email, safeText(profile.name, 80) || email.split('@')[0] || 'Player').catch((error) => {
           console.warn('Welcome email send failed:', error instanceof Error ? error.message : error);
           return false;
         });
       }
       await createUserSession(req, res, rows[0].id);
+      await logUserJourneyEvent({
+        userId: rows[0].id,
+        email,
+        eventType: 'login',
+        status: 'completed',
+        detail: 'Google login completed'
+      });
       appendSetCookie(
         res,
         `${GOOGLE_OAUTH_STATE_COOKIE_NAME}=; Path=/api/auth/google; HttpOnly; SameSite=Lax; Max-Age=0${
@@ -4538,7 +4856,18 @@ async function startServer() {
         ],
         success_url: `${appUrl}/play?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${appUrl}/play?checkout=cancelled`,
-        metadata: { userId: user.id }
+        metadata: { userId: user.id },
+        payment_intent_data: {
+          metadata: { userId: user.id }
+        }
+      });
+      await logUserJourneyEvent({
+        userId: user.id,
+        email: user.email,
+        eventType: 'checkout_started',
+        status: 'pending',
+        detail: 'Stripe Checkout session created',
+        metadata: { stripeSessionId: session.id }
       });
       await recordAbandonedCheckoutStart(user, session).catch((error) => {
         console.warn('Abandoned checkout tracker failed:', error instanceof Error ? error.message : error);
@@ -4555,7 +4884,8 @@ async function startServer() {
       const payments = await queryDb<PaymentRecord>(
         `SELECT id, user_id AS "userId", email, amount_cents AS "amountCents", currency, status,
                 stripe_session_id AS "stripeSessionId", stripe_payment_intent_id AS "stripePaymentIntentId",
-                refunded_at AS "refundedAt", receipt_url AS "receiptUrl", created_at AS "createdAt"
+                refunded_at AS "refundedAt", receipt_url AS "receiptUrl", failure_reason AS "failureReason",
+                created_at AS "createdAt"
          FROM sg_payments
          WHERE user_id = $1
          ORDER BY created_at DESC
@@ -4709,6 +5039,205 @@ async function startServer() {
     }
   });
 
+  app.get('/api/admin/user-segments', requireAdmin, async (_req, res) => {
+    if (!isDatabaseConfigured()) {
+      res.json({
+        segments: {
+          purchasers: 0,
+          activeUnlimited: 0,
+          freeAccounts: 0,
+          topPlayers: 0,
+          returningPlayers: 0,
+          queuedRequesters: 0,
+          unverified: 0
+        }
+      });
+      return;
+    }
+    try {
+      const rows = await queryDb<Record<string, unknown>>(
+        `SELECT
+           (SELECT count(DISTINCT user_id) FROM sg_payments WHERE status IN ('paid', 'succeeded'))::int AS purchasers,
+           (SELECT count(*) FROM sg_entitlements WHERE access_until > now())::int AS "activeUnlimited",
+           (SELECT count(*) FROM sg_users u WHERE NOT EXISTS (
+             SELECT 1 FROM sg_entitlements e WHERE e.user_id = u.id AND e.access_until > now()
+           ))::int AS "freeAccounts",
+           (SELECT count(DISTINCT user_id) FROM sg_leaderboard_entries WHERE user_id IS NOT NULL AND points >= 4000)::int AS "topPlayers",
+           (SELECT count(*) FROM sg_users WHERE last_seen_at IS NOT NULL AND last_seen_at > created_at + interval '1 day')::int AS "returningPlayers",
+           (SELECT count(DISTINCT user_id) FROM sg_artist_request_subscribers WHERE user_id IS NOT NULL AND status = 'queued')::int AS "queuedRequesters",
+           (SELECT count(*) FROM sg_users WHERE email_verified = false)::int AS unverified`
+      );
+      res.json({ segments: rows[0] || {} });
+    } catch {
+      res.status(503).json({ error: 'Could not load user segments' });
+    }
+  });
+
+  app.get('/api/admin/email-events', requireAdmin, async (_req, res) => {
+    if (!isDatabaseConfigured()) {
+      res.json({ emails: [], mailerSendConfigured: isMailerSendConfigured(), databaseConfigured: false });
+      return;
+    }
+    try {
+      const emails = await queryDb(
+        `SELECT id, user_id AS "userId", email, name, subject, category, status,
+                provider_message_id AS "providerMessageId", error,
+                text_body AS "textBody", html_body AS "htmlBody",
+                created_at AS "createdAt", sent_at AS "sentAt"
+         FROM sg_email_events
+         ORDER BY created_at DESC
+         LIMIT 500`
+      );
+      res.json({ emails, mailerSendConfigured: isMailerSendConfigured(), databaseConfigured: true });
+    } catch {
+      res.status(503).json({ error: 'Could not load email events' });
+    }
+  });
+
+  app.post('/api/admin/email-events/:id/retry', requireAdmin, requireAdminCsrf, async (req, res) => {
+    if (!isDatabaseConfigured()) {
+      res.status(503).json({ error: 'Postgres DATABASE_URL is required for email retries' });
+      return;
+    }
+    const id = safeText(req.params.id, 80);
+    try {
+      const rows = await queryDb<Record<string, unknown>>(
+        `SELECT email, name, subject, category, text_body, html_body
+         FROM sg_email_events
+         WHERE id = $1
+         LIMIT 1`,
+        [id]
+      );
+      const email = rows[0];
+      if (!email) {
+        res.status(404).json({ error: 'Email event not found' });
+        return;
+      }
+      await queryDb('UPDATE sg_email_events SET status = $2 WHERE id = $1', [id, 'retrying']);
+      await sendTransactionalEmail(
+        String(email.email || ''),
+        String(email.name || ''),
+        String(email.subject || ''),
+        String(email.text_body || ''),
+        String(email.html_body || ''),
+        String(email.category || 'manual_retry')
+      );
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Email retry failed' });
+    }
+  });
+
+  app.get('/api/admin/users/:id', requireAdmin, async (req, res) => {
+    if (!isDatabaseConfigured()) {
+      res.status(503).json({ error: 'Postgres DATABASE_URL is required for user profiles' });
+      return;
+    }
+    const userId = safeText(req.params.id, 80);
+    try {
+      const users = await queryDb<AdminUserRecord>(
+        `SELECT u.id, u.email, u.name, u.email_verified AS "emailVerified",
+                u.mailersend_registered_at AS "mailerSendRegisteredAt",
+                u.mailersend_registration_source AS "mailerSendRegistrationSource",
+                e.access_until AS "accessUntil", u.created_at AS "createdAt", u.last_seen_at AS "lastSeenAt"
+         FROM sg_users u
+         LEFT JOIN sg_entitlements e ON e.user_id = u.id
+         WHERE u.id = $1
+         LIMIT 1`,
+        [userId]
+      );
+      const user = users[0];
+      if (!user) {
+        res.status(404).json({ error: 'User not found' });
+        return;
+      }
+      const [payments, journey, emails, queuedRequests, leaderboard] = await Promise.all([
+        queryDb(
+          `SELECT id, user_id AS "userId", email, amount_cents AS "amountCents", currency, status,
+                  stripe_session_id AS "stripeSessionId", stripe_payment_intent_id AS "stripePaymentIntentId",
+                  refunded_at AS "refundedAt", receipt_url AS "receiptUrl", failure_reason AS "failureReason",
+                  created_at AS "createdAt"
+           FROM sg_payments
+           WHERE user_id = $1
+           ORDER BY created_at DESC
+           LIMIT 100`,
+          [userId]
+        ),
+        queryDb(
+          `SELECT id, user_id AS "userId", email, event_type AS "eventType", status, detail, metadata, created_at AS "createdAt"
+           FROM sg_user_journey_events
+           WHERE user_id = $1 OR lower(email) = lower($2)
+           ORDER BY created_at DESC
+           LIMIT 200`,
+          [userId, user.email]
+        ),
+        queryDb(
+          `SELECT id, user_id AS "userId", email, name, subject, category, status,
+                  provider_message_id AS "providerMessageId", error,
+                  text_body AS "textBody", html_body AS "htmlBody",
+                  created_at AS "createdAt", sent_at AS "sentAt"
+           FROM sg_email_events
+           WHERE user_id = $1 OR lower(email) = lower($2)
+           ORDER BY created_at DESC
+           LIMIT 100`,
+          [userId, user.email]
+        ),
+        queryDb(
+          `SELECT id, spotify_artist_id AS "spotifyArtistId", artist_slug AS "artistSlug",
+                  artist_name AS "artistName", artist_image_url AS "artistImageUrl",
+                  email, name, status, created_at AS "createdAt", ready_at AS "readyAt", notified_at AS "notifiedAt"
+           FROM sg_artist_request_subscribers
+           WHERE user_id = $1 OR lower(email) = lower($2)
+           ORDER BY created_at DESC
+           LIMIT 100`,
+          [userId, user.email]
+        ),
+        queryDb<{ points: number }>(
+          'SELECT max(points)::int AS points FROM sg_leaderboard_entries WHERE user_id = $1',
+          [userId]
+        )
+      ]);
+      const hasPaid = payments.some((payment: any) => ['paid', 'succeeded'].includes(String(payment.status)));
+      const segments = [
+        hasPaid ? 'Purchaser' : 'Free account',
+        user.accessUntil ? 'Active unlimited' : '',
+        Number(leaderboard[0]?.points || 0) >= 4000 ? 'Top player' : '',
+        user.lastSeenAt && Date.parse(String(user.lastSeenAt)) > Date.parse(String(user.createdAt)) + 24 * 60 * 60 * 1000 ? 'Returning player' : '',
+        queuedRequests.some((request: any) => request.status === 'queued') ? 'Queued requester' : '',
+        !user.emailVerified ? 'Unverified' : ''
+      ].filter(Boolean);
+      res.json({ user, segments, payments, journey, emails, queuedRequests });
+    } catch {
+      res.status(503).json({ error: 'Could not load user profile' });
+    }
+  });
+
+  app.post('/api/admin/artist-requests/:slug/execute', requireAdmin, requireAdminCsrf, async (req, res) => {
+    const slug = slugifyChallenge(req.params.slug);
+    const artists = await getRequestedArtists();
+    const existing = artists.find((artist) => artist.slug === slug || getBaseArtistSlugValue(artist.slug) === slug);
+    if (!existing?.spotifyArtistId) {
+      res.status(404).json({ error: 'Queued Spotify artist request not found' });
+      return;
+    }
+    try {
+      const refreshed = await buildRequestedArtistPackFromSpotify(existing.name, existing.spotifyArtistId);
+      refreshed.createdAt = existing.createdAt;
+      refreshed.updatedAt = new Date().toISOString();
+      refreshed.nextRefreshAt = getNextArtistPackRefreshAt();
+      refreshed.lastRefreshType = 'manual';
+      const nextArtists = [
+        refreshed,
+        ...artists.filter((artist) => artist.spotifyArtistId !== refreshed.spotifyArtistId && artist.slug !== existing.slug)
+      ];
+      await saveRequestedArtists(nextArtists);
+      await notifyArtistRequestReady(refreshed);
+      res.json({ artist: refreshed, artists: nextArtists });
+    } catch (error) {
+      sendSpotifyError(res, error, 'Could not execute queued artist request');
+    }
+  });
+
   app.get('/api/admin/payments', requireAdmin, async (_req, res) => {
     if (!isDatabaseConfigured()) {
       res.json({ payments: [], databaseConfigured: false, stripeConfigured: isStripeConfigured() });
@@ -4718,7 +5247,7 @@ async function startServer() {
       const payments = await queryDb<PaymentRecord>(
         `SELECT id, user_id AS "userId", email, amount_cents AS "amountCents", currency, status,
                 stripe_session_id AS "stripeSessionId", stripe_payment_intent_id AS "stripePaymentIntentId",
-                refunded_at AS "refundedAt", created_at AS "createdAt"
+                refunded_at AS "refundedAt", failure_reason AS "failureReason", created_at AS "createdAt"
          FROM sg_payments
          ORDER BY created_at DESC
          LIMIT 500`

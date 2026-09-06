@@ -24,6 +24,7 @@ export interface Song {
   artistArabic?: string;
   nativeArtist?: string;
   album: string;
+  albumType?: 'album' | 'single' | 'compilation' | 'appears_on';
   genre: string;
   countryCode: string; // 'MA', 'US', 'GB', 'FR', 'ES', 'EG', 'DZ', 'BR', 'KR', 'JP', 'DE', 'IT', 'NG', 'MX', 'GLOBAL'
   releaseYear?: number;

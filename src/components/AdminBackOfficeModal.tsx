@@ -20,12 +20,15 @@ import {
   Trash2,
   Users
 } from 'lucide-react';
-import { AdminAdSlot, AdminConfigState, AdminPageConfig, AdPlacementLocation, AdminUserRecord, PaymentRecord, RequestedArtist } from '../adminTypes';
+import { AdminAdSlot, AdminConfigState, AdminEmailEvent, AdminPageConfig, AdminUserProfile, AdminUserSegments, AdPlacementLocation, AdminUserRecord, PaymentRecord, RequestedArtist } from '../adminTypes';
 import { COUNTRIES } from '../data/countries';
 import {
   clearAdminActivity,
   fetchAdminActivity,
   fetchAdminConfig,
+  fetchAdminEmailEvents,
+  fetchAdminUserProfile,
+  fetchAdminUserSegments,
   fetchAdminPayments,
   fetchAdminUsers,
   getAdminSession,
@@ -33,7 +36,9 @@ import {
   logoutAdmin,
   refundAdminPayment,
   refreshAdminArtistPack,
+  retryAdminEmail,
   saveAdminConfig,
+  executeQueuedArtistRequest,
   uploadBannerAsset
 } from '../utils/adminApi';
 import { fetchRequestedArtists } from '../utils/authApi';
@@ -125,6 +130,11 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
   const [adminUsers, setAdminUsers] = useState<AdminUserRecord[]>([]);
   const [adminUserTotal, setAdminUserTotal] = useState(0);
   const [adminPayments, setAdminPayments] = useState<PaymentRecord[]>([]);
+  const [adminEmailEvents, setAdminEmailEvents] = useState<AdminEmailEvent[]>([]);
+  const [adminSegments, setAdminSegments] = useState<AdminUserSegments | null>(null);
+  const [selectedAdminUserProfile, setSelectedAdminUserProfile] = useState<AdminUserProfile | null>(null);
+  const [loadingUserProfileId, setLoadingUserProfileId] = useState('');
+  const [retryingEmailId, setRetryingEmailId] = useState('');
   const [requestedArtists, setRequestedArtists] = useState<RequestedArtist[]>([]);
   const [paymentMeta, setPaymentMeta] = useState({ databaseConfigured: false, stripeConfigured: false });
   const [selectedCountryCode, setSelectedCountryCode] = useState('GLOBAL');
@@ -239,18 +249,22 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
   );
 
   const loadProtectedData = async () => {
-    const [nextConfig, nextActivity, usersBody, paymentsBody, requestedBody] = await Promise.all([
+    const [nextConfig, nextActivity, usersBody, paymentsBody, requestedBody, segmentsBody, emailEvents] = await Promise.all([
       fetchAdminConfig(),
       fetchAdminActivity(),
       fetchAdminUsers().catch(() => ({ users: [], totalUsers: 0, databaseConfigured: false })),
       fetchAdminPayments().catch(() => ({ payments: [], databaseConfigured: false, stripeConfigured: false })),
-      fetchRequestedArtists().catch(() => [])
+      fetchRequestedArtists().catch(() => []),
+      fetchAdminUserSegments().catch(() => null),
+      fetchAdminEmailEvents().catch(() => [])
     ]);
     setConfig(nextConfig);
     setActivityLogs(nextActivity);
     setAdminUsers(usersBody.users);
     setAdminUserTotal(usersBody.totalUsers || usersBody.users.length);
     setAdminPayments(paymentsBody.payments);
+    setAdminSegments(segmentsBody);
+    setAdminEmailEvents(emailEvents);
     setRequestedArtists(requestedBody);
     onRequestedArtistsChanged?.(requestedBody);
     setPaymentMeta({
@@ -355,13 +369,17 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
 
   const handleRefreshMonetization = async () => {
     try {
-      const [usersBody, paymentsBody] = await Promise.all([
+      const [usersBody, paymentsBody, segmentsBody, emailEvents] = await Promise.all([
         fetchAdminUsers(),
-        fetchAdminPayments()
+        fetchAdminPayments(),
+        fetchAdminUserSegments(),
+        fetchAdminEmailEvents()
       ]);
       setAdminUsers(usersBody.users);
       setAdminUserTotal(usersBody.totalUsers || usersBody.users.length);
       setAdminPayments(paymentsBody.payments);
+      setAdminSegments(segmentsBody);
+      setAdminEmailEvents(emailEvents);
       setPaymentMeta({
         databaseConfigured: usersBody.databaseConfigured && paymentsBody.databaseConfigured,
         stripeConfigured: paymentsBody.stripeConfigured
@@ -369,6 +387,53 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
       showToast('Monetization refreshed');
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : 'Failed to load monetization data');
+    }
+  };
+
+  const handleOpenUserProfile = async (userId: string) => {
+    setLoadingUserProfileId(userId);
+    setAuthError(null);
+    try {
+      setSelectedAdminUserProfile(await fetchAdminUserProfile(userId));
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Could not load user profile');
+    } finally {
+      setLoadingUserProfileId('');
+    }
+  };
+
+  const handleRetryEmail = async (emailId: string) => {
+    setRetryingEmailId(emailId);
+    setAuthError(null);
+    try {
+      await retryAdminEmail(emailId);
+      setAdminEmailEvents(await fetchAdminEmailEvents());
+      if (selectedAdminUserProfile) {
+        setSelectedAdminUserProfile(await fetchAdminUserProfile(selectedAdminUserProfile.user.id));
+      }
+      showToast('Email retry sent');
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Email retry failed');
+    } finally {
+      setRetryingEmailId('');
+    }
+  };
+
+  const handleExecuteQueuedArtist = async (slug: string) => {
+    setRefreshingArtistSlug(slug);
+    setAuthError(null);
+    try {
+      const result = await executeQueuedArtistRequest(slug);
+      setRequestedArtists(result.artists);
+      onRequestedArtistsChanged?.(result.artists);
+      if (selectedAdminUserProfile) {
+        setSelectedAdminUserProfile(await fetchAdminUserProfile(selectedAdminUserProfile.user.id));
+      }
+      showToast(`${result.artist.name} request executed`);
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Queued artist execution failed');
+    } finally {
+      setRefreshingArtistSlug('');
     }
   };
 
@@ -1317,6 +1382,25 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                 </div>
               </div>
 
+              {adminSegments && (
+                <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
+                  {[
+                    ['Purchasers', adminSegments.purchasers],
+                    ['Active unlimited', adminSegments.activeUnlimited],
+                    ['Free accounts', adminSegments.freeAccounts],
+                    ['Top players', adminSegments.topPlayers],
+                    ['Returning', adminSegments.returningPlayers],
+                    ['Queued requests', adminSegments.queuedRequesters],
+                    ['Unverified', adminSegments.unverified]
+                  ].map(([label, value]) => (
+                    <div key={String(label)} className="rounded-xl border border-white/10 bg-[#0b100d] p-3">
+                      <p className="text-[10px] font-black uppercase tracking-wide text-white/35">{label}</p>
+                      <p className="mt-1 text-lg font-black text-[#00e676]">{value}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                 <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-4">
                   <h3 className="text-sm font-black text-white mb-1">Users and access</h3>
@@ -1341,6 +1425,14 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                               {user.accessUntil ? `until ${new Date(user.accessUntil).toLocaleDateString()}` : 'free'}
                             </span>
                           </div>
+                          <button
+                            type="button"
+                            onClick={() => void handleOpenUserProfile(user.id)}
+                            disabled={loadingUserProfileId === user.id}
+                            className="mt-2 rounded-lg border border-[#00e676]/25 bg-[#00e676]/10 px-2.5 py-1.5 text-[11px] font-black text-[#00e676] hover:bg-[#00e676]/20 disabled:cursor-wait disabled:opacity-50"
+                          >
+                            {loadingUserProfileId === user.id ? 'Loading profile' : 'View profile'}
+                          </button>
                         </div>
                       ))}
                     </div>
@@ -1361,6 +1453,9 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                               <p className="font-mono text-white/45">
                                 ${(payment.amountCents / 100).toFixed(2)} {payment.currency.toUpperCase()} • {payment.status}
                               </p>
+                              {payment.failureReason && (
+                                <p className="mt-1 text-[11px] leading-4 text-red-200">{payment.failureReason}</p>
+                              )}
                             </div>
                             <button
                               onClick={() => void handleRefundPayment(payment.id)}
@@ -1376,6 +1471,110 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                   )}
                 </div>
               </div>
+
+              <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-4">
+                <h3 className="text-sm font-black text-white mb-1">MailerSend email log</h3>
+                <p className="mb-3 text-[11px] text-white/45">Latest transactional emails with delivery attempts, failures, previews, and retry actions.</p>
+                {adminEmailEvents.length === 0 ? (
+                  <p className="rounded-xl bg-white/5 p-4 text-xs text-white/45">No email attempts have been logged yet.</p>
+                ) : (
+                  <div className="max-h-96 overflow-y-auto space-y-2">
+                    {adminEmailEvents.slice(0, 80).map((email) => (
+                      <div key={email.id} className="rounded-xl border border-white/10 bg-[#121915] p-3 text-xs">
+                        <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                          <div className="min-w-0">
+                            <p className="truncate font-black text-white">{email.subject}</p>
+                            <p className="text-white/45">{email.email} • {email.category} • {formatIsoDate(email.sentAt || email.createdAt)}</p>
+                            {email.error && <p className="mt-1 text-red-200">{email.error}</p>}
+                            {email.textBody && <details className="mt-2 text-white/55"><summary className="cursor-pointer font-bold text-[#00e676]">Preview</summary><pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-black/25 p-2">{email.textBody}</pre></details>}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void handleRetryEmail(email.id)}
+                            disabled={retryingEmailId === email.id}
+                            className="h-8 rounded-lg border border-[#00e676]/25 bg-[#00e676]/10 px-3 text-[11px] font-black text-[#00e676] hover:bg-[#00e676]/20 disabled:cursor-wait disabled:opacity-50"
+                          >
+                            {retryingEmailId === email.id ? 'Retrying' : 'Retry'}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {selectedAdminUserProfile && (
+                <div className="rounded-2xl border border-[#00e676]/25 bg-[#0d1a13] p-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h3 className="text-lg font-black text-white">{selectedAdminUserProfile.user.name || 'Player profile'}</h3>
+                      <p className="text-xs text-white/55">{selectedAdminUserProfile.user.email}</p>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {selectedAdminUserProfile.segments.map((segment) => (
+                          <span key={segment} className="rounded-full bg-[#00e676]/10 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-[#00e676]">{segment}</span>
+                        ))}
+                      </div>
+                    </div>
+                    <button type="button" onClick={() => setSelectedAdminUserProfile(null)} className="rounded-lg bg-white/5 px-3 py-1.5 text-xs font-bold text-white/60 hover:text-white">
+                      Close profile
+                    </button>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 xl:grid-cols-3">
+                    <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                      <h4 className="text-xs font-black uppercase tracking-wide text-white/45">Journey</h4>
+                      <div className="mt-2 max-h-72 overflow-y-auto space-y-2">
+                        {selectedAdminUserProfile.journey.map((event) => (
+                          <div key={event.id} className="rounded-lg bg-white/[0.04] p-2 text-[11px]">
+                            <p className="font-black text-white">{event.eventType} · {event.status}</p>
+                            <p className="text-white/45">{formatIsoDate(event.createdAt)}</p>
+                            {event.detail && <p className="mt-1 text-white/60">{event.detail}</p>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                      <h4 className="text-xs font-black uppercase tracking-wide text-white/45">Queued artist requests</h4>
+                      <div className="mt-2 max-h-72 overflow-y-auto space-y-2">
+                        {selectedAdminUserProfile.queuedRequests.length === 0 ? <p className="text-xs text-white/40">No queued requests.</p> : selectedAdminUserProfile.queuedRequests.map((request) => (
+                          <div key={request.id} className="rounded-lg bg-white/[0.04] p-2 text-[11px]">
+                            <div className="flex items-center gap-2">
+                              {getSafeImageUrl(request.artistImageUrl) && <img src={getSafeImageUrl(request.artistImageUrl) || ''} alt="" className="h-8 w-8 rounded-md object-cover" referrerPolicy="no-referrer" />}
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate font-black text-white">{request.artistName}</p>
+                                <p className="text-white/45">{request.status} • {formatIsoDate(request.createdAt)}</p>
+                              </div>
+                            </div>
+                            {request.status === 'queued' && (
+                              <button
+                                type="button"
+                                onClick={() => void handleExecuteQueuedArtist(request.artistSlug)}
+                                disabled={refreshingArtistSlug === request.artistSlug}
+                                className="mt-2 rounded-lg bg-[#00e676] px-2.5 py-1.5 text-[11px] font-black text-black disabled:cursor-wait disabled:opacity-50"
+                              >
+                                {refreshingArtistSlug === request.artistSlug ? 'Executing' : 'Execute now'}
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                      <h4 className="text-xs font-black uppercase tracking-wide text-white/45">Emails</h4>
+                      <div className="mt-2 max-h-72 overflow-y-auto space-y-2">
+                        {selectedAdminUserProfile.emails.map((email) => (
+                          <div key={email.id} className="rounded-lg bg-white/[0.04] p-2 text-[11px]">
+                            <p className="font-black text-white">{email.subject}</p>
+                            <p className="text-white/45">{email.status} • {email.category} • {formatIsoDate(email.sentAt || email.createdAt)}</p>
+                            {email.error && <p className="mt-1 text-red-200">{email.error}</p>}
+                            <button type="button" onClick={() => void handleRetryEmail(email.id)} className="mt-2 rounded-md border border-[#00e676]/25 px-2 py-1 text-[10px] font-black text-[#00e676]">Retry</button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

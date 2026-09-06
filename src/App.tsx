@@ -76,7 +76,7 @@ function baseArtistSlug(slug: string): string {
 
 type ActiveView = 'home' | 'game' | 'legal' | 'artists' | 'genres' | 'countries' | 'contact';
 type ActiveChallenge =
-  | { type: 'artist'; slug: string; title: string; songIds?: string[]; songs?: Song[] }
+  | { type: 'artist'; slug: string; title: string; songIds?: string[]; songs?: Song[]; albumPacks?: RequestedArtist['albumPacks'] }
   | { type: 'genre'; slug: string; title: string }
   | null;
 type StartGameOptions = {
@@ -140,6 +140,7 @@ export default function App() {
   const [accessNotice, setAccessNotice] = useState<string | null>(null);
   const [requestedArtists, setRequestedArtists] = useState<RequestedArtist[]>([]);
   const [requestedArtistsLoaded, setRequestedArtistsLoaded] = useState(false);
+  const [activeArtistAlbumPackId, setActiveArtistAlbumPackId] = useState('all');
   const [secretAdminClicks, setSecretAdminClicks] = useState(0);
 
   // Active Game State
@@ -194,7 +195,13 @@ export default function App() {
         : activeChallenge?.type === 'genre'
         ? getSongsByGenreSlug(activeChallenge.slug)
         : [];
-    const countrySongPool = activeChallenge ? challengePool : getSongsForCountry(countryCode);
+    const activeArtistAlbumPack = activeChallenge?.type === 'artist' && activeArtistAlbumPackId !== 'all'
+      ? activeChallenge.albumPacks?.find((pack) => pack.id === activeArtistAlbumPackId)
+      : undefined;
+    const filteredChallengePool = activeArtistAlbumPack
+      ? challengePool.filter((song) => activeArtistAlbumPack.songIds.includes(song.id))
+      : challengePool;
+    const countrySongPool = activeChallenge ? filteredChallengePool : getSongsForCountry(countryCode);
 
     let result: Song[] = [];
 
@@ -228,7 +235,7 @@ export default function App() {
     preCacheGameAudioSnippets(result);
 
     return result;
-  }, [activeMultiplayerSession, activeChallenge, gameMode, activeCollection, settings.selectedCountry, gameSessionKey, shuffleArray]);
+  }, [activeMultiplayerSession, activeChallenge, activeArtistAlbumPackId, gameMode, activeCollection, settings.selectedCountry, gameSessionKey, shuffleArray]);
 
   const totalRounds = gameSongs.length;
   const currentSong = gameSongs[roundIndex] || ALL_SONGS[0];
@@ -462,9 +469,9 @@ export default function App() {
             return;
           }
           const nextArtist = requestedArtist
-            ? { slug: requestedArtist.slug, name: requestedArtist.name, songIds: requestedArtist.songIds, songs: requestedArtist.songs }
+            ? { slug: requestedArtist.slug, name: requestedArtist.name, songIds: requestedArtist.songIds, songs: requestedArtist.songs, albumPacks: requestedArtist.albumPacks }
             : artist
-            ? { slug: artist.slug, name: artist.name, songIds: undefined as string[] | undefined }
+            ? { slug: artist.slug, name: artist.name, songIds: undefined as string[] | undefined, albumPacks: undefined as RequestedArtist['albumPacks'] }
             : null;
           if (requestedArtist && requestedArtist.slug !== segments[1]) {
             window.history.replaceState({}, document.title, getArtistPath(requestedArtist.slug));
@@ -481,7 +488,8 @@ export default function App() {
           }
           if (nextArtist && (activeChallenge?.type !== 'artist' || activeChallenge.slug !== nextArtist.slug)) {
             audioEngine.stop();
-            setActiveChallenge({ type: 'artist', slug: nextArtist.slug, title: nextArtist.name, songIds: nextArtist.songIds, songs: nextArtist.songs });
+            setActiveChallenge({ type: 'artist', slug: nextArtist.slug, title: nextArtist.name, songIds: nextArtist.songIds, songs: nextArtist.songs, albumPacks: nextArtist.albumPacks });
+            setActiveArtistAlbumPackId('all');
             setGameMode('practice');
             setActiveCollection(null);
             setRoundIndex(0);
@@ -854,16 +862,27 @@ export default function App() {
       return;
     }
     const cleanStr = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9\u0600-\u06FF\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/g, '');
+    const cleanBaseTitle = (s: string) => cleanStr(
+      (s || '')
+        .replace(/\([^)]*\)/g, ' ')
+        .replace(/\[[^\]]*\]/g, ' ')
+        .replace(/\s+-\s+(remaster(?:ed)?|live|radio edit|single version|explicit|clean|sped up|slowed|acoustic).*$/i, ' ')
+    );
     const cleanGuessedTitle = cleanStr(guessedSong.title);
     const cleanTargetTitle = cleanStr(currentSong.title);
+    const cleanGuessedBaseTitle = cleanBaseTitle(guessedSong.title);
+    const cleanTargetBaseTitle = cleanBaseTitle(currentSong.title);
     const cleanGuessedArtist = cleanStr(guessedSong.artist);
     const cleanTargetArtist = cleanStr(currentSong.artist);
 
     const isIdMatch = guessedSong.id === currentSong.id;
     const isTitleMatch =
       cleanGuessedTitle === cleanTargetTitle ||
+      (!!cleanGuessedBaseTitle && cleanGuessedBaseTitle === cleanTargetBaseTitle) ||
       (currentSong.titleArabic && cleanGuessedTitle === cleanStr(currentSong.titleArabic)) ||
-      (currentSong.nativeTitle && cleanGuessedTitle === cleanStr(currentSong.nativeTitle));
+      (currentSong.nativeTitle && cleanGuessedTitle === cleanStr(currentSong.nativeTitle)) ||
+      (currentSong.translatedTitle && cleanGuessedTitle === cleanStr(currentSong.translatedTitle)) ||
+      (currentSong.romanizedTitle && cleanGuessedTitle === cleanStr(currentSong.romanizedTitle));
     
     const isArtistMatch =
       !cleanGuessedArtist ||
@@ -1315,8 +1334,10 @@ export default function App() {
         slug: artist.slug,
         title: artist.name,
         songIds: artist.songIds,
-        songs: artist.songs
+        songs: artist.songs,
+        albumPacks: artist.albumPacks
       });
+      setActiveArtistAlbumPackId('all');
       setGameMode('practice');
       setActiveCollection(null);
       setActiveView('game');
@@ -2066,6 +2087,43 @@ export default function App() {
 
         {renderMultiplayerStatusBar()}
 
+        {activeChallenge?.type === 'artist' && activeChallenge.albumPacks && activeChallenge.albumPacks.length > 0 && !activeMultiplayerSession && (
+          <div className="mb-3 flex w-full max-w-3xl gap-2 overflow-x-auto rounded-lg border border-white/10 bg-[#08100b]/80 p-2">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveArtistAlbumPackId('all');
+                setRoundIndex(0);
+                setCurrentStepIndex(0);
+                setIsRevealed(false);
+                setRoundHistory([]);
+                setGameSessionKey(Date.now());
+              }}
+              className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-black ${activeArtistAlbumPackId === 'all' ? 'bg-[#00e676] text-black' : 'bg-white/[0.06] text-white/65 hover:text-white'}`}
+            >
+              All songs
+            </button>
+            {activeChallenge.albumPacks.map((pack) => (
+              <button
+                key={pack.id}
+                type="button"
+                onClick={() => {
+                  setActiveArtistAlbumPackId(pack.id);
+                  setRoundIndex(0);
+                  setCurrentStepIndex(0);
+                  setIsRevealed(false);
+                  setRoundHistory([]);
+                  setGameSessionKey(Date.now());
+                }}
+                className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-black ${activeArtistAlbumPackId === pack.id ? 'bg-[#00e676] text-black' : 'bg-white/[0.06] text-white/65 hover:text-white'}`}
+                title={`${pack.songsCount} songs`}
+              >
+                {pack.title} · {pack.songsCount}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Top Header Banner Ad Slot */}
         {shouldShowAds && (
           <div className="w-full max-w-lg mb-1">
@@ -2099,6 +2157,7 @@ export default function App() {
               titleDisplayMode={settings.titleDisplayPreference || 'both'}
               isLastStep={currentStepIndex >= SNIPPET_TIERS.length - 1}
               nextStepLabel={currentStepIndex < SNIPPET_TIERS.length - 1 ? SNIPPET_TIERS[currentStepIndex + 1]?.label : undefined}
+              prioritySongs={gameSongs}
               disabled={isMultiplayerGuestTurn}
             />
 

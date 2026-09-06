@@ -133,6 +133,7 @@ export interface PaymentRecord {
   stripePaymentIntentId?: string;
   refundedAt?: string;
   receiptUrl?: string;
+  failureReason?: string;
   createdAt: string;
 }
 
@@ -146,6 +147,66 @@ export interface AdminUserRecord {
   accessUntil?: string;
   createdAt: string;
   lastSeenAt?: string;
+}
+
+export interface AdminEmailEvent {
+  id: string;
+  userId?: string;
+  email: string;
+  name?: string;
+  subject: string;
+  category: string;
+  status: 'sent' | 'failed' | 'retrying';
+  providerMessageId?: string;
+  error?: string;
+  textBody?: string;
+  htmlBody?: string;
+  createdAt: string;
+  sentAt?: string;
+}
+
+export interface AdminUserJourneyEvent {
+  id: string;
+  userId?: string;
+  email?: string;
+  eventType: string;
+  status: 'completed' | 'failed' | 'pending';
+  detail?: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface AdminQueuedArtistRequest {
+  id: string;
+  spotifyArtistId?: string;
+  artistSlug: string;
+  artistName: string;
+  artistImageUrl?: string;
+  email: string;
+  name?: string;
+  status: string;
+  createdAt: string;
+  readyAt?: string;
+  notifiedAt?: string;
+}
+
+export interface AdminUserProfile {
+  user: AdminUserRecord;
+  segments: string[];
+  payments: PaymentRecord[];
+  journey: AdminUserJourneyEvent[];
+  emails: AdminEmailEvent[];
+  queuedRequests: AdminQueuedArtistRequest[];
+}
+
+export interface AdminUserSegments {
+  purchasers: number;
+  activeUnlimited: number;
+  freeAccounts: number;
+  topPlayers: number;
+  returningPlayers: number;
+  queuedRequesters: number;
+  unverified: number;
 }
 
 export interface RequestedArtist {
@@ -162,6 +223,15 @@ export interface RequestedArtist {
   updatedAt?: string;
   nextRefreshAt?: string;
   lastRefreshType?: 'manual' | 'automatic' | 'request';
+  albumPacks?: Array<{
+    id: string;
+    title: string;
+    type: 'album' | 'single' | 'compilation' | 'appears_on' | 'singles';
+    coverImage?: string;
+    songIds: string[];
+    songsCount: number;
+    releaseYear?: number;
+  }>;
 }
 
 export interface ArtistRequestResponse {

@@ -34,13 +34,13 @@ function cleanText(str: string): string {
  * Searches global and country-specific songs with instant local fuzzy match across English,
  * Arabic, Korean, Japanese, and Latin titles & artists, and falls back to proxy endpoint.
  */
-export async function searchGlobalSongs(query: string, countryCode?: string): Promise<Song[]> {
+export async function searchGlobalSongs(query: string, countryCode?: string, prioritySongs: Song[] = []): Promise<Song[]> {
   const rawQuery = query.trim();
   if (!rawQuery) return [];
 
   const lowerQuery = rawQuery.toLowerCase();
   const cleanedQuery = cleanText(rawQuery);
-  const cacheKey = `${countryCode || 'ALL'}::${lowerQuery}`;
+  const cacheKey = `${countryCode || 'ALL'}::${prioritySongs.length ? 'priority' : 'all'}::${lowerQuery}`;
 
   // Check in-memory cache first
   if (searchCache.has(cacheKey)) {
@@ -48,7 +48,9 @@ export async function searchGlobalSongs(query: string, countryCode?: string): Pr
   }
 
   // 1. Search local curated catalog
-  const pool = ALL_SONGS;
+  const pool = prioritySongs.length > 0
+    ? Array.from(new Map([...prioritySongs, ...ALL_SONGS].map((song) => [song.id, song])).values())
+    : ALL_SONGS;
 
   const localMatches = pool.filter((song) => {
     const titleClean = cleanText(song.title);
