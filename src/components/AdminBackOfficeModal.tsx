@@ -1699,7 +1699,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                               <p className="truncate font-black text-white">{user.email}</p>
                               <p className="text-white/45">{user.name || 'Player'} • {user.emailVerified ? 'verified' : 'unverified'}</p>
                               <p className="mt-1 text-[10px] uppercase tracking-wide text-[#00e676]/80">
-                                MailerSend: {user.mailerSendRegisteredAt ? `${user.mailerSendRegistrationSource || 'account'} sync` : 'not synced'}
+                                Email provider: {user.mailerSendRegisteredAt ? `${user.mailerSendRegistrationSource || 'account'} sync` : 'not synced'}
                               </p>
                             </div>
                             <span className="rounded-full bg-white/5 px-2 py-1 font-mono text-[10px] text-white/55">
@@ -1754,7 +1754,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-4">
-                <h3 className="text-sm font-black text-white mb-1">MailerSend email log</h3>
+                <h3 className="text-sm font-black text-white mb-1">Email delivery log</h3>
                 <p className="mb-3 text-[11px] text-white/45">Latest transactional emails with delivery attempts, failures, previews, and retry actions.</p>
                 {adminEmailEvents.length === 0 ? (
                   <p className="rounded-xl bg-white/5 p-4 text-xs text-white/45">No email attempts have been logged yet.</p>

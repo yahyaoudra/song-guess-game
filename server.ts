@@ -68,7 +68,7 @@ const ABANDONED_CHECKOUT_BACKFILL_DAYS = Math.max(1, Math.min(30, Number(process
 const ABANDONED_CHECKOUT_BACKFILL_LIMIT = Math.max(25, Math.min(500, Number(process.env.ABANDONED_CHECKOUT_BACKFILL_LIMIT || '200') || 200));
 const SPOTIFY_ARTIST_ALBUM_LIMIT = Math.max(10, Math.min(50, Number(process.env.SPOTIFY_ARTIST_ALBUM_LIMIT || '20') || 20));
 const REQUESTED_ARTIST_MIN_SONGS = Math.max(10, Math.min(50, Number(process.env.REQUESTED_ARTIST_MIN_SONGS || '20') || 20));
-const MAILERSEND_EMAIL_API_URL = 'https://api.mailersend.com/v1/email';
+const RESEND_EMAIL_API_URL = 'https://api.resend.com/emails';
 const SPOTIFY_TOKEN_URL = 'https://accounts.spotify.com/api/token';
 const SPOTIFY_API_URL = 'https://api.spotify.com/v1';
 const RECAPTCHA_VERIFY_URL = 'https://www.google.com/recaptcha/api/siteverify';
@@ -427,6 +427,36 @@ function getStripeFailureMessage(rawCode?: string, rawMessage?: string): string 
   return safeText(rawMessage, 500) || 'Payment failed. Try a different payment method, or retry the payment later.';
 }
 
+function getEmailProviderConfig(): { provider: 'resend' | 'mailersend' | ''; apiKey: string; fromEmail: string; fromName: string } {
+  const resendApiKey = process.env.RESEND_API_KEY?.trim() || '';
+  const resendFromEmail = process.env.RESEND_FROM_EMAIL?.trim() || process.env.EMAIL_FROM?.trim() || '';
+  if (resendApiKey && resendFromEmail) {
+    return {
+      provider: 'resend',
+      apiKey: resendApiKey,
+      fromEmail: resendFromEmail,
+      fromName: process.env.RESEND_FROM_NAME?.trim() || process.env.EMAIL_FROM_NAME?.trim() || 'Song Guess Game'
+    };
+  }
+
+  const mailerSendApiKey = process.env.MAILERSEND_API_KEY?.trim() || '';
+  const mailerSendFromEmail = process.env.MAILERSEND_FROM_EMAIL?.trim() || '';
+  if (mailerSendApiKey && mailerSendFromEmail) {
+    return {
+      provider: 'mailersend',
+      apiKey: mailerSendApiKey,
+      fromEmail: mailerSendFromEmail,
+      fromName: process.env.MAILERSEND_FROM_NAME?.trim() || 'Song Guess Game'
+    };
+  }
+
+  return { provider: '', apiKey: '', fromEmail: '', fromName: 'Song Guess Game' };
+}
+
+function isEmailProviderConfigured(): boolean {
+  return Boolean(getEmailProviderConfig().provider);
+}
+
 function isMailerSendConfigured(): boolean {
   return Boolean(
     process.env.MAILERSEND_API_KEY?.trim() &&
@@ -574,17 +604,15 @@ async function upsertMultiplayerRoomHistory(room: MultiplayerRoom, statusOverrid
 }
 
 async function sendTransactionalEmail(toEmail: string, toName: string, subject: string, text: string, html: string, category = 'transactional'): Promise<void> {
-  const apiKey = process.env.MAILERSEND_API_KEY?.trim();
-  const fromEmail = process.env.MAILERSEND_FROM_EMAIL?.trim();
-  const fromName = process.env.MAILERSEND_FROM_NAME?.trim() || 'Song Guess Game';
-  if (!apiKey || !fromEmail) {
+  const emailProvider = getEmailProviderConfig();
+  if (!emailProvider.provider) {
     await logEmailEvent({
       email: toEmail,
       name: toName,
       subject,
       category,
       status: 'failed',
-      error: 'MailerSend is not configured. Set MAILERSEND_API_KEY and MAILERSEND_FROM_EMAIL.',
+      error: 'Email provider is not configured. Set RESEND_API_KEY and RESEND_FROM_EMAIL.',
       textBody: text,
       htmlBody: html
     });
@@ -592,28 +620,40 @@ async function sendTransactionalEmail(toEmail: string, toName: string, subject: 
   }
 
   try {
-    const response = await fetch(MAILERSEND_EMAIL_API_URL, {
+    const response = await fetch(emailProvider.provider === 'resend' ? RESEND_EMAIL_API_URL : 'https://api.mailersend.com/v1/email', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${emailProvider.apiKey}`,
         'Content-Type': 'application/json',
         Accept: 'application/json'
       },
-      body: JSON.stringify({
-        from: { email: fromEmail, name: fromName },
-        to: [{ email: toEmail, name: toName || toEmail }],
-        subject,
-        text,
-        html
-      })
+      body: JSON.stringify(
+        emailProvider.provider === 'resend'
+          ? {
+              from: `${emailProvider.fromName} <${emailProvider.fromEmail}>`,
+              to: [toEmail],
+              subject,
+              text,
+              html
+            }
+          : {
+              from: { email: emailProvider.fromEmail, name: emailProvider.fromName },
+              to: [{ email: toEmail, name: toName || toEmail }],
+              subject,
+              text,
+              html
+            }
+      )
     });
 
     if (!response.ok) {
       const body = await response.text().catch(() => '');
-      const message = `MailerSend returned ${response.status}: ${body.slice(0, 300)}`;
+      const message = `${emailProvider.provider === 'resend' ? 'Resend' : 'MailerSend'} returned ${response.status}: ${body.slice(0, 300)}`;
       await logEmailEvent({ email: toEmail, name: toName, subject, category, status: 'failed', error: message, textBody: text, htmlBody: html });
       throw new Error(message);
     }
+
+    const body = await response.json().catch(() => ({} as { id?: string }));
 
     await logEmailEvent({
       email: toEmail,
@@ -621,12 +661,12 @@ async function sendTransactionalEmail(toEmail: string, toName: string, subject: 
       subject,
       category,
       status: 'sent',
-      providerMessageId: response.headers.get('x-message-id') || response.headers.get('x-request-id') || '',
+      providerMessageId: safeText(body.id, 180) || response.headers.get('x-message-id') || response.headers.get('x-request-id') || '',
       textBody: text,
       htmlBody: html
     });
   } catch (error) {
-    if (!(error instanceof Error && error.message.startsWith('MailerSend returned'))) {
+    if (!(error instanceof Error && (error.message.startsWith('Resend returned') || error.message.startsWith('MailerSend returned')))) {
       await logEmailEvent({
         email: toEmail,
         name: toName,
@@ -643,7 +683,7 @@ async function sendTransactionalEmail(toEmail: string, toName: string, subject: 
 }
 
 async function sendVerificationEmail(email: string, name: string, verificationUrl: string, mode: 'new-account' | 'email-change'): Promise<boolean> {
-  if (!isMailerSendConfigured()) return false;
+  if (!isEmailProviderConfigured()) return false;
   const title = mode === 'email-change' ? 'Verify your new Song Guess email' : 'Verify your Song Guess account';
   const intro = mode === 'email-change'
     ? 'Confirm this email address to finish updating your Song Guess account.'
@@ -660,7 +700,7 @@ async function sendVerificationEmail(email: string, name: string, verificationUr
 }
 
 async function sendContactEmail(name: string, email: string, message: string): Promise<boolean> {
-  if (!isMailerSendConfigured()) return false;
+  if (!isEmailProviderConfigured()) return false;
   await sendTransactionalEmail(
     'info@songguessgame.online',
     'Song Guess Game',
@@ -710,7 +750,7 @@ function createPrimaryEmailButton(url: string, label: string): string {
 }
 
 async function sendWelcomeEmail(email: string, name: string): Promise<boolean> {
-  if (!isMailerSendConfigured()) return false;
+  if (!isEmailProviderConfigured()) return false;
   const appUrl = `${getProductionAppUrl()}/play`;
   const safeName = name || email.split('@')[0] || 'Player';
   const text = [
@@ -734,7 +774,7 @@ async function sendWelcomeEmail(email: string, name: string): Promise<boolean> {
 }
 
 async function sendArtistRequestReceivedEmail(user: UserSession, artist: RequestedArtist): Promise<boolean> {
-  if (!isMailerSendConfigured()) return false;
+  if (!isEmailProviderConfigured()) return false;
   const safeName = user.name || user.email.split('@')[0] || 'Player';
   const image = safePublicImageUrl(artist.coverImage);
   const text = [
@@ -759,7 +799,7 @@ async function sendArtistRequestReceivedEmail(user: UserSession, artist: Request
 }
 
 async function sendArtistReadyEmail(email: string, name: string, artist: RequestedArtist): Promise<boolean> {
-  if (!isMailerSendConfigured()) return false;
+  if (!isEmailProviderConfigured()) return false;
   const safeName = name || email.split('@')[0] || 'Player';
   const playUrl = `${getProductionAppUrl()}/artist/${encodeURIComponent(artist.slug)}`;
   const image = safePublicImageUrl(artist.coverImage || artist.songs?.[0]?.artworkUrl);
@@ -996,7 +1036,7 @@ async function markCheckoutCompleted(userId: string, stripeSessionId: string): P
 }
 
 async function processAbandonedCheckoutReminders(): Promise<void> {
-  if (!isDatabaseConfigured() || !isMailerSendConfigured()) return;
+  if (!isDatabaseConfigured() || !isEmailProviderConfigured()) return;
 
   const rows = await queryDb<AbandonedCheckoutRow>(
     `SELECT a.stripe_session_id AS "stripeSessionId",
@@ -1992,7 +2032,7 @@ async function subscribeToArtistRequest(user: UserSession, artist: RequestedArti
 }
 
 async function notifyArtistRequestReady(artist: RequestedArtist): Promise<void> {
-  if (!isDatabaseConfigured() || !isMailerSendConfigured()) return;
+  if (!isDatabaseConfigured() || !isEmailProviderConfigured()) return;
   const rows = await queryDb<{ id: string; userId?: string; email: string; name: string }>(
     `SELECT id, user_id AS "userId", email, name
      FROM sg_artist_request_subscribers
@@ -4553,7 +4593,7 @@ async function startServer() {
         [userId, email, passwordHash, name, verifyHash]
       );
       await markMailerSendRegistered(userId, 'password').catch((error) => {
-        console.warn('MailerSend registration marker failed:', error instanceof Error ? error.message : error);
+        console.warn('Email provider registration marker failed:', error instanceof Error ? error.message : error);
       });
       await logUserJourneyEvent({
         userId,
@@ -4869,7 +4909,7 @@ async function startServer() {
       );
 
       await markMailerSendRegistered(rows[0].id, 'google').catch((error) => {
-        console.warn('MailerSend registration marker failed:', error instanceof Error ? error.message : error);
+        console.warn('Email provider registration marker failed:', error instanceof Error ? error.message : error);
       });
       if (rows[0].created) {
         await logUserJourneyEvent({
@@ -5292,7 +5332,7 @@ async function startServer() {
 
   app.get('/api/admin/email-events', requireAdmin, async (_req, res) => {
     if (!isDatabaseConfigured()) {
-      res.json({ emails: [], mailerSendConfigured: isMailerSendConfigured(), databaseConfigured: false });
+      res.json({ emails: [], mailerSendConfigured: isEmailProviderConfigured(), databaseConfigured: false });
       return;
     }
     try {
@@ -5305,7 +5345,7 @@ async function startServer() {
          ORDER BY created_at DESC
          LIMIT 500`
       );
-      res.json({ emails, mailerSendConfigured: isMailerSendConfigured(), databaseConfigured: true });
+      res.json({ emails, mailerSendConfigured: isEmailProviderConfigured(), databaseConfigured: true });
     } catch {
       res.status(503).json({ error: 'Could not load email events' });
     }
@@ -5368,7 +5408,7 @@ async function startServer() {
         res.status(404).json({ error: 'User not found' });
         return;
       }
-      const optionalProfileQuery = async <T extends Record<string, unknown>>(label: string, sql: string, params: unknown[]): Promise<T[]> => {
+      const optionalProfileQuery = async <T>(label: string, sql: string, params: unknown[]): Promise<T[]> => {
         try {
           return await queryDb<T>(sql, params);
         } catch (error) {
@@ -5377,7 +5417,7 @@ async function startServer() {
         }
       };
       const [payments, journey, emails, queuedRequests, leaderboard] = await Promise.all([
-        optionalProfileQuery<PaymentRecord>(
+        optionalProfileQuery<any>(
           'payments',
           `SELECT id, user_id AS "userId", email, amount_cents AS "amountCents", currency, status,
                   stripe_session_id AS "stripeSessionId", stripe_payment_intent_id AS "stripePaymentIntentId",
@@ -5389,7 +5429,7 @@ async function startServer() {
            LIMIT 100`,
           [userId]
         ),
-        optionalProfileQuery<AdminUserJourneyEvent>(
+        optionalProfileQuery<any>(
           'journey',
           `SELECT id, user_id AS "userId", email, event_type AS "eventType", status, detail, metadata, created_at AS "createdAt"
            FROM sg_user_journey_events
@@ -5398,7 +5438,7 @@ async function startServer() {
            LIMIT 200`,
           [userId, user.email]
         ),
-        optionalProfileQuery<AdminEmailEvent>(
+        optionalProfileQuery<any>(
           'emails',
           `SELECT id, user_id AS "userId", email, name, subject, category, status,
                   provider_message_id AS "providerMessageId", error,
@@ -5410,7 +5450,7 @@ async function startServer() {
            LIMIT 100`,
           [userId, user.email]
         ),
-        optionalProfileQuery<AdminQueuedArtistRequest>(
+        optionalProfileQuery<any>(
           'queued artist requests',
           `SELECT id, spotify_artist_id AS "spotifyArtistId", artist_slug AS "artistSlug",
                   artist_name AS "artistName", artist_image_url AS "artistImageUrl",

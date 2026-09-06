@@ -57,9 +57,9 @@ SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
 SPOTIFY_AUTO_REFRESH_ENABLED=true
 SPOTIFY_ARTIST_ALBUM_LIMIT=20
 
-MAILERSEND_API_KEY=your_mailersend_api_key
-MAILERSEND_FROM_EMAIL=noreply@songguessgame.online
-MAILERSEND_FROM_NAME=Song Guess Game
+RESEND_API_KEY=your_resend_api_key
+RESEND_FROM_EMAIL=noreply@songguessgame.online
+RESEND_FROM_NAME=Song Guess Game
 
 GOOGLE_CLIENT_ID=optional_google_oauth_client_id
 GOOGLE_CLIENT_SECRET=optional_google_oauth_client_secret
@@ -205,12 +205,12 @@ The app serves:
 3. Set `GOOGLE_ADSENSE_CLIENT` or paste it in the admin Google integrations panel.
 4. Keep manual banners configured as fallback while AdSense approval is pending.
 
-## MailerSend
+## Resend
 
-1. Verify `songguessgame.online` as a sending domain in MailerSend.
+1. Verify `songguessgame.online` as a sending domain in Resend.
 2. Add SPF, DKIM, and any required tracking DNS records.
-3. Create an API token with email sending permission.
-4. Set `MAILERSEND_API_KEY`, `MAILERSEND_FROM_EMAIL`, and `MAILERSEND_FROM_NAME`.
+3. Create an API key with email sending permission.
+4. Set `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, and `RESEND_FROM_NAME`.
 5. Register a test user and verify that the email verification message arrives.
 6. Submit the `/contact` form and verify the message arrives at `info@songguessgame.online`.
 
