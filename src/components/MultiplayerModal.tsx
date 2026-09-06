@@ -875,6 +875,12 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
                     <span className="text-xs text-white/45">{players.length}/{MAX_PLAYERS}</span>
                   </div>
                   {room.activity && <p className="mt-2 text-xs text-white/45">{room.activity}</p>}
+                  {room.status !== 'playing' && (
+                    <div className="mt-3 flex items-center gap-2 rounded-lg border border-[#00e676]/20 bg-[#00e676]/8 px-3 py-2 text-xs font-bold text-[#00e676]">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Waiting for new players. The host can start playing now.
+                    </div>
+                  )}
                   {!room.settings?.hostHasUnlimited && (
                     <div className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/10 p-3">
                       <p className="text-xs font-bold text-amber-100">
@@ -899,7 +905,7 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
                       </span>
                     ))}
                   </div>
-                  <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                  <div className="mt-4 grid gap-2 sm:grid-cols-4">
                     <button type="button" onClick={copyRoomInvite} className="h-11 rounded-lg border border-[#00e676]/35 bg-[#00e676]/10 text-sm font-black text-[#00e676] hover:bg-[#00e676]/20">
                       {copiedInvite ? 'Invite copied' : 'Share invite'}
                     </button>
@@ -911,9 +917,14 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
                         Enter game
                       </button>
                     ) : isOnlineHost ? (
-                      <button type="button" onClick={() => setStep('pack')} className="h-11 rounded-lg bg-[#00e676] text-sm font-black text-black hover:bg-[#1fe682]">
-                        Choose pack
-                      </button>
+                      <>
+                        <button type="button" onClick={() => setStep('pack')} className="h-11 rounded-lg border border-white/10 bg-white/[0.04] text-sm font-black text-white/70 hover:bg-white/10">
+                          Change playlist
+                        </button>
+                        <button type="button" onClick={startOnlineGame} className="h-11 rounded-lg bg-[#00e676] text-sm font-black text-black hover:bg-[#1fe682]">
+                          Start playing now
+                        </button>
+                      </>
                     ) : (
                       <div className="flex h-11 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-xs font-black text-white/45">
                         Waiting for host
