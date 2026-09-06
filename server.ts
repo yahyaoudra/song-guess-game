@@ -684,6 +684,8 @@ async function sendTransactionalEmail(toEmail: string, toName: string, subject: 
 
 async function sendVerificationEmail(email: string, name: string, verificationUrl: string, mode: 'new-account' | 'email-change'): Promise<boolean> {
   if (!isEmailProviderConfigured()) return false;
+  const category = mode === 'email-change' ? 'email_change_verification' : 'email_verification';
+  const trackedVerificationUrl = addEmailUtm(verificationUrl, category, 'verify_email');
   const title = mode === 'email-change' ? 'Verify your new Song Guess email' : 'Verify your Song Guess account';
   const intro = mode === 'email-change'
     ? 'Confirm this email address to finish updating your Song Guess account.'
@@ -692,9 +694,9 @@ async function sendVerificationEmail(email: string, name: string, verificationUr
     email,
     name,
     title,
-    `${intro}\n\n${verificationUrl}\n\nThis link expires in 24 hours.`,
-    `<p>${escapeHtml(intro)}</p><p><a href="${escapeHtml(verificationUrl)}">Verify email</a></p><p>This link expires in 24 hours.</p>`,
-    mode === 'email-change' ? 'email_change_verification' : 'email_verification'
+    `${intro}\n\n${trackedVerificationUrl}\n\nThis link expires in 24 hours.`,
+    `<p>${escapeHtml(intro)}</p><p><a href="${escapeHtml(trackedVerificationUrl)}">Verify email</a></p><p>This link expires in 24 hours.</p>`,
+    category
   );
   return true;
 }
@@ -702,7 +704,9 @@ async function sendVerificationEmail(email: string, name: string, verificationUr
 async function sendVerificationReminderEmail(email: string, name: string, verificationUrl: string): Promise<boolean> {
   if (!isEmailProviderConfigured()) return false;
   const safeName = name || email.split('@')[0] || 'Player';
-  const appUrl = `${getProductionAppUrl()}/play`;
+  const category = 'email_verification_reminder';
+  const trackedVerificationUrl = addEmailUtm(verificationUrl, category, 'verify_email');
+  const appUrl = addEmailUtm(`${getProductionAppUrl()}/play`, category, 'play_now');
   const text = [
     `Hi ${safeName},`,
     '',
@@ -710,7 +714,7 @@ async function sendVerificationReminderEmail(email: string, name: string, verifi
     '',
     'Verify your email to keep your player identity, account benefits, and game history connected.',
     '',
-    `Verify email: ${verificationUrl}`,
+    `Verify email: ${trackedVerificationUrl}`,
     `Play Song Guess Game: ${appUrl}`,
     '',
     'This verification link expires in 48 hours.'
@@ -721,11 +725,11 @@ async function sendVerificationReminderEmail(email: string, name: string, verifi
     [
       `<p style="margin:0 0 14px;color:#f5fff8;font-size:16px;line-height:24px;">Hi ${escapeHtml(safeName)},</p>`,
       '<p style="margin:0 0 18px;color:#a7b4ad;font-size:15px;line-height:24px;">You can still verify your Song Guess Game account. This keeps your player identity, account benefits, and game history connected.</p>',
-      createPrimaryEmailButton(verificationUrl, 'Verify email'),
+      createPrimaryEmailButton(trackedVerificationUrl, 'Verify email'),
       `<p style="margin:16px 0 0;color:#819087;font-size:12px;line-height:19px;">This verification link expires in 48 hours. You can also return to <a href="${escapeHtml(appUrl)}" style="color:#00e676;text-decoration:underline;">Song Guess Game</a>.</p>`
     ].join('')
   );
-  await sendTransactionalEmail(email, safeName, 'Verify your Song Guess Game account', text, html, 'email_verification_reminder');
+  await sendTransactionalEmail(email, safeName, 'Verify your Song Guess Game account', text, html, category);
   return true;
 }
 
@@ -781,7 +785,7 @@ function createPrimaryEmailButton(url: string, label: string): string {
 
 async function sendWelcomeEmail(email: string, name: string): Promise<boolean> {
   if (!isEmailProviderConfigured()) return false;
-  const appUrl = `${getProductionAppUrl()}/play`;
+  const appUrl = addEmailUtm(`${getProductionAppUrl()}/play`, 'welcome', 'play_now');
   const safeName = name || email.split('@')[0] || 'Player';
   const text = [
     `Hi ${safeName},`,
@@ -807,12 +811,15 @@ async function sendArtistRequestReceivedEmail(user: UserSession, artist: Request
   if (!isEmailProviderConfigured()) return false;
   const safeName = user.name || user.email.split('@')[0] || 'Player';
   const image = safePublicImageUrl(artist.coverImage);
+  const browseUrl = addEmailUtm(`${getProductionAppUrl()}/artist`, 'artist_request_received', 'browse_artists');
   const text = [
     `Hi ${safeName},`,
     '',
     `We received your request for ${artist.name}. It is in the queue and we will email you when the Spotify pack is ready.`,
     '',
-    'We are handling artist requests in order while respecting Spotify API limits.'
+    'We are handling artist requests in order while respecting Spotify API limits.',
+    '',
+    `Browse artists: ${browseUrl}`
   ].join('\n');
   const html = createEmailShell(
     `${artist.name} request received`,
@@ -821,7 +828,8 @@ async function sendArtistRequestReceivedEmail(user: UserSession, artist: Request
       `<p style="margin:0 0 14px;color:#f5fff8;font-size:16px;line-height:24px;">Hi ${escapeHtml(safeName)},</p>`,
       image ? `<img src="${escapeHtml(image)}" alt="${escapeHtml(artist.name)}" width="96" height="96" style="display:block;width:96px;height:96px;object-fit:cover;border-radius:16px;border:1px solid #244231;margin:0 0 18px;">` : '',
       `<p style="margin:0 0 18px;color:#a7b4ad;font-size:15px;line-height:24px;">We received your request for <strong style="color:#ffffff;">${escapeHtml(artist.name)}</strong>. It is in the queue while we respect Spotify API limits.</p>`,
-      '<p style="margin:0;color:#a7b4ad;font-size:15px;line-height:24px;">We will send you a Play Now link as soon as the pack is built.</p>'
+      '<p style="margin:0 0 18px;color:#a7b4ad;font-size:15px;line-height:24px;">We will send you a Play Now link as soon as the pack is built.</p>',
+      createPrimaryEmailButton(browseUrl, 'Browse artists')
     ].join('')
   );
   await sendTransactionalEmail(user.email, safeName, `${artist.name} request received`, text, html, 'artist_request_received');
@@ -831,7 +839,7 @@ async function sendArtistRequestReceivedEmail(user: UserSession, artist: Request
 async function sendArtistReadyEmail(email: string, name: string, artist: RequestedArtist): Promise<boolean> {
   if (!isEmailProviderConfigured()) return false;
   const safeName = name || email.split('@')[0] || 'Player';
-  const playUrl = `${getProductionAppUrl()}/artist/${encodeURIComponent(artist.slug)}`;
+  const playUrl = addEmailUtm(`${getProductionAppUrl()}/artist/${encodeURIComponent(artist.slug)}`, 'artist_ready', 'play_now');
   const image = safePublicImageUrl(artist.coverImage || artist.songs?.[0]?.artworkUrl);
   const subject = `${artist.name} is ready to play`;
   const text = [
@@ -886,10 +894,35 @@ function getProductionAppUrl(): string {
   return normalizePublicAppUrl(getStringEnv(['APP_URL', 'VITE_APP_URL', 'VITE_DOMAIN_NAME']), 'https://songguessgame.online');
 }
 
+function normalizeUtmValue(value: string): string {
+  const normalized = safeText(value, 80)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return normalized || 'transactional';
+}
+
+function addEmailUtm(rawUrl: string, emailType: string, content = 'primary_cta'): string {
+  const campaign = normalizeUtmValue(emailType);
+  const contentValue = normalizeUtmValue(content);
+  try {
+    const url = new URL(rawUrl, getProductionAppUrl());
+    url.searchParams.set('utm_source', 'email');
+    url.searchParams.set('utm_medium', 'email');
+    url.searchParams.set('utm_campaign', campaign);
+    url.searchParams.set('utm_content', contentValue);
+    return url.toString();
+  } catch {
+    const separator = rawUrl.includes('?') ? '&' : '?';
+    return `${rawUrl}${separator}utm_source=email&utm_medium=email&utm_campaign=${encodeURIComponent(campaign)}&utm_content=${encodeURIComponent(contentValue)}`;
+  }
+}
+
 function createAbandonedCheckoutEmail(row: AbandonedCheckoutRow, reminderKey: string): { subject: string; text: string; html: string } {
   const reminder = ABANDONED_CHECKOUT_REMINDERS.find((item) => item.key === reminderKey) || ABANDONED_CHECKOUT_REMINDERS[0];
   const appUrl = getProductionAppUrl();
-  const unlockUrl = row.checkoutUrl || `${appUrl}/play?unlock=1`;
+  const unlockUrl = addEmailUtm(`${appUrl}/play?unlock=1`, `abandoned_checkout_${reminder.key}`, 'get_unlimited');
   const safeName = row.name || row.email.split('@')[0] || 'there';
   const features = [
     'Unlimited heardle for 7 days',

@@ -4,9 +4,9 @@ Use these for opted-in Song Guess Game players. Keep the unsubscribe link active
 
 Default placeholders:
 - `{{name}}`
-- `{{play_url}}`
-- `{{unlock_url}}`
-- `{{multiplayer_url}}`
+- `{{play_url}}` should include `utm_source=email&utm_medium=email&utm_campaign=play_now&utm_content=play_now`
+- `{{unlock_url}}` should include `utm_source=email&utm_medium=email&utm_campaign=unlock_unlimited&utm_content=get_unlimited`
+- `{{multiplayer_url}}` should include `utm_source=email&utm_medium=email&utm_campaign=multiplayer&utm_content=create_room`
 - `{{unsubscribe_url}}`
 
 Footer disclaimer:
@@ -160,20 +160,20 @@ Hi {{name}},
 New artist packs are live in Song Guess Game:
 
 Stray Kids
-https://songguessgame.online/artist/stray-kids-2digfjal
+https://songguessgame.online/artist/stray-kids-2digfjal?utm_source=email&utm_medium=email&utm_campaign=new_added_artists&utm_content=stray_kids
 
 Lana Del Rey
-https://songguessgame.online/artist/lana-del-rey-00fqb4jt
+https://songguessgame.online/artist/lana-del-rey-00fqb4jt?utm_source=email&utm_medium=email&utm_campaign=new_added_artists&utm_content=lana_del_rey
 
 Kanye West
-https://songguessgame.online/artist/kanye-west-5k4w6rqb
+https://songguessgame.online/artist/kanye-west-5k4w6rqb?utm_source=email&utm_medium=email&utm_campaign=new_added_artists&utm_content=kanye_west
 
 Maroon 5
-https://songguessgame.online/artist/maroon-5-04gdigrs
+https://songguessgame.online/artist/maroon-5-04gdigrs?utm_source=email&utm_medium=email&utm_campaign=new_added_artists&utm_content=maroon_5
 
 Want more than Daily 5?
 Get unlimited access for the week: all artists, all countries, all genres, multiplayer rooms, and no ads while your pass is active.
-https://songguessgame.online/play?unlock=1
+https://songguessgame.online/play?unlock=1&utm_source=email&utm_medium=email&utm_campaign=new_added_artists&utm_content=get_unlimited
 
 Song Guess Game is not affiliated with Stray Kids, Lana Del Rey, Kanye West, Maroon 5, Spotify, Apple Music, or any record label.
 Unsubscribe: {{unsubscribe_url}}
