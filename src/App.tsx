@@ -123,6 +123,7 @@ export default function App() {
   const [authInitialMode, setAuthInitialMode] = useState<'login' | 'register'>('register');
   const [pendingArtistRequest, setPendingArtistRequest] = useState<{ name: string; spotifyArtistId?: string; imageUrl?: string } | null>(null);
   const [pendingUnlockAfterAuth, setPendingUnlockAfterAuth] = useState(false);
+  const [pendingArtistAlbumPackId, setPendingArtistAlbumPackId] = useState<string | null>(null);
   const [showAlbumAccessTooltip, setShowAlbumAccessTooltip] = useState(false);
   const [isPaywallOpen, setIsPaywallOpen] = useState(false);
   const [isMultiplayerOpen, setIsMultiplayerOpen] = useState(false);
@@ -824,18 +825,23 @@ export default function App() {
     setIsAuthOpen(true);
   }, [authSession.authenticated, handleUnlock]);
 
-  const applyArtistAlbumPack = useCallback((albumPackId: string) => {
-    if (albumPackId !== 'all' && !authSession.entitlement.active) {
-      requireAlbumAccess();
-      return;
-    }
+  const activateArtistAlbumPack = useCallback((albumPackId: string) => {
     setActiveArtistAlbumPackId(albumPackId);
     setRoundIndex(0);
     setCurrentStepIndex(0);
     setIsRevealed(false);
     setRoundHistory([]);
     setGameSessionKey(Date.now());
-  }, [authSession.entitlement.active, requireAlbumAccess]);
+  }, []);
+
+  const applyArtistAlbumPack = useCallback((albumPackId: string) => {
+    if (albumPackId !== 'all' && !authSession.entitlement.active) {
+      setPendingArtistAlbumPackId(albumPackId);
+      requireAlbumAccess();
+      return;
+    }
+    activateArtistAlbumPack(albumPackId);
+  }, [activateArtistAlbumPack, authSession.entitlement.active, requireAlbumAccess]);
 
   const handleUpdateVolume = (newVol: number) => {
     const updated = { ...getStoredSettings(), volume: newVol };
@@ -1481,9 +1487,25 @@ export default function App() {
     if (pendingUnlockAfterAuth) {
       setPendingUnlockAfterAuth(false);
       setIsAuthOpen(false);
-      setIsPaywallOpen(true);
+      if (session.entitlement.active) {
+        if (pendingArtistAlbumPackId) {
+          activateArtistAlbumPack(pendingArtistAlbumPackId);
+          setPendingArtistAlbumPackId(null);
+        }
+        setIsPaywallOpen(false);
+      } else {
+        setIsPaywallOpen(true);
+      }
     }
-  }, [handleRequestArtist, multiplayerAuthReturn, pendingArtistRequest, pendingUnlockAfterAuth, refreshAccessState]);
+  }, [
+    activateArtistAlbumPack,
+    handleRequestArtist,
+    multiplayerAuthReturn,
+    pendingArtistAlbumPackId,
+    pendingArtistRequest,
+    pendingUnlockAfterAuth,
+    refreshAccessState
+  ]);
 
   useEffect(() => {
     const socket = activeMultiplayerSession?.socket;
