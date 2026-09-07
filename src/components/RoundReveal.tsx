@@ -151,9 +151,9 @@ export const RoundReveal: React.FC<RoundRevealProps> = ({
   return (
     <div className="w-full max-w-lg mx-auto flex flex-col items-center text-center select-none mt-4 mb-8 px-4 animate-in fade-in zoom-in-95 duration-300">
       {/* Album Artwork Cover with Play/Pause Badge */}
-      <div className="relative group mb-4">
+      <div className={`relative group mb-4 ${isCorrect ? 'song-cover-success-pop' : ''}`}>
         <div
-          className="w-44 h-44 sm:w-52 sm:h-52 rounded-2xl overflow-hidden shadow-2xl border border-white/10 bg-[#161d19] relative transition-transform duration-300 group-hover:scale-105"
+          className={`w-44 h-44 sm:w-52 sm:h-52 rounded-2xl overflow-hidden shadow-2xl border border-white/10 bg-[#161d19] relative transition-transform duration-300 group-hover:scale-105 ${isCorrect ? 'song-cover-success-ring' : ''}`}
           style={{
             boxShadow: isCorrect
               ? `0 10px 40px -10px ${activeColor}40`
