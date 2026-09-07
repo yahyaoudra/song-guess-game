@@ -108,7 +108,7 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [currentPage, setCurrentPage] = useState(1);
   const [albumPickerCollection, setAlbumPickerCollection] = useState<QuizCollection | null>(null);
-  const [albumAccessNotice, setAlbumAccessNotice] = useState(false);
+  const [albumAccessNoticeCollectionId, setAlbumAccessNoticeCollectionId] = useState('');
   const runtimeCountries = useMemo(() => getRuntimeCountries(publicConfig), [publicConfig]);
   const libraryCollections = useMemo(() => {
     const requestedCollections = requestedArtists
@@ -249,8 +249,7 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
 
   const handleSelectAlbumPack = (collection: QuizCollection, albumId: string) => {
     if (!isAlbumSelectionUnlocked) {
-      setAlbumAccessNotice(true);
-      onRequireAlbumAccess?.();
+      setAlbumAccessNoticeCollectionId(collection.id);
       return;
     }
     if (albumId === 'all') {
@@ -470,19 +469,6 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
           </button>
         </div>
 
-        {albumAccessNotice && (
-          <div className="mb-2 rounded-lg border border-[#00e676]/30 bg-[#00e676]/10 px-3 py-2 text-center text-xs font-bold text-[#b8ffd7]">
-            <div>Playing a specific album is included with unlimited access.</div>
-            <button
-              type="button"
-              onClick={onUnlockAlbumAccess}
-              className="mt-1 underline decoration-[#00e676] decoration-2 underline-offset-4 hover:text-white"
-            >
-              Unlock more
-            </button>
-          </div>
-        )}
-
         {/* Filter Pills */}
         <div className="flex items-center gap-2 py-1.5 overflow-x-auto no-scrollbar border-b border-white/5 shrink-0">
           {categories.map((cat) => (
@@ -626,23 +612,39 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
                           </span>
                         </div>
 
-                        <div className="flex items-center gap-1.5">
+                        <div className="relative flex items-center gap-1.5">
                           {hasAlbumPacks ? (
-                            <button
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                if (isAlbumSelectionUnlocked) {
-                                  setAlbumPickerCollection(col);
-                                } else {
-                                  setAlbumAccessNotice(true);
-                                  onRequireAlbumAccess?.();
-                                }
-                              }}
-                              className="inline-flex items-center gap-1 rounded-lg border border-[#00e676]/60 bg-[#00e676]/10 px-2 py-1 text-[10px] font-black text-[#00e676] transition-colors hover:bg-[#00e676]/18 sm:px-2.5 sm:text-[11px]"
-                            >
-                              <Disc3 className="h-3 w-3" />
-                              Select album
-                            </button>
+                            <>
+                              <button
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  if (isAlbumSelectionUnlocked) {
+                                    setAlbumPickerCollection(col);
+                                  } else {
+                                    setAlbumAccessNoticeCollectionId(col.id);
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1 rounded-lg border border-[#00e676]/60 bg-[#00e676]/10 px-2 py-1 text-[10px] font-black text-[#00e676] transition-colors hover:bg-[#00e676]/18 sm:px-2.5 sm:text-[11px]"
+                              >
+                                <Disc3 className="h-3 w-3" />
+                                Select album
+                              </button>
+                              {albumAccessNoticeCollectionId === col.id && (
+                                <div className="absolute bottom-full right-0 z-20 mb-2 w-64 rounded-lg border border-[#00e676]/35 bg-[#0d1a13] p-3 text-left text-xs font-bold text-[#b8ffd7] shadow-2xl">
+                                  <div>Playing a specific album is included with unlimited access.</div>
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      onUnlockAlbumAccess?.();
+                                    }}
+                                    className="mt-1 underline decoration-[#00e676] decoration-2 underline-offset-4 hover:text-white"
+                                  >
+                                    Unlock more
+                                  </button>
+                                </div>
+                              )}
+                            </>
                           ) : activeTab === 'artists' && getArtistSlugFromCollection(col) && (
                             <a
                               href={getArtistPath(getArtistSlugFromCollection(col) || '')}
@@ -812,18 +814,6 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
                 </button>
               </div>
               <div className="p-4">
-                {!isAlbumSelectionUnlocked && albumAccessNotice && (
-                  <div className="mb-3 rounded-lg border border-[#00e676]/30 bg-[#00e676]/10 px-3 py-2 text-center text-xs font-bold text-[#b8ffd7]">
-                    <div>Playing a specific album is included with unlimited access.</div>
-                    <button
-                      type="button"
-                      onClick={onUnlockAlbumAccess}
-                      className="mt-1 underline decoration-[#00e676] decoration-2 underline-offset-4 hover:text-white"
-                    >
-                      Unlock more
-                    </button>
-                  </div>
-                )}
                 <div className="flex max-w-full gap-2 overflow-x-auto pb-2 no-scrollbar">
                 <button
                   onClick={() => handleSelectAlbumPack(albumPickerCollection, 'all')}

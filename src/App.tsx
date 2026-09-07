@@ -102,6 +102,7 @@ export default function App() {
   const checkoutInFlightRef = useRef(false);
   const checkoutAttemptIdRef = useRef('');
   const roundTimeoutRef = useRef(false);
+  const albumAccessTooltipTimeoutRef = useRef<number | null>(null);
 
   // Modals state
   const [isCollectionsOpen, setIsCollectionsOpen] = useState(false);
@@ -122,6 +123,7 @@ export default function App() {
   const [authInitialMode, setAuthInitialMode] = useState<'login' | 'register'>('register');
   const [pendingArtistRequest, setPendingArtistRequest] = useState<{ name: string; spotifyArtistId?: string; imageUrl?: string } | null>(null);
   const [pendingUnlockAfterAuth, setPendingUnlockAfterAuth] = useState(false);
+  const [showAlbumAccessTooltip, setShowAlbumAccessTooltip] = useState(false);
   const [isPaywallOpen, setIsPaywallOpen] = useState(false);
   const [isMultiplayerOpen, setIsMultiplayerOpen] = useState(false);
   const [initialMultiplayerRoomCode, setInitialMultiplayerRoomCode] = useState('');
@@ -788,7 +790,27 @@ export default function App() {
   }, [authSession.authenticated]);
 
   const requireAlbumAccess = useCallback(() => {
-    setAccessNotice('Playing a specific album is included with unlimited access.');
+    setShowAlbumAccessTooltip(true);
+    if (albumAccessTooltipTimeoutRef.current) {
+      window.clearTimeout(albumAccessTooltipTimeoutRef.current);
+    }
+    albumAccessTooltipTimeoutRef.current = window.setTimeout(() => {
+      setShowAlbumAccessTooltip(false);
+      albumAccessTooltipTimeoutRef.current = null;
+    }, 5000);
+  }, []);
+
+  useEffect(() => {
+    if (activeChallenge?.type === 'artist') return;
+    setShowAlbumAccessTooltip(false);
+  }, [activeChallenge?.type]);
+
+  useEffect(() => {
+    return () => {
+      if (albumAccessTooltipTimeoutRef.current) {
+        window.clearTimeout(albumAccessTooltipTimeoutRef.current);
+      }
+    };
   }, []);
 
   const handleAccessNoticeUnlock = useCallback(() => {
@@ -2208,6 +2230,18 @@ export default function App() {
               <span>Albums</span>
               <span className="normal-case tracking-normal text-white/30">scroll to choose</span>
             </div>
+            {showAlbumAccessTooltip && (
+              <div className="mb-2 w-fit max-w-full rounded-lg border border-[#00e676]/30 bg-[#0d1a13] px-3 py-2 text-xs font-bold text-[#b8ffd7] shadow-xl">
+                <div>Playing a specific album is included with unlimited access.</div>
+                <button
+                  type="button"
+                  onClick={handleAccessNoticeUnlock}
+                  className="mt-1 underline decoration-[#00e676] decoration-2 underline-offset-4 hover:text-white"
+                >
+                  Unlock more
+                </button>
+              </div>
+            )}
             <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
             <button
               type="button"
