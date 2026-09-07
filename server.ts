@@ -70,8 +70,10 @@ const ABANDONED_CHECKOUT_CHECK_MS = 5 * 60 * 1000;
 const ABANDONED_CHECKOUT_START_DELAY_MS = 60 * 1000;
 const ABANDONED_CHECKOUT_BACKFILL_DAYS = Math.max(1, Math.min(30, Number(process.env.ABANDONED_CHECKOUT_BACKFILL_DAYS || '7') || 7));
 const ABANDONED_CHECKOUT_BACKFILL_LIMIT = Math.max(25, Math.min(500, Number(process.env.ABANDONED_CHECKOUT_BACKFILL_LIMIT || '200') || 200));
-const SPOTIFY_ARTIST_ALBUM_LIMIT = Math.max(10, Math.min(50, Number(process.env.SPOTIFY_ARTIST_ALBUM_LIMIT || '20') || 20));
-const REQUESTED_ARTIST_MIN_SONGS = Math.max(10, Math.min(50, Number(process.env.REQUESTED_ARTIST_MIN_SONGS || '20') || 20));
+const REQUESTED_ARTIST_MAX_SONGS = Math.max(50, Math.min(300, Number(process.env.REQUESTED_ARTIST_MAX_SONGS || '150') || 150));
+const REQUESTED_ARTIST_MIN_SONGS = Math.max(10, Math.min(REQUESTED_ARTIST_MAX_SONGS, Number(process.env.REQUESTED_ARTIST_MIN_SONGS || '80') || 80));
+const SPOTIFY_ARTIST_ALBUM_LIMIT = Math.max(20, Math.min(200, Number(process.env.SPOTIFY_ARTIST_ALBUM_LIMIT || '80') || 80));
+const REQUESTED_ARTIST_ALBUM_PACK_LIMIT = Math.max(30, Math.min(100, Number(process.env.REQUESTED_ARTIST_ALBUM_PACK_LIMIT || '60') || 60));
 const RESEND_EMAIL_API_URL = 'https://api.resend.com/emails';
 const BREVO_EMAIL_API_URL = 'https://api.brevo.com/v3/smtp/email';
 const SPOTIFY_TOKEN_URL = 'https://accounts.spotify.com/api/token';
@@ -2207,7 +2209,7 @@ async function getRequestedArtists(): Promise<RequestedArtist[]> {
               deezerUrl: safeHttpsUrl(song.deezerUrl),
               difficulty: song.difficulty || 'MEDIUM'
             }))
-            .slice(0, 50)
+            .slice(0, REQUESTED_ARTIST_MAX_SONGS)
         : [];
       const hasSpotifyBuiltSongs = songs.length > 0;
       const requestedStatus = artist.status === 'queued' || artist.status === 'pending' ? artist.status : undefined;
@@ -2217,8 +2219,8 @@ async function getRequestedArtists(): Promise<RequestedArtist[]> {
             title: safeText(pack.title, 160),
             type: (pack.type === 'single' || pack.type === 'compilation' || pack.type === 'appears_on' || pack.type === 'singles' ? pack.type : 'album') as RequestedArtistAlbumPack['type'],
             coverImage: safePublicImageUrl(pack.coverImage),
-            songIds: Array.isArray(pack.songIds) ? pack.songIds.map((id) => safeText(id, 120)).filter(Boolean).slice(0, 80) : [],
-            songsCount: Math.max(0, Math.min(80, Number(pack.songsCount) || 0)),
+            songIds: Array.isArray(pack.songIds) ? pack.songIds.map((id) => safeText(id, 120)).filter(Boolean).slice(0, REQUESTED_ARTIST_MAX_SONGS) : [],
+            songsCount: Math.max(0, Math.min(REQUESTED_ARTIST_MAX_SONGS, Number(pack.songsCount) || 0)),
             releaseYear: Number.isFinite(Number(pack.releaseYear)) ? Number(pack.releaseYear) : undefined
           })).filter((pack) => pack.id && pack.title && pack.songIds.length > 0)
         : [];
@@ -2486,7 +2488,7 @@ function buildRequestedArtistAlbumPacks(artistName: string, songs: Song[]): Requ
       releaseYear: singles.find((song) => Number.isFinite(song.releaseYear))?.releaseYear
     });
   }
-  return albumPacks.slice(0, 30);
+  return albumPacks.slice(0, REQUESTED_ARTIST_ALBUM_PACK_LIMIT);
 }
 
 function normalizeSpotifyArtistSuggestion(artist: SpotifyArtistApiItem): SpotifyArtistSuggestion | null {
@@ -2713,7 +2715,7 @@ async function buildRequestedArtistPackFromSpotify(name: string, spotifyArtistId
     external_urls?: { spotify?: string };
   };
   const albums: SpotifyAlbumSummary[] = [];
-  for (let offset = 0; offset < SPOTIFY_ARTIST_ALBUM_LIMIT; offset += 10) {
+  for (let offset = 0; offset < SPOTIFY_ARTIST_ALBUM_LIMIT; offset += 50) {
     const albumsResponse = await fetchSpotifyJson<{
       items?: SpotifyAlbumSummary[];
       total?: number;
@@ -2721,7 +2723,7 @@ async function buildRequestedArtistPackFromSpotify(name: string, spotifyArtistId
       `/artists/${encodeURIComponent(spotifyArtist.id)}/albums?${new URLSearchParams({
         include_groups: 'album,single',
         market: 'US',
-        limit: '10',
+        limit: String(Math.min(50, SPOTIFY_ARTIST_ALBUM_LIMIT - offset)),
         offset: String(offset)
       }).toString()}`
     );
@@ -2753,7 +2755,7 @@ async function buildRequestedArtistPackFromSpotify(name: string, spotifyArtistId
     if (!title || seen.has(key)) return false;
     seen.add(key);
     return true;
-  })).slice(0, 50);
+  })).slice(0, REQUESTED_ARTIST_MAX_SONGS);
 
   if (spotifyTracks.length === 0) {
     throw new Error(`Spotify did not return playable tracks for "${spotifyArtist.name || name}".`);

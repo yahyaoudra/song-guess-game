@@ -55,7 +55,10 @@ VITE_STRIPE_PUBLISHABLE_KEY=pk_live_or_test_value
 SPOTIFY_CLIENT_ID=your_spotify_client_id
 SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
 SPOTIFY_AUTO_REFRESH_ENABLED=true
-SPOTIFY_ARTIST_ALBUM_LIMIT=20
+SPOTIFY_ARTIST_ALBUM_LIMIT=80
+REQUESTED_ARTIST_MAX_SONGS=150
+REQUESTED_ARTIST_MIN_SONGS=80
+REQUESTED_ARTIST_ALBUM_PACK_LIMIT=60
 
 AWS_SES_REGION=us-east-1
 AWS_SES_FROM_EMAIL=noreply@songguessgame.online
@@ -279,6 +282,8 @@ Manual checks:
 - Confirm admin route is not linked in public UI.
 
 ## Artist Pack Backfill
+
+Artist refreshes scan recent Spotify albums and singles first, then keep expanding the playable pack up to `REQUESTED_ARTIST_MAX_SONGS`. The default production settings scan up to 80 Spotify releases and keep up to 150 songs, with up to 60 album/single pack tabs. Lower these values if Spotify starts returning `429`; raise them carefully for major artists with very large catalogs.
 
 After deploy, use small batches to avoid Spotify `429` quota responses:
 
