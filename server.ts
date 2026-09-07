@@ -931,6 +931,7 @@ function createAbandonedCheckoutEmail(row: AbandonedCheckoutRow, reminderKey: st
     'Unlimited heardle for 7 days',
     'All artist packs',
     'All countries and genres',
+    'Play by album',
     'Multiplayer rooms',
     'No ads while your pass is active'
   ];

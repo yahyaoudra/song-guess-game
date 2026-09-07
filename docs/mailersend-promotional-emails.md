@@ -58,6 +58,7 @@ Unlock a 7-day pass and play unlimited heardle across every mode:
 - All artists
 - All countries
 - All genres and eras
+- Play by album
 - Unlimited replay
 - Multiplayer rooms
 - No ads while your pass is active
@@ -77,6 +78,7 @@ HTML:
   <li>All artists</li>
   <li>All countries</li>
   <li>All genres and eras</li>
+  <li>Play by album</li>
   <li>Unlimited replay</li>
   <li>Multiplayer rooms</li>
   <li>No ads while your pass is active</li>
