@@ -1299,6 +1299,12 @@ function getRecaptchaMinScore(): number {
   return Math.min(1, Math.max(0, parsed));
 }
 
+function isLocalDevelopmentRequest(req: Request): boolean {
+  if (process.env.NODE_ENV === 'production') return false;
+  const host = `${req.hostname || req.headers.host || ''}`.toLowerCase();
+  return host === 'localhost' || host === '127.0.0.1' || host.startsWith('localhost:') || host.startsWith('127.0.0.1:');
+}
+
 function sendSpotifyError(res: ExpressResponse, error: unknown, fallback: string): void {
   if (error instanceof SpotifyApiError) {
     if (error.status === 429) {
@@ -1322,6 +1328,8 @@ function sendSpotifyError(res: ExpressResponse, error: unknown, fallback: string
 }
 
 async function verifyRecaptcha(req: Request, action: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (isLocalDevelopmentRequest(req)) return { ok: true };
+
   const secret = getRecaptchaSecretKey();
   if (!secret) return { ok: true };
 

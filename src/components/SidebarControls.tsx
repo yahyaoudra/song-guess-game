@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CreditCard, Flame, Gamepad2, Languages, Mic2, ShieldCheck, Sparkles, Sliders, Tags, Volume2, VolumeX } from 'lucide-react';
+import { Crown, Flame, Gamepad2, Languages, Mic2, ShieldCheck, Sparkles, Sliders, Tags, Volume2, VolumeX } from 'lucide-react';
 import { Difficulty, StreakData, ThemeColor, TitleDisplayMode } from '../types';
 import { DIFFICULTY_COLORS } from '../data/moroccanSongs';
 import { COUNTRIES } from '../data/countries';
@@ -198,7 +198,7 @@ export const SidebarControls: React.FC<SidebarControlsProps> = ({
               {isUnlocked ? (
                 <ShieldCheck className="w-4 h-4 text-[#00e676]" />
               ) : (
-                <CreditCard className="w-4 h-4 text-[#00e676]" />
+                <Crown className="w-4 h-4 text-[#00e676]" />
               )}
               <span>{isUnlocked ? 'Unlimited active' : 'Play unlimited'}</span>
             </div>
@@ -233,6 +233,7 @@ export const SidebarControls: React.FC<SidebarControlsProps> = ({
               }}
               className="mt-1 h-9 w-full rounded-lg bg-[#00e676] text-xs font-black text-black hover:bg-[#1fe682] active:scale-95"
             >
+              <Crown className="mr-1 inline h-3.5 w-3.5 text-black" />
               Unlock unlimited
             </button>
           )}
