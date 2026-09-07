@@ -444,6 +444,7 @@ export default function App() {
         if (pathname === '/') {
           audioEngine.stop();
           setActiveChallenge(null);
+          setActiveArtistAlbumPackId('all');
           setActiveView('home');
           return;
         }
@@ -451,6 +452,7 @@ export default function App() {
         if (segments[0] === 'contact') {
           audioEngine.stop();
           setActiveChallenge(null);
+          setActiveArtistAlbumPackId('all');
           setActiveView('contact');
           return;
         }
@@ -459,6 +461,7 @@ export default function App() {
           audioEngine.stop();
           clearCountrySelectionForChallenge();
           setActiveChallenge(null);
+          setActiveArtistAlbumPackId('all');
           setActiveView('artists');
           return;
         }
@@ -478,6 +481,7 @@ export default function App() {
           if (!artist && !requestedArtist) {
             audioEngine.stop();
             setActiveChallenge(null);
+            setActiveArtistAlbumPackId('all');
             setActiveView('artists');
             window.history.replaceState({}, document.title, '/artist');
             return;
@@ -496,6 +500,7 @@ export default function App() {
           ) {
             audioEngine.stop();
             setActiveChallenge(null);
+            setActiveArtistAlbumPackId('all');
             setActiveView('artists');
             window.history.replaceState({}, document.title, '/artist');
             return;
@@ -523,6 +528,7 @@ export default function App() {
         if (segments[0] === 'play' && segments[1] === 'country' && !segments[2]) {
           audioEngine.stop();
           setActiveChallenge(null);
+          setActiveArtistAlbumPackId('all');
           setActiveView('countries');
           return;
         }
@@ -531,6 +537,7 @@ export default function App() {
           audioEngine.stop();
           clearCountrySelectionForChallenge();
           setActiveChallenge(null);
+          setActiveArtistAlbumPackId('all');
           setActiveView('genres');
           return;
         }
@@ -541,12 +548,14 @@ export default function App() {
           if (!genre) {
             audioEngine.stop();
             setActiveChallenge(null);
+            setActiveArtistAlbumPackId('all');
             setActiveView('genres');
             window.history.replaceState({}, document.title, '/play/genre');
             return;
           }
           if (genre && (activeChallenge?.type !== 'genre' || activeChallenge.slug !== genre.slug)) {
             audioEngine.stop();
+            setActiveArtistAlbumPackId('all');
             setActiveChallenge({ type: 'genre', slug: genre.slug, title: genre.name });
             setGameMode('practice');
             setActiveCollection(null);
@@ -567,6 +576,7 @@ export default function App() {
         setActiveView('game');
         if (activeChallenge) {
           setActiveChallenge(null);
+          setActiveArtistAlbumPackId('all');
           setActiveCollection(getDefaultCollectionForCountry(settings.selectedCountry || 'GLOBAL'));
           setRoundIndex(0);
           setCurrentStepIndex(0);
@@ -647,6 +657,7 @@ export default function App() {
     setActiveCollection(collection || null);
     if (options.clearChallenge) {
       setActiveChallenge(null);
+      setActiveArtistAlbumPackId('all');
     }
     setGameSessionKey(Date.now());
     setRoundIndex(0);
@@ -893,6 +904,7 @@ export default function App() {
     saveStoredSettings(updated);
     setActiveView('game');
     setActiveChallenge(null);
+    setActiveArtistAlbumPackId('all');
     if (updateRoute && typeof window !== 'undefined') {
       const nextPath = getCountryPath(countryCode, publicConfig);
       window.history.pushState({}, document.title, nextPath);
@@ -1333,7 +1345,7 @@ export default function App() {
     if (activeView !== 'game') {
       navigateToPage('/play');
     }
-    startNewGame(mode);
+    startNewGame(mode, null, { clearChallenge: true });
   };
 
   const handleCollectionCountrySelect = (code: string) => {
@@ -1344,6 +1356,7 @@ export default function App() {
     saveStoredSettings(updated);
     setActiveView('game');
     setActiveChallenge(null);
+    setActiveArtistAlbumPackId('all');
     setSavedResult(null);
     audioEngine.stop();
     window.history.pushState({}, document.title, getCountryPath(code, publicConfig));
@@ -1367,6 +1380,7 @@ export default function App() {
     setIsMultiplayerInfoOpen(false);
     setActiveView('game');
     setActiveChallenge(null);
+    setActiveArtistAlbumPackId('all');
     const artistAlbumMatch = col.id.match(/^artist-(.+)-artist-profile-album-(.+)$/);
     if (artistAlbumMatch?.[1] && artistAlbumMatch?.[2]) {
       const artistSlug = artistAlbumMatch[1];
@@ -1496,6 +1510,7 @@ export default function App() {
     setActiveMultiplayerSession(session);
     setActiveView('game');
     setActiveChallenge(null);
+    setActiveArtistAlbumPackId('all');
     setActiveCollection(null);
     setGameMode('practice');
     setRoundIndex(0);
