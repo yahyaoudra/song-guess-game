@@ -789,6 +789,9 @@ export default function App() {
 
   const requireAlbumAccess = useCallback(() => {
     setAccessNotice('Playing a specific album is included with unlimited access.');
+  }, []);
+
+  const handleAccessNoticeUnlock = useCallback(() => {
     if (authSession.authenticated) {
       void handleUnlock();
       return;
@@ -1829,6 +1832,7 @@ export default function App() {
           publicConfig={publicConfig}
           isAlbumSelectionUnlocked={authSession.entitlement.active}
           onRequireAlbumAccess={requireAlbumAccess}
+          onUnlockAlbumAccess={handleAccessNoticeUnlock}
           onClose={() => setIsCollectionsOpen(false)}
         />
       )}
@@ -2176,7 +2180,7 @@ export default function App() {
           <div className="mb-3 max-w-lg rounded-lg border border-[#00e676]/25 bg-[#00e676]/10 px-3 py-2 text-center text-xs font-bold text-[#b8ffd7]">
             <div>{accessNotice}</div>
             <button
-              onClick={() => setIsPaywallOpen(true)}
+              onClick={handleAccessNoticeUnlock}
               className="mt-1 underline decoration-[#00e676] decoration-2 underline-offset-4 hover:text-white"
             >
               Unlock more
@@ -2199,25 +2203,61 @@ export default function App() {
         {renderMultiplayerStatusBar()}
 
         {activeChallenge?.type === 'artist' && activeChallenge.albumPacks && activeChallenge.albumPacks.length > 0 && !activeMultiplayerSession && (
-          <div className="mb-3 flex w-full max-w-3xl gap-2 overflow-x-auto rounded-lg border border-white/10 bg-[#08100b]/80 p-2">
+          <div className="mb-3 w-full max-w-3xl overflow-hidden rounded-lg border border-white/10 bg-[#08100b]/85 p-2">
+            <div className="mb-1 flex items-center justify-between gap-3 px-1 text-[10px] font-black uppercase tracking-[0.18em] text-white/35">
+              <span>Albums</span>
+              <span className="normal-case tracking-normal text-white/30">scroll to choose</span>
+            </div>
+            <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
             <button
               type="button"
               onClick={() => applyArtistAlbumPack('all')}
-              className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-black ${activeArtistAlbumPackId === 'all' ? 'bg-[#00e676] text-black' : 'bg-white/[0.06] text-white/65 hover:text-white'}`}
+              className={`flex h-14 min-w-[145px] shrink-0 items-center gap-2 rounded-2xl border px-2 text-left transition-all ${
+                activeArtistAlbumPackId === 'all'
+                  ? 'border-[#00e676] bg-[#00e676] text-black shadow-[0_10px_30px_rgba(0,230,118,0.18)]'
+                  : 'border-white/10 bg-white/[0.05] text-white/70 hover:border-[#00e676]/35 hover:text-white'
+              }`}
             >
-              All songs
+              <img
+                src={currentSong.artworkUrl}
+                alt=""
+                className="h-10 w-10 rounded-xl object-cover"
+                referrerPolicy="no-referrer"
+              />
+              <span className="min-w-0">
+                <span className="block truncate text-xs font-black">All songs</span>
+                <span className={`block text-[11px] font-bold ${activeArtistAlbumPackId === 'all' ? 'text-black/65' : 'text-white/40'}`}>
+                  {activeChallenge.songs?.length || activeChallenge.songIds?.length || gameSongs.length} songs
+                </span>
+              </span>
             </button>
             {activeChallenge.albumPacks.map((pack) => (
               <button
                 key={pack.id}
                 type="button"
                 onClick={() => applyArtistAlbumPack(pack.id)}
-                className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-black ${activeArtistAlbumPackId === pack.id ? 'bg-[#00e676] text-black' : 'bg-white/[0.06] text-white/65 hover:text-white'}`}
+                className={`flex h-14 min-w-[170px] max-w-[230px] shrink-0 items-center gap-2 rounded-2xl border px-2 text-left transition-all ${
+                  activeArtistAlbumPackId === pack.id
+                    ? 'border-[#00e676] bg-[#00e676] text-black shadow-[0_10px_30px_rgba(0,230,118,0.18)]'
+                    : 'border-white/10 bg-white/[0.05] text-white/70 hover:border-[#00e676]/35 hover:text-white'
+                }`}
                 title={`${pack.songsCount} songs`}
               >
-                {pack.title} · {pack.songsCount}
+                <img
+                  src={pack.coverImage || currentSong.artworkUrl}
+                  alt=""
+                  className="h-10 w-10 rounded-xl object-cover"
+                  referrerPolicy="no-referrer"
+                />
+                <span className="min-w-0">
+                  <span className="block truncate text-xs font-black">{pack.title}</span>
+                  <span className={`block text-[11px] font-bold ${activeArtistAlbumPackId === pack.id ? 'text-black/65' : 'text-white/40'}`}>
+                    {pack.songsCount} songs
+                  </span>
+                </span>
               </button>
             ))}
+            </div>
           </div>
         )}
 
@@ -2430,6 +2470,7 @@ export default function App() {
           publicConfig={publicConfig}
           isAlbumSelectionUnlocked={authSession.entitlement.active}
           onRequireAlbumAccess={requireAlbumAccess}
+          onUnlockAlbumAccess={handleAccessNoticeUnlock}
           onClose={() => setIsCollectionsOpen(false)}
         />
       )}

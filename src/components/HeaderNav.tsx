@@ -462,12 +462,15 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
       {/* Round & Info Bar */}
       <div
         id="round-info-bar"
-        className="w-full max-w-lg mt-2 flex items-center justify-between text-xs tracking-wider font-mono font-bold text-white/70 px-2"
+        className="mt-2 grid w-full max-w-xl grid-cols-2 gap-1 rounded-full border border-white/10 bg-[#08100b]/75 px-2 py-1.5 text-[10px] font-mono font-black text-white/70 shadow-[0_10px_30px_rgba(0,0,0,0.18)] sm:grid-cols-4 sm:gap-0 sm:px-3 sm:text-xs"
       >
-        {/* Left: Round & Difficulty */}
-        <div className="flex items-center gap-2 uppercase">
-          <span>ROUND {roundNumber} / {totalRounds}</span>
-          <span className="text-white/30">•</span>
+        <div className="flex items-center justify-center gap-1.5 rounded-full bg-white/[0.04] px-2 py-1 uppercase sm:bg-transparent">
+          <span className="text-white/45">Round</span>
+          <span className="text-white">{roundNumber} / {totalRounds}</span>
+        </div>
+
+        <div className="flex items-center justify-center gap-1.5 rounded-full bg-white/[0.04] px-2 py-1 uppercase sm:border-l sm:border-white/10 sm:bg-transparent">
+          <span className="text-white/45">Level</span>
           <span
             className="font-black"
             style={{ color: activeColor }}
@@ -476,17 +479,16 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
           </span>
         </div>
 
-        {/* Center: Live Points */}
         <div
           id="live-points-counter"
-          className="text-sm font-mono font-black transition-all transform hover:scale-105"
+          className="flex items-center justify-center gap-1.5 rounded-full bg-white/[0.04] px-2 py-1 transition-all sm:border-l sm:border-white/10 sm:bg-transparent"
           style={{ color: activeColor }}
         >
-          {currentPoints} PTS
+          <span>{currentPoints}</span>
+          <span className="text-white/45">PTS</span>
         </div>
 
-        {/* Right: Countdown to next daily */}
-        <div className="flex items-center gap-1.5 text-white/50 font-mono">
+        <div className="flex items-center justify-center rounded-full bg-white/[0.04] px-2 py-1 font-mono text-white/55 sm:border-l sm:border-white/10 sm:bg-transparent">
           <span title="Countdown to next Daily 5">{timeRemaining}</span>
         </div>
       </div>

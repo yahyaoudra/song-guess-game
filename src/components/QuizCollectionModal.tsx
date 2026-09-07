@@ -15,6 +15,7 @@ interface QuizCollectionModalProps {
   publicConfig?: PublicRuntimeConfig;
   isAlbumSelectionUnlocked?: boolean;
   onRequireAlbumAccess?: () => void;
+  onUnlockAlbumAccess?: () => void;
   onClose: () => void;
 }
 
@@ -97,6 +98,7 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
   publicConfig,
   isAlbumSelectionUnlocked = false,
   onRequireAlbumAccess,
+  onUnlockAlbumAccess,
   onClose
 }) => {
   const [activeTab, setActiveTab] = useState<LibraryTab>('countries');
@@ -106,6 +108,7 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [currentPage, setCurrentPage] = useState(1);
   const [albumPickerCollection, setAlbumPickerCollection] = useState<QuizCollection | null>(null);
+  const [albumAccessNotice, setAlbumAccessNotice] = useState(false);
   const runtimeCountries = useMemo(() => getRuntimeCountries(publicConfig), [publicConfig]);
   const libraryCollections = useMemo(() => {
     const requestedCollections = requestedArtists
@@ -246,6 +249,7 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
 
   const handleSelectAlbumPack = (collection: QuizCollection, albumId: string) => {
     if (!isAlbumSelectionUnlocked) {
+      setAlbumAccessNotice(true);
       onRequireAlbumAccess?.();
       return;
     }
@@ -466,6 +470,19 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
           </button>
         </div>
 
+        {albumAccessNotice && (
+          <div className="mb-2 rounded-lg border border-[#00e676]/30 bg-[#00e676]/10 px-3 py-2 text-center text-xs font-bold text-[#b8ffd7]">
+            <div>Playing a specific album is included with unlimited access.</div>
+            <button
+              type="button"
+              onClick={onUnlockAlbumAccess}
+              className="mt-1 underline decoration-[#00e676] decoration-2 underline-offset-4 hover:text-white"
+            >
+              Unlock more
+            </button>
+          </div>
+        )}
+
         {/* Filter Pills */}
         <div className="flex items-center gap-2 py-1.5 overflow-x-auto no-scrollbar border-b border-white/5 shrink-0">
           {categories.map((cat) => (
@@ -617,10 +634,11 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
                                 if (isAlbumSelectionUnlocked) {
                                   setAlbumPickerCollection(col);
                                 } else {
+                                  setAlbumAccessNotice(true);
                                   onRequireAlbumAccess?.();
                                 }
                               }}
-                              className="hidden sm:inline-flex items-center gap-1 rounded-lg border border-[#00e676]/60 bg-[#00e676]/10 px-2.5 py-1 text-[11px] font-black text-[#00e676] transition-colors hover:bg-[#00e676]/18"
+                              className="inline-flex items-center gap-1 rounded-lg border border-[#00e676]/60 bg-[#00e676]/10 px-2 py-1 text-[10px] font-black text-[#00e676] transition-colors hover:bg-[#00e676]/18 sm:px-2.5 sm:text-[11px]"
                             >
                               <Disc3 className="h-3 w-3" />
                               Select album
@@ -793,47 +811,53 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
                   <X className="h-5 w-5" />
                 </button>
               </div>
-              <div className="max-h-[62vh] overflow-y-auto p-4">
+              <div className="p-4">
+                {!isAlbumSelectionUnlocked && albumAccessNotice && (
+                  <div className="mb-3 rounded-lg border border-[#00e676]/30 bg-[#00e676]/10 px-3 py-2 text-center text-xs font-bold text-[#b8ffd7]">
+                    <div>Playing a specific album is included with unlimited access.</div>
+                    <button
+                      type="button"
+                      onClick={onUnlockAlbumAccess}
+                      className="mt-1 underline decoration-[#00e676] decoration-2 underline-offset-4 hover:text-white"
+                    >
+                      Unlock more
+                    </button>
+                  </div>
+                )}
+                <div className="flex max-w-full gap-2 overflow-x-auto pb-2 no-scrollbar">
                 <button
                   onClick={() => handleSelectAlbumPack(albumPickerCollection, 'all')}
-                  className="mb-3 flex w-full items-center gap-3 rounded-lg border border-[#00e676]/55 bg-[#00e676]/12 p-3 text-left transition-colors hover:bg-[#00e676]/18"
+                  className="flex h-16 min-w-[170px] shrink-0 items-center gap-2 rounded-2xl border border-[#00e676]/70 bg-[#00e676] px-2 text-left text-black shadow-[0_10px_30px_rgba(0,230,118,0.18)]"
                 >
                   <img
                     src={albumPickerCollection.coverImage}
                     alt=""
-                    className="h-16 w-16 rounded-lg object-cover"
+                    className="h-11 w-11 rounded-xl object-cover"
                     referrerPolicy="no-referrer"
                   />
                   <div className="min-w-0 flex-1">
-                    <div className="text-lg font-black text-white">All songs</div>
-                    <div className="text-sm text-white/55">{getRuntimeCollectionSongs(albumPickerCollection).length} songs from the full artist pack</div>
+                    <div className="truncate text-sm font-black">All songs</div>
+                    <div className="text-xs font-bold text-black/65">{getRuntimeCollectionSongs(albumPickerCollection).length} songs</div>
                   </div>
-                  <span className="rounded-lg bg-[#00e676] px-4 py-2 text-sm font-black text-black">Play</span>
                 </button>
-                <div className="grid gap-3 sm:grid-cols-2">
                   {albumPickerCollection.albumPacks?.map((album) => (
                     <button
                       key={album.id}
                       onClick={() => handleSelectAlbumPack(albumPickerCollection, album.id)}
-                      className="group flex min-h-[92px] items-center gap-3 rounded-lg border border-white/10 bg-[#121915] p-3 text-left transition-all hover:border-[#00e676]/65 hover:bg-[#18231d]"
+                      className="group flex h-16 min-w-[190px] max-w-[240px] shrink-0 items-center gap-2 rounded-2xl border border-white/10 bg-[#121915] px-2 text-left transition-all hover:border-[#00e676]/65 hover:bg-[#18231d]"
                     >
                       <img
                         src={album.coverImage || albumPickerCollection.coverImage}
                         alt=""
-                        className="h-16 w-16 rounded-lg object-cover"
+                        className="h-11 w-11 rounded-xl object-cover"
                         referrerPolicy="no-referrer"
                       />
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-base font-black text-white group-hover:text-[#00e676]">{album.title}</div>
-                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-white/50">
-                          <span className="rounded-full bg-white/5 px-2 py-0.5 font-bold capitalize">{album.type}</span>
-                          {album.releaseYear && <span>{album.releaseYear}</span>}
-                          <span>{album.songsCount} songs</span>
+                        <div className="truncate text-sm font-black text-white group-hover:text-[#00e676]">{album.title}</div>
+                        <div className="mt-0.5 truncate text-xs font-bold text-white/45">
+                          {album.releaseYear ? `${album.releaseYear} • ` : ''}{album.songsCount} songs
                         </div>
                       </div>
-                      <span className="rounded-lg border border-[#00e676]/45 px-3 py-2 text-xs font-black text-[#00e676] group-hover:bg-[#00e676] group-hover:text-black">
-                        Play
-                      </span>
                     </button>
                   ))}
                 </div>
