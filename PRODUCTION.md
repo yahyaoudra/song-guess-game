@@ -61,6 +61,10 @@ RESEND_API_KEY=your_resend_api_key
 RESEND_FROM_EMAIL=noreply@songguessgame.online
 RESEND_FROM_NAME=Song Guess Game
 
+BREVO_API_KEY=your_brevo_transactional_api_key
+BREVO_FROM_EMAIL=noreply@songguessgame.online
+BREVO_FROM_NAME=Song Guess Game
+
 GOOGLE_CLIENT_ID=optional_google_oauth_client_id
 GOOGLE_CLIENT_SECRET=optional_google_oauth_client_secret
 
@@ -213,6 +217,16 @@ The app serves:
 4. Set `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, and `RESEND_FROM_NAME`.
 5. Register a test user and verify that the email verification message arrives.
 6. Submit the `/contact` form and verify the message arrives at `info@songguessgame.online`.
+
+## Brevo Fallback
+
+Brevo is used automatically when Resend is configured but a send attempt fails.
+
+1. Verify `songguessgame.online` as a sender or sending domain in Brevo.
+2. Add the Brevo DNS records for SPF/DKIM if Brevo asks for them.
+3. Create a transactional email API key.
+4. Set `BREVO_API_KEY`, `BREVO_FROM_EMAIL`, and `BREVO_FROM_NAME`.
+5. Keep the Brevo sender address aligned with your verified domain, for example `noreply@songguessgame.online`.
 
 ## Smoke Test Checklist
 

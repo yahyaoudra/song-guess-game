@@ -214,7 +214,9 @@ export default function App() {
       const roundLimit = gameMode === 'daily' ? 5 : 10;
       result = shuffleArray(countrySongPool).slice(0, roundLimit);
     } else if (gameMode === 'collection' && activeCollection) {
-      const selected = ALL_SONGS.filter((s) => activeCollection.songIds.includes(s.id));
+      const selected = activeCollection.songs?.length
+        ? activeCollection.songs
+        : ALL_SONGS.filter((s) => activeCollection.songIds.includes(s.id));
       if (selected.length > 0) {
         result = shuffleArray(selected);
       } else {
@@ -1365,6 +1367,60 @@ export default function App() {
     setIsMultiplayerInfoOpen(false);
     setActiveView('game');
     setActiveChallenge(null);
+    const artistAlbumMatch = col.id.match(/^artist-(.+)-artist-profile-album-(.+)$/);
+    if (artistAlbumMatch?.[1] && artistAlbumMatch?.[2]) {
+      const artistSlug = artistAlbumMatch[1];
+      const albumPackId = artistAlbumMatch[2];
+      const requestedArtist = requestedArtists.find((item) => item.slug === artistSlug)
+        || requestedArtists.find((item) =>
+          item.status === 'ready'
+          && item.songsCount > 0
+          && baseArtistSlug(item.slug) === artistSlug
+        );
+      const nextArtist = requestedArtist
+        ? {
+            slug: requestedArtist.slug,
+            name: requestedArtist.name,
+            songIds: requestedArtist.songIds,
+            songs: requestedArtist.songs,
+            albumPacks: requestedArtist.albumPacks
+          }
+        : {
+            slug: artistSlug,
+            name: col.title.replace(/\s+-\s+.+$/, ''),
+            songIds: col.songIds,
+            songs: col.songs,
+            albumPacks: col.albumPacks
+          };
+
+      setIsCollectionsOpen(false);
+      window.history.pushState({}, document.title, getArtistPath(nextArtist.slug));
+      audioEngine.stop();
+      setActiveChallenge({
+        type: 'artist',
+        slug: nextArtist.slug,
+        title: nextArtist.name,
+        songIds: nextArtist.songIds,
+        songs: nextArtist.songs,
+        albumPacks: nextArtist.albumPacks
+      });
+      setActiveArtistAlbumPackId(albumPackId);
+      setGameMode('practice');
+      setActiveCollection(null);
+      setRoundIndex(0);
+      setCurrentStepIndex(0);
+      setIsRevealed(false);
+      setRoundHistory([]);
+      setGameStartTime(Date.now());
+      setMultiplayerRoundEndsAt(null);
+      setMultiplayerSecondsLeft(null);
+      roundTimeoutRef.current = false;
+      setIsCompleteModalOpen(false);
+      setSavedResult(null);
+      setWrongFeedback(null);
+      setGameSessionKey(Date.now());
+      return;
+    }
     const artistMatch = col.id.match(/^artist-(.+)-artist-profile$/);
     if (artistMatch?.[1]) {
       setIsCollectionsOpen(false);

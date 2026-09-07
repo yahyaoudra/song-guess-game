@@ -72,6 +72,7 @@ const ABANDONED_CHECKOUT_BACKFILL_LIMIT = Math.max(25, Math.min(500, Number(proc
 const SPOTIFY_ARTIST_ALBUM_LIMIT = Math.max(10, Math.min(50, Number(process.env.SPOTIFY_ARTIST_ALBUM_LIMIT || '20') || 20));
 const REQUESTED_ARTIST_MIN_SONGS = Math.max(10, Math.min(50, Number(process.env.REQUESTED_ARTIST_MIN_SONGS || '20') || 20));
 const RESEND_EMAIL_API_URL = 'https://api.resend.com/emails';
+const BREVO_EMAIL_API_URL = 'https://api.brevo.com/v3/smtp/email';
 const SPOTIFY_TOKEN_URL = 'https://accounts.spotify.com/api/token';
 const SPOTIFY_API_URL = 'https://api.spotify.com/v1';
 const RECAPTCHA_VERIFY_URL = 'https://www.google.com/recaptcha/api/siteverify';
@@ -430,34 +431,48 @@ function getStripeFailureMessage(rawCode?: string, rawMessage?: string): string 
   return safeText(rawMessage, 500) || 'Payment failed. Try a different payment method, or retry the payment later.';
 }
 
-function getEmailProviderConfig(): { provider: 'resend' | 'mailersend' | ''; apiKey: string; fromEmail: string; fromName: string } {
+type EmailProviderConfig = { provider: 'resend' | 'brevo' | 'mailersend'; apiKey: string; fromEmail: string; fromName: string };
+
+function getEmailProviderConfigs(): EmailProviderConfig[] {
+  const providers: EmailProviderConfig[] = [];
   const resendApiKey = process.env.RESEND_API_KEY?.trim() || '';
   const resendFromEmail = process.env.RESEND_FROM_EMAIL?.trim() || process.env.EMAIL_FROM?.trim() || '';
   if (resendApiKey && resendFromEmail) {
-    return {
+    providers.push({
       provider: 'resend',
       apiKey: resendApiKey,
       fromEmail: resendFromEmail,
       fromName: process.env.RESEND_FROM_NAME?.trim() || process.env.EMAIL_FROM_NAME?.trim() || 'Song Guess Game'
-    };
+    });
+  }
+
+  const brevoApiKey = process.env.BREVO_API_KEY?.trim() || '';
+  const brevoFromEmail = process.env.BREVO_FROM_EMAIL?.trim() || process.env.EMAIL_FROM?.trim() || '';
+  if (brevoApiKey && brevoFromEmail) {
+    providers.push({
+      provider: 'brevo',
+      apiKey: brevoApiKey,
+      fromEmail: brevoFromEmail,
+      fromName: process.env.BREVO_FROM_NAME?.trim() || process.env.EMAIL_FROM_NAME?.trim() || 'Song Guess Game'
+    });
   }
 
   const mailerSendApiKey = process.env.MAILERSEND_API_KEY?.trim() || '';
   const mailerSendFromEmail = process.env.MAILERSEND_FROM_EMAIL?.trim() || '';
   if (mailerSendApiKey && mailerSendFromEmail) {
-    return {
+    providers.push({
       provider: 'mailersend',
       apiKey: mailerSendApiKey,
       fromEmail: mailerSendFromEmail,
       fromName: process.env.MAILERSEND_FROM_NAME?.trim() || 'Song Guess Game'
-    };
+    });
   }
 
-  return { provider: '', apiKey: '', fromEmail: '', fromName: 'Song Guess Game' };
+  return providers;
 }
 
 function isEmailProviderConfigured(): boolean {
-  return Boolean(getEmailProviderConfig().provider);
+  return getEmailProviderConfigs().length > 0;
 }
 
 function isMailerSendConfigured(): boolean {
@@ -607,82 +622,108 @@ async function upsertMultiplayerRoomHistory(room: MultiplayerRoom, statusOverrid
 }
 
 async function sendTransactionalEmail(toEmail: string, toName: string, subject: string, text: string, html: string, category = 'transactional'): Promise<void> {
-  const emailProvider = getEmailProviderConfig();
-  if (!emailProvider.provider) {
+  const emailProviders = getEmailProviderConfigs();
+  if (emailProviders.length === 0) {
     await logEmailEvent({
       email: toEmail,
       name: toName,
       subject,
       category,
       status: 'failed',
-      error: 'Email provider is not configured. Set RESEND_API_KEY and RESEND_FROM_EMAIL.',
+      error: 'Email provider is not configured. Set RESEND_API_KEY and RESEND_FROM_EMAIL, or BREVO_API_KEY and BREVO_FROM_EMAIL.',
       textBody: text,
       htmlBody: html
     });
     return;
   }
 
-  try {
-    const response = await fetch(emailProvider.provider === 'resend' ? RESEND_EMAIL_API_URL : 'https://api.mailersend.com/v1/email', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${emailProvider.apiKey}`,
-        'Content-Type': 'application/json',
-        Accept: 'application/json'
-      },
-      body: JSON.stringify(
+  let lastError: Error | null = null;
+
+  for (const emailProvider of emailProviders) {
+    try {
+      const response = await fetch(
         emailProvider.provider === 'resend'
-          ? {
-              from: `${emailProvider.fromName} <${emailProvider.fromEmail}>`,
-              to: [toEmail],
-              subject,
-              text,
-              html
-            }
-          : {
-              from: { email: emailProvider.fromEmail, name: emailProvider.fromName },
-              to: [{ email: toEmail, name: toName || toEmail }],
-              subject,
-              text,
-              html
-            }
-      )
-    });
+          ? RESEND_EMAIL_API_URL
+          : emailProvider.provider === 'brevo'
+          ? BREVO_EMAIL_API_URL
+          : 'https://api.mailersend.com/v1/email',
+        {
+          method: 'POST',
+          headers: {
+            ...(emailProvider.provider === 'brevo'
+              ? { 'api-key': emailProvider.apiKey }
+              : { Authorization: `Bearer ${emailProvider.apiKey}` }),
+            'Content-Type': 'application/json',
+            Accept: 'application/json'
+          },
+          body: JSON.stringify(
+            emailProvider.provider === 'resend'
+              ? {
+                  from: `${emailProvider.fromName} <${emailProvider.fromEmail}>`,
+                  to: [toEmail],
+                  subject,
+                  text,
+                  html
+                }
+              : emailProvider.provider === 'brevo'
+              ? {
+                  sender: { email: emailProvider.fromEmail, name: emailProvider.fromName },
+                  to: [{ email: toEmail, name: toName || toEmail }],
+                  subject,
+                  htmlContent: html
+                }
+              : {
+                  from: { email: emailProvider.fromEmail, name: emailProvider.fromName },
+                  to: [{ email: toEmail, name: toName || toEmail }],
+                  subject,
+                  text,
+                  html
+                }
+          )
+        }
+      );
 
-    if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      const message = `${emailProvider.provider === 'resend' ? 'Resend' : 'MailerSend'} returned ${response.status}: ${body.slice(0, 300)}`;
-      await logEmailEvent({ email: toEmail, name: toName, subject, category, status: 'failed', error: message, textBody: text, htmlBody: html });
-      throw new Error(message);
-    }
+      if (!response.ok) {
+        const body = await response.text().catch(() => '');
+        const providerLabel = emailProvider.provider === 'resend' ? 'Resend' : emailProvider.provider === 'brevo' ? 'Brevo' : 'MailerSend';
+        const message = `${providerLabel} returned ${response.status}: ${body.slice(0, 300)}`;
+        lastError = new Error(message);
+        await logEmailEvent({ email: toEmail, name: toName, subject, category, status: 'failed', error: message, textBody: text, htmlBody: html });
+        continue;
+      }
 
-    const body = await response.json().catch(() => ({} as { id?: string }));
+      const body = await response.json().catch(() => ({} as { id?: string; messageId?: string }));
 
-    await logEmailEvent({
-      email: toEmail,
-      name: toName,
-      subject,
-      category,
-      status: 'sent',
-      providerMessageId: safeText(body.id, 180) || response.headers.get('x-message-id') || response.headers.get('x-request-id') || '',
-      textBody: text,
-      htmlBody: html
-    });
-  } catch (error) {
-    if (!(error instanceof Error && (error.message.startsWith('Resend returned') || error.message.startsWith('MailerSend returned')))) {
+      await logEmailEvent({
+        email: toEmail,
+        name: toName,
+        subject,
+        category,
+        status: 'sent',
+        providerMessageId:
+          `${emailProvider.provider}:${
+            safeText(body.id || body.messageId, 160) || response.headers.get('x-message-id') || response.headers.get('x-request-id') || 'sent'
+          }`,
+        textBody: text,
+        htmlBody: html
+      });
+      return;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
       await logEmailEvent({
         email: toEmail,
         name: toName,
         subject,
         category,
         status: 'failed',
-        error: error instanceof Error ? error.message : String(error),
+        error: `${emailProvider.provider}: ${lastError.message}`,
         textBody: text,
         htmlBody: html
       });
     }
-    throw error;
   }
+
+  throw lastError || new Error('Email send failed');
 }
 
 async function sendVerificationEmail(email: string, name: string, verificationUrl: string, mode: 'new-account' | 'email-change'): Promise<boolean> {
@@ -5866,7 +5907,7 @@ async function startServer() {
       return;
     }
     if (!isEmailProviderConfigured()) {
-      res.status(503).json({ error: 'Email provider is not configured. Set RESEND_API_KEY and RESEND_FROM_EMAIL.' });
+      res.status(503).json({ error: 'Email provider is not configured. Set Resend or Brevo API credentials.' });
       return;
     }
 
@@ -5923,7 +5964,7 @@ async function startServer() {
       return;
     }
     if (!isEmailProviderConfigured()) {
-      res.status(503).json({ error: 'Email provider is not configured. Set RESEND_API_KEY and RESEND_FROM_EMAIL.' });
+      res.status(503).json({ error: 'Email provider is not configured. Set Resend or Brevo API credentials.' });
       return;
     }
 
