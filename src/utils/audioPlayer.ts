@@ -70,6 +70,9 @@ class MoroccanAudioEngine {
   public prepare(previewUrl: string, startOffsetSec = 0) {
     if (!this.audio || !previewUrl) return;
     const targetUrl = this.getEffectiveUrl(previewUrl);
+    if (targetUrl.startsWith('/api/music/preview?') && !targetUrl.includes('url=')) {
+      return;
+    }
 
     if (this.currentUrl !== targetUrl) {
       this.currentUrl = targetUrl;
@@ -196,6 +199,7 @@ class MoroccanAudioEngine {
           if (!this.audio) return;
           this.audio.removeEventListener('playing', handleReady);
           this.audio.removeEventListener('canplay', handleReady);
+          this.audio.removeEventListener('error', handleError);
           if (fallbackTimer !== null) {
             window.clearTimeout(fallbackTimer);
             fallbackTimer = null;
@@ -205,9 +209,14 @@ class MoroccanAudioEngine {
           cleanup();
           beginSnippetTimer();
         };
+        const handleError = () => {
+          cleanup();
+          startFallback();
+        };
 
         this.audio.addEventListener('playing', handleReady, { once: true });
         this.audio.addEventListener('canplay', handleReady, { once: true });
+        this.audio.addEventListener('error', handleError, { once: true });
         fallbackTimer = window.setTimeout(handleReady, 1200);
       };
 
@@ -221,7 +230,13 @@ class MoroccanAudioEngine {
             // Fallback: Try dynamic music preview server endpoint, then direct preview URL
             if (songMeta?.title && this.audio && this.isPlaying) {
               try {
-                const dynamicEndpoint = `/api/music/preview?title=${encodeURIComponent(songMeta.title)}&artist=${encodeURIComponent(songMeta.artist)}`;
+                const dynamicEndpoint = `/api/music/preview?${
+                  new URLSearchParams({
+                    ...(songMeta.spotifyTrackId ? { spotifyTrackId: songMeta.spotifyTrackId } : {}),
+                    title: songMeta.title,
+                    artist: songMeta.artist
+                  }).toString()
+                }`;
                 this.audio.src = dynamicEndpoint;
                 this.audio.volume = this.volume;
                 await this.audio.play();
@@ -300,7 +315,13 @@ class MoroccanAudioEngine {
 
     let targetUrl = this.getEffectiveUrl(previewUrl);
     if (!targetUrl && songMeta?.title && songMeta?.artist) {
-      targetUrl = `/api/music/preview?title=${encodeURIComponent(songMeta.title)}&artist=${encodeURIComponent(songMeta.artist)}`;
+      targetUrl = `/api/music/preview?${
+        new URLSearchParams({
+          ...(songMeta.spotifyTrackId ? { spotifyTrackId: songMeta.spotifyTrackId } : {}),
+          title: songMeta.title,
+          artist: songMeta.artist
+        }).toString()
+      }`;
     } else if (!targetUrl && previewUrl) {
       targetUrl = previewUrl;
     }

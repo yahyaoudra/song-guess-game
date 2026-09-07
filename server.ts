@@ -1956,6 +1956,7 @@ function sanitizeCustomPackSong(raw: unknown, fallbackCountryCode: string, fallb
     artworkUrl: safePublicImageUrl(source.artworkUrl),
     previewUrl: safeText(source.previewUrl, MAX_URL_LENGTH),
     spotifyTrackId: safeText(source.spotifyTrackId, 80),
+    isrc: safeText(source.isrc, 40),
     spotifyUri: safeText(source.spotifyUri, 120),
     spotifyUrl: safeHttpsUrl(source.spotifyUrl),
     deezerUrl: safeHttpsUrl(source.deezerUrl),
@@ -2141,6 +2142,8 @@ async function getRequestedArtists(): Promise<RequestedArtist[]> {
               countryCode: safeText(song.countryCode, 12) || 'GLOBAL',
               artworkUrl: safePublicImageUrl(song.artworkUrl),
               previewUrl: safeText(song.previewUrl, MAX_URL_LENGTH),
+              spotifyTrackId: safeText(song.spotifyTrackId, 80),
+              isrc: safeText(song.isrc, 40),
               spotifyUrl: safeHttpsUrl(song.spotifyUrl),
               deezerUrl: safeHttpsUrl(song.deezerUrl),
               difficulty: song.difficulty || 'MEDIUM'
@@ -2510,7 +2513,7 @@ async function fetchSpotifyPlaylistTracks(playlistId: string): Promise<Array<{ t
   let nextUrl = `${SPOTIFY_API_URL}/playlists/${encodeURIComponent(playlistId)}/tracks?${new URLSearchParams({
     market: 'US',
     limit: '50',
-    fields: 'items(track(id,name,preview_url,artists(name),album(id,name,album_type,release_date,images,external_urls),external_urls,uri)),next,total'
+    fields: 'items(track(id,name,preview_url,artists(name),album(id,name,album_type,release_date,images,external_urls),external_urls,external_ids,uri)),next,total'
   }).toString()}`;
   while (nextUrl && tracks.length < 100) {
     const page = await fetchSpotifyJson<{ items?: Array<{ track?: any }>; next?: string | null }>(nextUrl);
@@ -2564,8 +2567,11 @@ async function buildCustomPackFromSpotifyPlaylist(options: {
       const releaseYear = Number(String(album.release_date || '').slice(0, 4));
       const artworkUrl = safeHttpsUrl(album.images?.[0]?.url || playlist.images?.[0]?.url);
       const directPreview = safeHttpsUrl(track.preview_url);
+      const isrc = safeText(track.external_ids?.isrc, 40);
       const params = new URLSearchParams({ title: trackTitle, artist });
       if (directPreview) params.set('url', directPreview);
+      if (trackId) params.set('spotifyTrackId', trackId);
+      if (isrc) params.set('isrc', isrc);
       return {
         id: `custom-${slugifyChallenge(title)}-${trackId}`,
         title: trackTitle,
@@ -2578,6 +2584,7 @@ async function buildCustomPackFromSpotifyPlaylist(options: {
         artworkUrl,
         previewUrl: `/api/music/preview?${params.toString()}`,
         spotifyTrackId: trackId,
+        isrc,
         spotifyUri: safeText(track.uri, 120),
         spotifyUrl: safeHttpsUrl(track.external_urls?.spotify || album.external_urls?.spotify),
         difficulty: index < 10 ? 'EASY' : index < 50 ? 'MEDIUM' : 'HARD'
@@ -2701,8 +2708,12 @@ async function buildRequestedArtistPackFromSpotify(name: string, spotifyArtistId
     const artworkUrl = safeHttpsUrl(album?.images?.[0]?.url);
     const releaseYear = Number(String(album?.release_date || '').slice(0, 4));
     const directPreview = safeHttpsUrl(track.preview_url);
+    const trackId = safeText(track.id, 80);
+    const isrc = safeText(track.external_ids?.isrc, 40);
     const params = new URLSearchParams({ title, artist });
     if (directPreview) params.set('url', directPreview);
+    if (trackId) params.set('spotifyTrackId', trackId);
+    if (isrc) params.set('isrc', isrc);
     return {
       id: `requested-${slug}-${safeText(String(track.id || index), 80)}`,
       title,
@@ -2714,7 +2725,8 @@ async function buildRequestedArtistPackFromSpotify(name: string, spotifyArtistId
       releaseYear: Number.isFinite(releaseYear) ? releaseYear : undefined,
       artworkUrl,
       previewUrl: `/api/music/preview?${params.toString()}`,
-      spotifyTrackId: safeText(track.id, 80),
+      spotifyTrackId: trackId,
+      isrc,
       spotifyUri: safeText(track.uri, 120),
       spotifyUrl: safeHttpsUrl(track.external_urls?.spotify || album?.external_urls?.spotify),
       difficulty: index < 5 ? 'EASY' : index < 20 ? 'MEDIUM' : 'HARD'
@@ -6239,12 +6251,14 @@ async function startServer() {
     const title = getBoundedQueryValue(req.query.title);
     const artist = getBoundedQueryValue(req.query.artist);
     const directUrl = getBoundedQueryValue(req.query.url);
+    const spotifyTrackId = safeText(req.query.spotifyTrackId, 80);
+    let isrc = safeText(req.query.isrc, 40);
 
     if (title.length > MAX_TEXT_QUERY_LENGTH || artist.length > MAX_TEXT_QUERY_LENGTH || directUrl.length > MAX_URL_LENGTH) {
       return res.status(400).json({ error: 'Request parameters are too long' });
     }
 
-    if (!title && !artist && !directUrl) {
+    if (!title && !artist && !directUrl && !spotifyTrackId && !isrc) {
       return res.status(400).json({ error: 'Song title or artist required' });
     }
 
@@ -6258,15 +6272,42 @@ async function startServer() {
         previewUrl = directValidation.url;
       }
 
-      const cacheKey = `${title.toLowerCase()}---${artist.toLowerCase()}`;
+      const cacheKey = `${spotifyTrackId.toLowerCase()}---${isrc.toLowerCase()}---${title.toLowerCase()}---${artist.toLowerCase()}`;
 
       if (!previewUrl && previewUrlCache.has(cacheKey)) {
         previewUrl = previewUrlCache.get(cacheKey)!;
       }
 
       if (!previewUrl) {
-        const cleanTitle = title.replace(/\([^)]*\)/g, '').replace(/feat\..*/i, '').trim();
-        const cleanArtist = artist.replace(/\([^)]*\)/g, '').replace(/feat\..*/i, '').trim();
+        let cleanTitle = title.replace(/\([^)]*\)/g, '').replace(/feat\..*/i, '').trim();
+        let cleanArtist = artist.replace(/\([^)]*\)/g, '').replace(/feat\..*/i, '').trim();
+
+        if (spotifyTrackId && isSpotifyConfigured()) {
+          try {
+            const spotifyTrack = await fetchSpotifyJson<any>(`/tracks/${encodeURIComponent(spotifyTrackId)}?${new URLSearchParams({ market: 'US' }).toString()}`);
+            const spotifyPreview = getValidatedAudioUrl(spotifyTrack?.preview_url);
+            if (spotifyPreview) {
+              previewUrl = spotifyPreview;
+            }
+            if (!isrc) {
+              isrc = safeText(spotifyTrack?.external_ids?.isrc, 40);
+            }
+            cleanTitle = cleanTitle || safeText(spotifyTrack?.name, 160);
+            if (!cleanArtist && Array.isArray(spotifyTrack?.artists)) {
+              cleanArtist = spotifyTrack.artists.map((item: any) => safeText(item?.name, 120)).filter(Boolean).join(' & ');
+            }
+          } catch (error) {
+            console.debug('Spotify track preview lookup skipped:', error instanceof Error ? error.message : error);
+          }
+        }
+
+        if (!previewUrl && isrc) {
+          try {
+            const deezerTrack = await fetchJson<{ preview?: string }>(`https://api.deezer.com/track/isrc:${encodeURIComponent(isrc)}`);
+            previewUrl = getValidatedAudioUrl(deezerTrack.preview);
+          } catch (_) {}
+        }
+
         const lowerArtist = cleanArtist.toLowerCase();
         const lowerTitle = cleanTitle.toLowerCase();
 

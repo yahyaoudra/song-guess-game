@@ -31,6 +31,7 @@ export interface Song {
   artworkUrl: string;
   previewUrl: string;
   spotifyTrackId?: string;
+  isrc?: string;
   spotifyUri?: string;
   spotifyUrl?: string;
   deezerUrl?: string;
