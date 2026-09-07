@@ -1448,12 +1448,13 @@ export default function App() {
       return;
     }
     const latestSettings = getStoredSettings();
-    if (col.countryCode && col.countryCode !== latestSettings.selectedCountry) {
-      const updated = { ...latestSettings, selectedCountry: col.countryCode };
+    const nextCountryCode = col.countryCode || latestSettings.selectedCountry || 'GLOBAL';
+    if (nextCountryCode !== latestSettings.selectedCountry) {
+      const updated = { ...latestSettings, selectedCountry: nextCountryCode };
       setSettings(updated);
       saveStoredSettings(updated);
-      window.history.pushState({}, document.title, getCountryPath(col.countryCode, publicConfig));
     }
+    window.history.pushState({}, document.title, getCountryPath(nextCountryCode, publicConfig));
     setIsCollectionsOpen(false);
     startNewGame('collection', col, { clearChallenge: true });
   };
