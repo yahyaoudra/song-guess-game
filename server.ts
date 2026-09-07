@@ -6,6 +6,7 @@ import http from 'http';
 import net from 'net';
 import path from 'path';
 import bcrypt from 'bcryptjs';
+import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { Pool } from 'pg';
 import Stripe from 'stripe';
 import { createServer as createViteServer } from 'vite';
@@ -431,10 +432,23 @@ function getStripeFailureMessage(rawCode?: string, rawMessage?: string): string 
   return safeText(rawMessage, 500) || 'Payment failed. Try a different payment method, or retry the payment later.';
 }
 
-type EmailProviderConfig = { provider: 'resend' | 'brevo' | 'mailersend'; apiKey: string; fromEmail: string; fromName: string };
+type EmailProviderConfig =
+  | { provider: 'ses'; region: string; fromEmail: string; fromName: string }
+  | { provider: 'resend' | 'brevo' | 'mailersend'; apiKey: string; fromEmail: string; fromName: string };
 
 function getEmailProviderConfigs(): EmailProviderConfig[] {
   const providers: EmailProviderConfig[] = [];
+  const sesRegion = process.env.AWS_SES_REGION?.trim() || process.env.SES_REGION?.trim() || process.env.AWS_REGION?.trim() || '';
+  const sesFromEmail = process.env.AWS_SES_FROM_EMAIL?.trim() || process.env.SES_FROM_EMAIL?.trim() || process.env.EMAIL_FROM?.trim() || '';
+  if (sesRegion && sesFromEmail) {
+    providers.push({
+      provider: 'ses',
+      region: sesRegion,
+      fromEmail: sesFromEmail,
+      fromName: process.env.AWS_SES_FROM_NAME?.trim() || process.env.SES_FROM_NAME?.trim() || process.env.EMAIL_FROM_NAME?.trim() || 'Song Guess Game'
+    });
+  }
+
   const resendApiKey = process.env.RESEND_API_KEY?.trim() || '';
   const resendFromEmail = process.env.RESEND_FROM_EMAIL?.trim() || process.env.EMAIL_FROM?.trim() || '';
   if (resendApiKey && resendFromEmail) {
@@ -469,6 +483,11 @@ function getEmailProviderConfigs(): EmailProviderConfig[] {
   }
 
   return providers;
+}
+
+function formatEmailAddress(name: string, email: string): string {
+  const safeName = safeText(name, 120).replace(/"/g, '\\"');
+  return safeName ? `"${safeName}" <${email}>` : email;
 }
 
 function isEmailProviderConfigured(): boolean {
@@ -630,7 +649,7 @@ async function sendTransactionalEmail(toEmail: string, toName: string, subject: 
       subject,
       category,
       status: 'failed',
-      error: 'Email provider is not configured. Set RESEND_API_KEY and RESEND_FROM_EMAIL, or BREVO_API_KEY and BREVO_FROM_EMAIL.',
+      error: 'Email provider is not configured. Set AWS_SES_REGION and AWS_SES_FROM_EMAIL with AWS credentials, or configure Resend/Brevo fallback credentials.',
       textBody: text,
       htmlBody: html
     });
@@ -641,6 +660,46 @@ async function sendTransactionalEmail(toEmail: string, toName: string, subject: 
 
   for (const emailProvider of emailProviders) {
     try {
+      if (emailProvider.provider === 'ses') {
+        const client = new SESv2Client({ region: emailProvider.region });
+        const result = await client.send(new SendEmailCommand({
+          FromEmailAddress: formatEmailAddress(emailProvider.fromName, emailProvider.fromEmail),
+          Destination: {
+            ToAddresses: [formatEmailAddress(toName || toEmail, toEmail)]
+          },
+          Content: {
+            Simple: {
+              Subject: {
+                Data: subject,
+                Charset: 'UTF-8'
+              },
+              Body: {
+                Text: {
+                  Data: text,
+                  Charset: 'UTF-8'
+                },
+                Html: {
+                  Data: html,
+                  Charset: 'UTF-8'
+                }
+              }
+            }
+          }
+        }));
+
+        await logEmailEvent({
+          email: toEmail,
+          name: toName,
+          subject,
+          category,
+          status: 'sent',
+          providerMessageId: `ses:${safeText(result.MessageId, 160) || 'sent'}`,
+          textBody: text,
+          htmlBody: html
+        });
+        return;
+      }
+
       const response = await fetch(
         emailProvider.provider === 'resend'
           ? RESEND_EMAIL_API_URL
@@ -5919,7 +5978,7 @@ async function startServer() {
       return;
     }
     if (!isEmailProviderConfigured()) {
-      res.status(503).json({ error: 'Email provider is not configured. Set Resend or Brevo API credentials.' });
+      res.status(503).json({ error: 'Email provider is not configured. Set AWS SES credentials or Resend/Brevo fallback credentials.' });
       return;
     }
 
@@ -5976,7 +6035,7 @@ async function startServer() {
       return;
     }
     if (!isEmailProviderConfigured()) {
-      res.status(503).json({ error: 'Email provider is not configured. Set Resend or Brevo API credentials.' });
+      res.status(503).json({ error: 'Email provider is not configured. Set AWS SES credentials or Resend/Brevo fallback credentials.' });
       return;
     }
 

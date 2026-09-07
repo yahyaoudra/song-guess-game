@@ -47,6 +47,11 @@ GOOGLE_SEARCH_CONSOLE_VERIFICATION=""
 VITE_RECAPTCHA_SITE_KEY=""
 RECAPTCHA_SECRET_KEY=""
 RECAPTCHA_MIN_SCORE="0.5"
+AWS_SES_REGION="us-east-1"
+AWS_SES_FROM_EMAIL="noreply@songguessgame.online"
+AWS_SES_FROM_NAME="Song Guess Game"
+AWS_ACCESS_KEY_ID=""
+AWS_SECRET_ACCESS_KEY=""
 RESEND_API_KEY=""
 RESEND_FROM_EMAIL="noreply@songguessgame.online"
 RESEND_FROM_NAME="Song Guess Game"
@@ -59,4 +64,4 @@ Admin config and activity logs persist under `./data` by default, or through `AD
 
 Create the reCAPTCHA keys as reCAPTCHA v3 keys in Google Cloud/Google reCAPTCHA and add `songguessgame.online`, `localhost`, and `127.0.0.1` as allowed domains.
 
-For Hetzner/EasyPanel, Stripe, Spotify, Google Search Console, Analytics, AdSense, Resend, and Brevo setup, see [PRODUCTION.md](./PRODUCTION.md).
+For Hetzner/EasyPanel, Stripe, Spotify, Google Search Console, Analytics, AdSense, AWS SES, Resend, and Brevo setup, see [PRODUCTION.md](./PRODUCTION.md).

@@ -57,11 +57,17 @@ SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
 SPOTIFY_AUTO_REFRESH_ENABLED=true
 SPOTIFY_ARTIST_ALBUM_LIMIT=20
 
-RESEND_API_KEY=your_resend_api_key
+AWS_SES_REGION=us-east-1
+AWS_SES_FROM_EMAIL=noreply@songguessgame.online
+AWS_SES_FROM_NAME=Song Guess Game
+AWS_ACCESS_KEY_ID=your_aws_access_key_id
+AWS_SECRET_ACCESS_KEY=your_aws_secret_access_key
+
+RESEND_API_KEY=optional_resend_fallback_api_key
 RESEND_FROM_EMAIL=noreply@songguessgame.online
 RESEND_FROM_NAME=Song Guess Game
 
-BREVO_API_KEY=your_brevo_transactional_api_key
+BREVO_API_KEY=optional_brevo_fallback_api_key
 BREVO_FROM_EMAIL=noreply@songguessgame.online
 BREVO_FROM_NAME=Song Guess Game
 
@@ -209,7 +215,22 @@ The app serves:
 3. Set `GOOGLE_ADSENSE_CLIENT` or paste it in the admin Google integrations panel.
 4. Keep manual banners configured as fallback while AdSense approval is pending.
 
-## Resend
+## AWS SES Email
+
+AWS SES is the primary transactional email sender. Resend, Brevo, and MailerSend are only fallback providers if they are configured and SES fails.
+
+1. In AWS SES, choose one region and stay on it, for example `us-east-1`.
+2. Verify `songguessgame.online` as an SES identity.
+3. Add the SES DNS records for DKIM, SPF/Mail From if you configure it, and DMARC.
+4. Request production access for SES. While SES is in sandbox mode, it can only send to verified recipient addresses.
+5. Create an IAM user or access key with permission to send SES email, preferably limited to `ses:SendEmail` and `ses:SendRawEmail`.
+6. Set `AWS_SES_REGION`, `AWS_SES_FROM_EMAIL`, `AWS_SES_FROM_NAME`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY` in EasyPanel.
+7. Register a test user and verify that the email verification message arrives.
+8. In the admin email log, successful SES messages show a provider id starting with `ses:`.
+
+## Resend Fallback
+
+Resend is used automatically when AWS SES fails and Resend is configured.
 
 1. Verify `songguessgame.online` as a sending domain in Resend.
 2. Add SPF, DKIM, and any required tracking DNS records.
