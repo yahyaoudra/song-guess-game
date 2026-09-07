@@ -13,6 +13,8 @@ interface QuizCollectionModalProps {
   onOpenArtist?: (slug: string) => void;
   requestedArtists?: RequestedArtist[];
   publicConfig?: PublicRuntimeConfig;
+  isAlbumSelectionUnlocked?: boolean;
+  onRequireAlbumAccess?: () => void;
   onClose: () => void;
 }
 
@@ -93,6 +95,8 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
   onOpenArtist,
   requestedArtists = [],
   publicConfig,
+  isAlbumSelectionUnlocked = false,
+  onRequireAlbumAccess,
   onClose
 }) => {
   const [activeTab, setActiveTab] = useState<LibraryTab>('countries');
@@ -241,6 +245,10 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
   };
 
   const handleSelectAlbumPack = (collection: QuizCollection, albumId: string) => {
+    if (!isAlbumSelectionUnlocked) {
+      onRequireAlbumAccess?.();
+      return;
+    }
     if (albumId === 'all') {
       handleSelectPack(collection);
       setAlbumPickerCollection(null);
@@ -606,7 +614,11 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
                             <button
                               onClick={(event) => {
                                 event.stopPropagation();
-                                setAlbumPickerCollection(col);
+                                if (isAlbumSelectionUnlocked) {
+                                  setAlbumPickerCollection(col);
+                                } else {
+                                  onRequireAlbumAccess?.();
+                                }
                               }}
                               className="hidden sm:inline-flex items-center gap-1 rounded-lg border border-[#00e676]/60 bg-[#00e676]/10 px-2.5 py-1 text-[11px] font-black text-[#00e676] transition-colors hover:bg-[#00e676]/18"
                             >

@@ -7,6 +7,7 @@ import { setAnalyticsUser, trackEventOnce } from '../utils/analytics';
 interface AuthModalProps {
   onClose: () => void;
   onAuthenticated: (session: AuthSessionResponse) => void;
+  onRegistered?: () => void;
   databaseConfigured: boolean;
   initialMode?: 'login' | 'register';
 }
@@ -14,6 +15,7 @@ interface AuthModalProps {
 export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
   onAuthenticated,
+  onRegistered,
   databaseConfigured,
   initialMode = 'register'
 }) => {
@@ -43,6 +45,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             ? 'Check your email to verify your account. After verification, sign in to play with your account benefits.'
             : 'Account created. We could not send the verification email right now. Please try signing in later or contact support.'
         );
+        onRegistered?.();
         return;
       }
 

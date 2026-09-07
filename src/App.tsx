@@ -121,6 +121,7 @@ export default function App() {
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [authInitialMode, setAuthInitialMode] = useState<'login' | 'register'>('register');
   const [pendingArtistRequest, setPendingArtistRequest] = useState<{ name: string; spotifyArtistId?: string; imageUrl?: string } | null>(null);
+  const [pendingUnlockAfterAuth, setPendingUnlockAfterAuth] = useState(false);
   const [isPaywallOpen, setIsPaywallOpen] = useState(false);
   const [isMultiplayerOpen, setIsMultiplayerOpen] = useState(false);
   const [initialMultiplayerRoomCode, setInitialMultiplayerRoomCode] = useState('');
@@ -786,6 +787,31 @@ export default function App() {
     }
   }, [authSession.authenticated]);
 
+  const requireAlbumAccess = useCallback(() => {
+    setAccessNotice('Playing a specific album is included with unlimited access.');
+    if (authSession.authenticated) {
+      void handleUnlock();
+      return;
+    }
+    setPendingUnlockAfterAuth(true);
+    setAuthInitialMode('register');
+    setIsPaywallOpen(false);
+    setIsAuthOpen(true);
+  }, [authSession.authenticated, handleUnlock]);
+
+  const applyArtistAlbumPack = useCallback((albumPackId: string) => {
+    if (albumPackId !== 'all' && !authSession.entitlement.active) {
+      requireAlbumAccess();
+      return;
+    }
+    setActiveArtistAlbumPackId(albumPackId);
+    setRoundIndex(0);
+    setCurrentStepIndex(0);
+    setIsRevealed(false);
+    setRoundHistory([]);
+    setGameSessionKey(Date.now());
+  }, [authSession.entitlement.active, requireAlbumAccess]);
+
   const handleUpdateVolume = (newVol: number) => {
     const updated = { ...getStoredSettings(), volume: newVol };
     setSettings(updated);
@@ -1427,7 +1453,12 @@ export default function App() {
         })
         .catch(() => {});
     }
-  }, [handleRequestArtist, multiplayerAuthReturn, pendingArtistRequest, refreshAccessState]);
+    if (pendingUnlockAfterAuth) {
+      setPendingUnlockAfterAuth(false);
+      setIsAuthOpen(false);
+      setIsPaywallOpen(true);
+    }
+  }, [handleRequestArtist, multiplayerAuthReturn, pendingArtistRequest, pendingUnlockAfterAuth, refreshAccessState]);
 
   useEffect(() => {
     const socket = activeMultiplayerSession?.socket;
@@ -1796,6 +1827,8 @@ export default function App() {
           onOpenArtist={(slug) => navigateToPage(getArtistPath(slug))}
           requestedArtists={requestedArtists}
           publicConfig={publicConfig}
+          isAlbumSelectionUnlocked={authSession.entitlement.active}
+          onRequireAlbumAccess={requireAlbumAccess}
           onClose={() => setIsCollectionsOpen(false)}
         />
       )}
@@ -1827,6 +1860,13 @@ export default function App() {
           initialMode={authInitialMode}
           onClose={() => setIsAuthOpen(false)}
           onAuthenticated={handleAuthenticated}
+          onRegistered={() => {
+            if (pendingUnlockAfterAuth) {
+              setPendingUnlockAfterAuth(false);
+              setIsAuthOpen(false);
+              setIsPaywallOpen(true);
+            }
+          }}
           databaseConfigured={authSession.databaseConfigured}
         />
       )}
@@ -2162,14 +2202,7 @@ export default function App() {
           <div className="mb-3 flex w-full max-w-3xl gap-2 overflow-x-auto rounded-lg border border-white/10 bg-[#08100b]/80 p-2">
             <button
               type="button"
-              onClick={() => {
-                setActiveArtistAlbumPackId('all');
-                setRoundIndex(0);
-                setCurrentStepIndex(0);
-                setIsRevealed(false);
-                setRoundHistory([]);
-                setGameSessionKey(Date.now());
-              }}
+              onClick={() => applyArtistAlbumPack('all')}
               className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-black ${activeArtistAlbumPackId === 'all' ? 'bg-[#00e676] text-black' : 'bg-white/[0.06] text-white/65 hover:text-white'}`}
             >
               All songs
@@ -2178,14 +2211,7 @@ export default function App() {
               <button
                 key={pack.id}
                 type="button"
-                onClick={() => {
-                  setActiveArtistAlbumPackId(pack.id);
-                  setRoundIndex(0);
-                  setCurrentStepIndex(0);
-                  setIsRevealed(false);
-                  setRoundHistory([]);
-                  setGameSessionKey(Date.now());
-                }}
+                onClick={() => applyArtistAlbumPack(pack.id)}
                 className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-black ${activeArtistAlbumPackId === pack.id ? 'bg-[#00e676] text-black' : 'bg-white/[0.06] text-white/65 hover:text-white'}`}
                 title={`${pack.songsCount} songs`}
               >
@@ -2402,6 +2428,8 @@ export default function App() {
           onSelectCollection={handleCollectionSelect}
           requestedArtists={requestedArtists}
           publicConfig={publicConfig}
+          isAlbumSelectionUnlocked={authSession.entitlement.active}
+          onRequireAlbumAccess={requireAlbumAccess}
           onClose={() => setIsCollectionsOpen(false)}
         />
       )}
@@ -2444,6 +2472,13 @@ export default function App() {
           initialMode={authInitialMode}
           onClose={() => setIsAuthOpen(false)}
           onAuthenticated={handleAuthenticated}
+          onRegistered={() => {
+            if (pendingUnlockAfterAuth) {
+              setPendingUnlockAfterAuth(false);
+              setIsAuthOpen(false);
+              setIsPaywallOpen(true);
+            }
+          }}
           databaseConfigured={authSession.databaseConfigured}
         />
       )}
