@@ -7,6 +7,8 @@ export interface RegisterUserResponse {
   email: string;
   emailSent?: boolean;
   verificationUrl?: string;
+  verificationSkipped?: boolean;
+  session?: AuthSessionResponse;
 }
 
 export class ApiRequestError extends Error {
@@ -80,9 +82,9 @@ export async function updateUserProfile(name: string, countryCode: string): Prom
   });
 }
 
-export async function startEmailChange(email: string): Promise<{ ok: true; verificationUrl: string; emailSent?: boolean }> {
+export async function startEmailChange(email: string): Promise<{ ok: true; verificationUrl?: string; emailSent?: boolean; verificationSkipped?: boolean; session?: AuthSessionResponse }> {
   const recaptchaToken = await executeRecaptcha('change_email');
-  return requestJson<{ ok: true; verificationUrl: string; emailSent?: boolean }>('/api/auth/change-email', {
+  return requestJson<{ ok: true; verificationUrl?: string; emailSent?: boolean; verificationSkipped?: boolean; session?: AuthSessionResponse }>('/api/auth/change-email', {
     method: 'POST',
     body: JSON.stringify({ email, recaptchaToken })
   });

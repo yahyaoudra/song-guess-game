@@ -78,6 +78,11 @@ export const AccountMenu: React.FC<AccountMenuProps> = ({ session, onOpenAuth, o
     setNotice(null);
     try {
       const result = await startEmailChange(email.trim());
+      if (result.session) {
+        onSessionChange(result.session);
+        setNotice('Email updated.');
+        return;
+      }
       setNotice(
         result.emailSent
           ? 'Verification email sent. Open it to confirm the new address.'

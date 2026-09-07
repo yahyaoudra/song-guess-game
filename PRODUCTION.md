@@ -76,6 +76,7 @@ BREVO_FROM_NAME=Song Guess Game
 
 GOOGLE_CLIENT_ID=optional_google_oauth_client_id
 GOOGLE_CLIENT_SECRET=optional_google_oauth_client_secret
+SKIP_EMAIL_VERIFICATION=false
 
 GOOGLE_ANALYTICS_MEASUREMENT_ID=G-XXXXXXXXXX
 MICROSOFT_CLARITY_PROJECT_ID=your_clarity_project_id
@@ -230,6 +231,16 @@ AWS SES is the primary transactional email sender. Resend, Brevo, and MailerSend
 6. Set `AWS_SES_REGION`, `AWS_SES_FROM_EMAIL`, `AWS_SES_FROM_NAME`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY` in EasyPanel.
 7. Register a test user and verify that the email verification message arrives.
 8. In the admin email log, successful SES messages show a provider id starting with `ses:`.
+
+### Temporary Verification Bypass
+
+While waiting for SES production approval, set this in EasyPanel:
+
+```bash
+SKIP_EMAIL_VERIFICATION=true
+```
+
+When enabled, new password accounts are created as verified and signed in immediately, existing unverified users can log in, checkout is allowed, and email changes apply without a verification email. Set it back to `false` after SES is approved.
 
 ## Resend Fallback
 

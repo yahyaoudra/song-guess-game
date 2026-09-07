@@ -38,8 +38,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         const result = await registerUser(email.trim(), password, name.trim());
         trackEventOnce('sign_up', email.trim().toLowerCase(), {
           method: 'email',
-          email_sent: Boolean(result.emailSent)
+          email_sent: Boolean(result.emailSent),
+          verification_skipped: Boolean(result.verificationSkipped)
         });
+        if (result.session) {
+          setAnalyticsUser(result.session.user?.id);
+          onAuthenticated(result.session);
+          onRegistered?.();
+          onClose();
+          return;
+        }
         setVerificationNotice(
           result.emailSent
             ? 'Check your email to verify your account. After verification, sign in to play with your account benefits.'

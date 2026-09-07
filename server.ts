@@ -426,6 +426,10 @@ function isStripeConfigured(): boolean {
   return Boolean(process.env.STRIPE_SECRET_KEY?.trim());
 }
 
+function isEmailVerificationSkipped(): boolean {
+  return /^(true|1|yes|on)$/i.test(process.env.SKIP_EMAIL_VERIFICATION?.trim() || '');
+}
+
 function getStripeFailureMessage(rawCode?: string, rawMessage?: string): string {
   const code = safeText(rawCode, 80);
   if (code === 'card_declined' || code === 'insufficient_funds') {
@@ -3030,7 +3034,7 @@ function publicUserFromRow(row: Record<string, unknown>): PublicUser {
     email: String(row.email || ''),
     name: String(row.name || ''),
     countryCode: String(row.country_code || '') || undefined,
-    emailVerified: Boolean(row.email_verified),
+    emailVerified: Boolean(row.email_verified) || isEmailVerificationSkipped(),
     createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at || '')
   };
 }
@@ -3057,7 +3061,7 @@ async function getUserSession(req: Request): Promise<UserSession | null> {
     email: String(rows[0].email),
     name: String(rows[0].name || ''),
     countryCode: String(rows[0].country_code || '') || undefined,
-    emailVerified: Boolean(rows[0].email_verified)
+    emailVerified: Boolean(rows[0].email_verified) || isEmailVerificationSkipped()
   };
 }
 
@@ -5081,10 +5085,11 @@ async function startServer() {
       const rawVerifyToken = randomBytes(32).toString('base64url');
       const verifyHash = hashToken(rawVerifyToken);
       const userId = randomUUID();
+      const skipEmailVerification = isEmailVerificationSkipped();
       await queryDb(
-        `INSERT INTO sg_users (id, email, password_hash, name, email_verification_token_hash, email_verification_expires_at)
-         VALUES ($1, $2, $3, $4, $5, now() + interval '24 hours')`,
-        [userId, email, passwordHash, name, verifyHash]
+        `INSERT INTO sg_users (id, email, password_hash, name, email_verified, email_verification_token_hash, email_verification_expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $5 THEN NULL ELSE now() + interval '24 hours' END)`,
+        [userId, email, passwordHash, name, skipEmailVerification, skipEmailVerification ? null : verifyHash]
       );
       await markMailerSendRegistered(userId, 'password').catch((error) => {
         console.warn('Email provider registration marker failed:', error instanceof Error ? error.message : error);
@@ -5093,21 +5098,40 @@ async function startServer() {
         userId,
         email,
         eventType: 'signup',
-        status: 'pending',
-        detail: 'Password account created; email verification required',
-        metadata: { source: 'password', referrer: safeText(req.headers.referer, 2048), userAgent: safeText(req.headers['user-agent'], 240) }
+        status: skipEmailVerification ? 'completed' : 'pending',
+        detail: skipEmailVerification ? 'Password account created; email verification skipped by server flag' : 'Password account created; email verification required',
+        metadata: {
+          source: 'password',
+          emailVerificationSkipped: skipEmailVerification,
+          referrer: safeText(req.headers.referer, 2048),
+          userAgent: safeText(req.headers['user-agent'], 240)
+        }
       });
       const appUrl = getEffectiveAppUrl(req);
       const verificationUrl = `${appUrl}/api/auth/verify?token=${encodeURIComponent(rawVerifyToken)}`;
-      const emailSent = await sendVerificationEmail(email, name, verificationUrl, 'new-account').catch((error) => {
-        console.warn('Verification email send failed:', error instanceof Error ? error.message : error);
-        return false;
-      });
+      const emailSent = skipEmailVerification
+        ? false
+        : await sendVerificationEmail(email, name, verificationUrl, 'new-account').catch((error) => {
+            console.warn('Verification email send failed:', error instanceof Error ? error.message : error);
+            return false;
+          });
+      if (skipEmailVerification) {
+        await createUserSession(req, res, userId);
+      }
       res.json({
         registered: true,
         email,
-        verificationUrl,
-        emailSent
+        verificationUrl: skipEmailVerification ? undefined : verificationUrl,
+        emailSent,
+        verificationSkipped: skipEmailVerification,
+        session: skipEmailVerification
+          ? await buildAuthSessionResponseForUser({
+              id: userId,
+              email,
+              name,
+              emailVerified: true
+            })
+          : undefined
       });
     } catch (error) {
       const message = String((error as { code?: string }).code) === '23505'
@@ -5141,7 +5165,7 @@ async function startServer() {
         res.status(401).json({ error: 'Invalid email or password' });
         return;
       }
-      if (!row.email_verified) {
+      if (!row.email_verified && !isEmailVerificationSkipped()) {
         res.status(403).json({ error: 'Please verify your email before signing in. Check your inbox for the verification link.' });
         return;
       }
@@ -5158,7 +5182,7 @@ async function startServer() {
         email: String(row.email),
         name: String(row.name || ''),
         countryCode: String(row.country_code || '') || undefined,
-        emailVerified: Boolean(row.email_verified)
+        emailVerified: Boolean(row.email_verified) || isEmailVerificationSkipped()
       }));
     } catch {
       res.status(503).json({ error: 'Login is not available right now' });
@@ -5214,6 +5238,41 @@ async function startServer() {
     const recaptcha = await verifyRecaptcha(req, 'change_email');
     if (recaptcha.ok === false) {
       res.status(403).json({ error: recaptcha.error });
+      return;
+    }
+    if (isEmailVerificationSkipped()) {
+      try {
+        const rows = await queryDb<Record<string, unknown>>(
+          `UPDATE sg_users
+           SET email = $2,
+               email_verified = true,
+               pending_email = null,
+               pending_email_verification_token_hash = null,
+               pending_email_verification_expires_at = null,
+               updated_at = now()
+           WHERE id = $1
+           RETURNING id, email, name, country_code, email_verified`,
+          [user.id, nextEmail]
+        );
+        const row = rows[0];
+        res.json({
+          ok: true,
+          emailSent: false,
+          verificationSkipped: true,
+          session: await buildAuthSessionResponseForUser({
+            id: String(row.id),
+            email: String(row.email),
+            name: String(row.name || ''),
+            countryCode: String(row.country_code || '') || undefined,
+            emailVerified: true
+          })
+        });
+      } catch (error) {
+        const message = String((error as { code?: string }).code) === '23505'
+          ? 'That email is already registered'
+          : 'Could not update email';
+        res.status(400).json({ error: message });
+      }
       return;
     }
     const rawVerifyToken = randomBytes(32).toString('base64url');
@@ -5510,7 +5569,7 @@ async function startServer() {
 
     try {
       const user = res.locals.user as UserSession;
-      if (!user.emailVerified) {
+      if (!user.emailVerified && !isEmailVerificationSkipped()) {
         res.status(403).json({ error: 'Please verify your email before unlocking unlimited play.' });
         return;
       }
