@@ -147,6 +147,15 @@ export interface QuizCollection {
   isOfficialSpotify?: boolean;
   spotifyPlaylistUrl?: string;
   spotifyPlaylistName?: string;
+  albumPacks?: Array<{
+    id: string;
+    title: string;
+    type: 'album' | 'single' | 'compilation' | 'appears_on' | 'singles';
+    coverImage?: string;
+    songIds: string[];
+    songsCount: number;
+    releaseYear?: number;
+  }>;
   tags?: string[];
 }
 

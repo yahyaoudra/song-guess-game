@@ -81,6 +81,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
                 'All artists',
                 'All countries',
                 'All genres and eras',
+                'Play by album',
                 'Unlimited replay',
                 'No ads',
                 'Multiplayer rooms'

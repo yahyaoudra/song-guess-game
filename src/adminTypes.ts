@@ -52,6 +52,8 @@ export interface AdminConfigState {
   pageConfigs: Record<string, AdminPageConfig>;
   routeConfigs: Record<string, AdminPageConfig>;
   featuredArtistSlugs: string[];
+  customCountries: AdminCustomCountry[];
+  customPacks: AdminCustomPack[];
   adSlots: AdminAdSlot[];
   robotsTxt: string;
   updatedAt: string;
@@ -65,6 +67,8 @@ export interface PublicRuntimeConfig {
   pageConfigs: Record<string, AdminPageConfig>;
   routeConfigs: Record<string, AdminPageConfig>;
   featuredArtistSlugs: string[];
+  customCountries: AdminCustomCountry[];
+  customPacks: AdminCustomPack[];
   adSlots: AdminAdSlot[];
   robotsTxt?: string;
   generatedAt: string;
@@ -302,6 +306,31 @@ export interface SpotifyArtistSuggestion {
   genres: string[];
 }
 
+export type AdminCustomPackType = 'country' | 'genre' | 'playlist';
+
+export interface AdminCustomCountry extends Country {
+  custom?: true;
+}
+
+export interface AdminCustomPack extends QuizCollection {
+  custom?: true;
+  packType: AdminCustomPackType;
+  genreSlug?: string;
+  genreName?: string;
+  spotifyPlaylistId?: string;
+  updatedAt?: string;
+}
+
+export interface SpotifyPlaylistSuggestion {
+  id: string;
+  name: string;
+  description: string;
+  imageUrl: string;
+  spotifyUrl: string;
+  ownerName?: string;
+  tracksTotal: number;
+}
+
 export interface AdminSessionResponse {
   authenticated: boolean;
   configured: boolean;
@@ -309,4 +338,5 @@ export interface AdminSessionResponse {
   username?: string;
   accessPathConfigured?: boolean;
 }
-import type { Song } from './types';
+import type { QuizCollection, Song } from './types';
+import type { Country } from './data/countries';

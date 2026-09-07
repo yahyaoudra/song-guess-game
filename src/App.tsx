@@ -390,6 +390,13 @@ export default function App() {
           window.history.replaceState({}, document.title, `${pathname}${nextQuery ? `?${nextQuery}` : ''}${hash}`);
         }
 
+        if (urlParams.get('unlock') === '1') {
+          setIsPaywallOpen(true);
+          urlParams.delete('unlock');
+          const nextQuery = urlParams.toString();
+          window.history.replaceState({}, document.title, `${pathname}${nextQuery ? `?${nextQuery}` : ''}${hash}`);
+        }
+
         const roomCode = (urlParams.get('room') || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
         if (roomCode) {
           setInitialMultiplayerRoomCode(roomCode);
@@ -1788,6 +1795,7 @@ export default function App() {
           onSelectCollection={handleCollectionSelect}
           onOpenArtist={(slug) => navigateToPage(getArtistPath(slug))}
           requestedArtists={requestedArtists}
+          publicConfig={publicConfig}
           onClose={() => setIsCollectionsOpen(false)}
         />
       )}
@@ -2393,6 +2401,7 @@ export default function App() {
           onSelectCountryCode={handleCollectionCountrySelect}
           onSelectCollection={handleCollectionSelect}
           requestedArtists={requestedArtists}
+          publicConfig={publicConfig}
           onClose={() => setIsCollectionsOpen(false)}
         />
       )}

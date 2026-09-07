@@ -4,11 +4,14 @@ import {
   AdminEmailEvent,
   AdminFeatureAnalytics,
   AdminSessionResponse,
+  AdminCustomCountry,
+  AdminCustomPack,
   AdminUserProfile,
   AdminUserRecord,
   AdminUserSegments,
   PaymentRecord,
-  RequestedArtist
+  RequestedArtist,
+  SpotifyPlaylistSuggestion
 } from '../adminTypes';
 
 let csrfToken = '';
@@ -73,6 +76,47 @@ export async function saveAdminConfig(config: AdminConfigState): Promise<AdminCo
   return requestJson<AdminConfigState>('/api/admin/config', {
     method: 'PUT',
     body: JSON.stringify(config)
+  });
+}
+
+export async function searchAdminSpotifyPlaylists(query: string): Promise<SpotifyPlaylistSuggestion[]> {
+  const params = new URLSearchParams({ q: query });
+  const body = await requestJson<{ playlists: SpotifyPlaylistSuggestion[] }>(`/api/admin/spotify/playlists?${params.toString()}`);
+  return body.playlists;
+}
+
+export async function addAdminCustomCountry(country: {
+  code: string;
+  name: string;
+  nativeName?: string;
+  flag?: string;
+  region?: string;
+  popularGenres?: string[] | string;
+  description?: string;
+}): Promise<{ country: AdminCustomCountry; config: AdminConfigState }> {
+  return requestJson<{ country: AdminCustomCountry; config: AdminConfigState }>('/api/admin/custom-countries', {
+    method: 'POST',
+    body: JSON.stringify(country)
+  });
+}
+
+export async function addAdminSpotifyPlaylistPack(input: {
+  playlistIdOrUrl: string;
+  packType: 'country' | 'genre' | 'playlist';
+  title?: string;
+  countryCode?: string;
+  genreName?: string;
+  genreSlug?: string;
+}): Promise<{ pack: AdminCustomPack; config: AdminConfigState }> {
+  return requestJson<{ pack: AdminCustomPack; config: AdminConfigState }>('/api/admin/custom-packs/spotify-playlist', {
+    method: 'POST',
+    body: JSON.stringify(input)
+  });
+}
+
+export async function deleteAdminCustomPack(packId: string): Promise<{ config: AdminConfigState }> {
+  return requestJson<{ ok: true; config: AdminConfigState }>(`/api/admin/custom-packs/${encodeURIComponent(packId)}`, {
+    method: 'DELETE'
   });
 }
 

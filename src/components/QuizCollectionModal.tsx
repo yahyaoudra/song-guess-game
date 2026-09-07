@@ -1,11 +1,10 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { X, Play, Flame, Music, Search, ExternalLink, LayoutGrid, List, MapPin, Mic2, Tags } from 'lucide-react';
+import { X, Play, Flame, Music, Search, ExternalLink, LayoutGrid, List, MapPin, Mic2, Tags, Disc3 } from 'lucide-react';
 import { QuizCollection, Song } from '../types';
-import { QUIZ_COLLECTIONS } from '../data/quizCollections';
-import { ALL_SONGS, DIFFICULTY_COLORS } from '../data/moroccanSongs';
-import { COUNTRIES } from '../data/countries';
+import { DIFFICULTY_COLORS } from '../data/moroccanSongs';
 import { getArtistPath } from '../utils/runtimeConfig';
-import { RequestedArtist } from '../adminTypes';
+import { RequestedArtist, PublicRuntimeConfig } from '../adminTypes';
+import { getCollectionSongs as getRuntimeCollectionSongs, getRuntimeCollections, getRuntimeCountries } from '../utils/customCatalog';
 
 interface QuizCollectionModalProps {
   selectedCountryCode: string;
@@ -13,6 +12,7 @@ interface QuizCollectionModalProps {
   onSelectCollection: (collection: QuizCollection) => void;
   onOpenArtist?: (slug: string) => void;
   requestedArtists?: RequestedArtist[];
+  publicConfig?: PublicRuntimeConfig;
   onClose: () => void;
 }
 
@@ -29,6 +29,8 @@ const TAB_OPTIONS: Array<{
 ];
 
 function getCollectionLibraryTab(collection: QuizCollection): LibraryTab {
+  if ('packType' in collection && collection.packType === 'genre') return 'genres';
+  if ('packType' in collection && collection.packType === 'country') return 'countries';
   if (collection.id.startsWith('artist-')) return 'artists';
   if (collection.id.startsWith('genre-')) return 'genres';
   return 'countries';
@@ -75,6 +77,7 @@ function requestedArtistToCollection(artist: RequestedArtist): QuizCollection {
     songsCount: artist.songsCount,
     songIds: artist.songIds,
     songs,
+    albumPacks: artist.albumPacks,
     isHot: artist.songsCount >= 25,
     isOfficialSpotify: true,
     spotifyPlaylistUrl: artist.spotifyUrl,
@@ -89,6 +92,7 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
   onSelectCollection,
   onOpenArtist,
   requestedArtists = [],
+  publicConfig,
   onClose
 }) => {
   const [activeTab, setActiveTab] = useState<LibraryTab>('countries');
@@ -97,7 +101,8 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [currentPage, setCurrentPage] = useState(1);
-  const songById = useMemo(() => new Map(ALL_SONGS.map((song) => [song.id, song])), []);
+  const [albumPickerCollection, setAlbumPickerCollection] = useState<QuizCollection | null>(null);
+  const runtimeCountries = useMemo(() => getRuntimeCountries(publicConfig), [publicConfig]);
   const libraryCollections = useMemo(() => {
     const requestedCollections = requestedArtists
       .filter((artist) => artist.status === 'ready' && artist.songsCount > 0)
@@ -108,14 +113,14 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
         .filter((slug): slug is string => Boolean(slug))
         .map(baseArtistSlug)
     );
-    const staticCollections = QUIZ_COLLECTIONS.filter((collection) => {
+    const staticCollections = getRuntimeCollections(publicConfig).filter((collection) => {
       if (!isCanonicalLibraryCollection(collection)) return false;
       if (getCollectionLibraryTab(collection) !== 'artists') return true;
       const slug = getArtistSlugFromCollection(collection);
       return !slug || !refreshedBaseSlugs.has(baseArtistSlug(slug));
     });
     return [...requestedCollections, ...staticCollections];
-  }, [requestedArtists]);
+  }, [requestedArtists, publicConfig]);
 
   const tabCounts = useMemo(() => {
     return libraryCollections.reduce<Record<LibraryTab, number>>(
@@ -147,14 +152,6 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
     }
   }, [categories, selectedCategory]);
 
-  const getCollectionSongs = (collection: QuizCollection): Song[] => (
-    collection.songs?.length
-      ? collection.songs
-      : collection.songIds
-      .map((songId) => songById.get(songId))
-      .filter((song): song is Song => Boolean(song))
-  );
-
   const filteredCollections = useMemo(() => {
     return libraryCollections.filter((col) => {
       const matchesTab = getCollectionLibraryTab(col) === activeTab;
@@ -175,7 +172,7 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
             (col.tags && col.tags.some(t => t.toLowerCase().includes(selectedCategory.toLowerCase())));
 
       const q = searchQuery.toLowerCase().trim();
-      const songs = getCollectionSongs(col);
+      const songs = getRuntimeCollectionSongs(col);
       const matchesSearch =
         !q ||
         getDisplayTitle(col, activeTab).toLowerCase().includes(q) ||
@@ -193,7 +190,7 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
 
       return matchesTab && matchesCountry && matchesCategory && matchesSearch;
     });
-  }, [activeTab, filterCountry, selectedCategory, searchQuery, libraryCollections, songById]);
+  }, [activeTab, filterCountry, selectedCategory, searchQuery, libraryCollections]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -241,6 +238,32 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
 
   const handleSelectPack = (collection: QuizCollection) => {
     onSelectCollection(collection);
+  };
+
+  const handleSelectAlbumPack = (collection: QuizCollection, albumId: string) => {
+    if (albumId === 'all') {
+      handleSelectPack(collection);
+      setAlbumPickerCollection(null);
+      return;
+    }
+    const album = collection.albumPacks?.find((pack) => pack.id === albumId);
+    if (!album) return;
+    const songIds = new Set(album.songIds);
+    const songs = getRuntimeCollectionSongs(collection).filter((song) => songIds.has(song.id));
+    if (songs.length === 0) return;
+    handleSelectPack({
+      ...collection,
+      id: `${collection.id}-album-${album.id}`,
+      title: `${getDisplayTitle(collection, 'artists')} - ${album.title}`,
+      description: `${album.title} album challenge with ${songs.length} playable songs.`,
+      category: 'Artist Album',
+      coverImage: album.coverImage || songs[0]?.artworkUrl || collection.coverImage,
+      songIds: songs.map((song) => song.id),
+      songs,
+      songsCount: songs.length,
+      tags: [...(collection.tags || []), album.title, 'Album']
+    });
+    setAlbumPickerCollection(null);
   };
 
   const handleOpenArtist = (collection: QuizCollection) => {
@@ -376,7 +399,7 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
               <span>All Countries</span>
             </button>
 
-            {COUNTRIES.map((c) => (
+            {runtimeCountries.map((c) => (
             <button
               key={c.code}
               onClick={() => {
@@ -479,9 +502,10 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
               {visibleCollections.map((col) => {
                 const diffMeta = DIFFICULTY_COLORS[col.difficulty];
-                const countryMeta = activeTab === 'countries' ? COUNTRIES.find((c) => c.code === col.countryCode) : null;
-                const songs = getCollectionSongs(col);
+                const countryMeta = activeTab === 'countries' ? runtimeCountries.find((c) => c.code === col.countryCode) : null;
+                const songs = getRuntimeCollectionSongs(col);
                 const displayTitle = getDisplayTitle(col, activeTab);
+                const hasAlbumPacks = activeTab === 'artists' && Boolean(col.albumPacks?.length);
 
                 return (
                   <div
@@ -521,13 +545,26 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
                     {/* Right: Info & Controls */}
                     <div className="flex-1 flex flex-col justify-between min-w-0">
                       <div>
-                        <div className="flex items-start justify-between gap-1">
+                        <div className="flex items-start justify-between gap-2">
                           <h3
                             onClick={() => activeTab === 'artists' ? handleOpenArtist(col) : handleSelectPack(col)}
                             className="text-xs sm:text-base font-black text-white group-hover:text-[#00e676] transition-colors leading-tight cursor-pointer line-clamp-1"
                           >
                             {displayTitle}
                           </h3>
+                          {col.spotifyPlaylistUrl && (
+                            <a
+                              href={col.spotifyPlaylistUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#1DB954]/35 bg-[#1DB954]/10 px-2 py-1 text-[10px] font-black text-[#1DB954] transition-colors hover:border-[#1DB954] hover:bg-[#1DB954]/18"
+                              title="Open in Spotify"
+                            >
+                              <span className="hidden sm:inline">Spotify</span>
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          )}
                         </div>
                         {col.titleArabic && (
                           <p className="text-[11px] text-[#00e676]/90 font-medium leading-tight mt-0.5" dir="rtl">
@@ -565,20 +602,18 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
                         </div>
 
                         <div className="flex items-center gap-1.5">
-                          {col.spotifyPlaylistUrl && (
-                            <a
-                              href={col.spotifyPlaylistUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                              className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 bg-[#1DB954]/15 hover:bg-[#1DB954]/25 border border-[#1DB954]/40 hover:border-[#1DB954] rounded-lg text-[11px] font-bold text-[#1DB954] transition-colors cursor-pointer"
-                              title="Open playlist in Spotify"
+                          {hasAlbumPacks ? (
+                            <button
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setAlbumPickerCollection(col);
+                              }}
+                              className="hidden sm:inline-flex items-center gap-1 rounded-lg border border-[#00e676]/60 bg-[#00e676]/10 px-2.5 py-1 text-[11px] font-black text-[#00e676] transition-colors hover:bg-[#00e676]/18"
                             >
-                              <span>Spotify</span>
-                              <ExternalLink className="w-2.5 h-2.5 opacity-70" />
-                            </a>
-                          )}
-                          {activeTab === 'artists' && getArtistSlugFromCollection(col) && (
+                              <Disc3 className="h-3 w-3" />
+                              Select album
+                            </button>
+                          ) : activeTab === 'artists' && getArtistSlugFromCollection(col) && (
                             <a
                               href={getArtistPath(getArtistSlugFromCollection(col) || '')}
                               onClick={(event) => {
@@ -610,8 +645,8 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
             <div className="flex flex-col space-y-2.5">
               {visibleCollections.map((col) => {
                 const diffMeta = DIFFICULTY_COLORS[col.difficulty];
-                const countryMeta = activeTab === 'countries' ? COUNTRIES.find((c) => c.code === col.countryCode) : null;
-                const songs = getCollectionSongs(col);
+                const countryMeta = activeTab === 'countries' ? runtimeCountries.find((c) => c.code === col.countryCode) : null;
+                const songs = getRuntimeCollectionSongs(col);
                 const songLine = songs.slice(0, 8).map((song) => `${song.title} - ${song.artist}`).join(', ');
                 const displayTitle = getDisplayTitle(col, activeTab);
 
@@ -726,6 +761,72 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
             <span className="text-white/35 font-mono">
               {pageStart + 1}-{Math.min(pageStart + pageSize, filteredCollections.length)} of {filteredCollections.length}
             </span>
+          </div>
+        )}
+        {albumPickerCollection && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/72 p-3 backdrop-blur-sm">
+            <div className="w-full max-w-3xl overflow-hidden rounded-lg border border-[#00e676]/35 bg-[#0b130f] shadow-2xl">
+              <div className="flex items-center justify-between gap-3 border-b border-white/10 p-4">
+                <div className="min-w-0">
+                  <p className="text-xs font-mono font-black uppercase tracking-[0.18em] text-[#00e676]">Select album</p>
+                  <h3 className="truncate text-2xl font-black text-white">
+                    {getDisplayTitle(albumPickerCollection, 'artists')}
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setAlbumPickerCollection(null)}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white"
+                  aria-label="Close album selector"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="max-h-[62vh] overflow-y-auto p-4">
+                <button
+                  onClick={() => handleSelectAlbumPack(albumPickerCollection, 'all')}
+                  className="mb-3 flex w-full items-center gap-3 rounded-lg border border-[#00e676]/55 bg-[#00e676]/12 p-3 text-left transition-colors hover:bg-[#00e676]/18"
+                >
+                  <img
+                    src={albumPickerCollection.coverImage}
+                    alt=""
+                    className="h-16 w-16 rounded-lg object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-lg font-black text-white">All songs</div>
+                    <div className="text-sm text-white/55">{getRuntimeCollectionSongs(albumPickerCollection).length} songs from the full artist pack</div>
+                  </div>
+                  <span className="rounded-lg bg-[#00e676] px-4 py-2 text-sm font-black text-black">Play</span>
+                </button>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {albumPickerCollection.albumPacks?.map((album) => (
+                    <button
+                      key={album.id}
+                      onClick={() => handleSelectAlbumPack(albumPickerCollection, album.id)}
+                      className="group flex min-h-[92px] items-center gap-3 rounded-lg border border-white/10 bg-[#121915] p-3 text-left transition-all hover:border-[#00e676]/65 hover:bg-[#18231d]"
+                    >
+                      <img
+                        src={album.coverImage || albumPickerCollection.coverImage}
+                        alt=""
+                        className="h-16 w-16 rounded-lg object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-base font-black text-white group-hover:text-[#00e676]">{album.title}</div>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-white/50">
+                          <span className="rounded-full bg-white/5 px-2 py-0.5 font-bold capitalize">{album.type}</span>
+                          {album.releaseYear && <span>{album.releaseYear}</span>}
+                          <span>{album.songsCount} songs</span>
+                        </div>
+                      </div>
+                      <span className="rounded-lg border border-[#00e676]/45 px-3 py-2 text-xs font-black text-[#00e676] group-hover:bg-[#00e676] group-hover:text-black">
+                        Play
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>

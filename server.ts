@@ -22,6 +22,8 @@ import {
 } from './src/utils/challengeCatalog';
 import type {
   ActivityLogEntry,
+  AdminCustomCountry,
+  AdminCustomPack,
   AdminUserRecord,
   AdminAdSlot,
   AdminConfigState,
@@ -33,6 +35,7 @@ import type {
   IntegrationSettings,
   PaymentRecord,
   RequestedArtist,
+  SpotifyPlaylistSuggestion,
   SpotifyArtistSuggestion,
   PublicUser,
   PublicRuntimeConfig
@@ -1433,6 +1436,10 @@ function safeMultilineText(value: unknown, maxLength: number): string {
     .slice(0, maxLength);
 }
 
+function stripHtml(value: string): string {
+  return value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 function safeHttpsUrl(value: unknown): string {
   const raw = safeText(value, 2048);
   if (!raw) return '';
@@ -1841,6 +1848,126 @@ function sanitizeFeaturedArtistSlugs(raw: unknown): string[] {
   return selected.length > 0 ? selected : getDefaultFeaturedArtistSlugs();
 }
 
+const COUNTRY_REGIONS = new Set(['Africa', 'Americas', 'Europe', 'Asia', 'Middle East', 'Global']);
+const PACK_TYPES = new Set(['country', 'genre', 'playlist']);
+const DIFFICULTIES = new Set(['EASY', 'MEDIUM', 'HARD', 'EXPERT', 'IMPOSSIBLE']);
+
+function sanitizeCustomCountries(raw: unknown): AdminCustomCountry[] {
+  const rows = Array.isArray(raw) ? raw : [];
+  const seen = new Set(COUNTRIES.map((country) => country.code));
+  const countries: AdminCustomCountry[] = [];
+
+  for (const item of rows.slice(0, 80)) {
+    const source = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+    const code = safeText(source.code, 8).toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const name = safeText(source.name, 80);
+    if (!code || !name || seen.has(code)) continue;
+    seen.add(code);
+    const popularGenres = Array.isArray(source.popularGenres)
+      ? source.popularGenres.map((genre) => safeText(genre, 40)).filter(Boolean).slice(0, 8)
+      : [];
+    countries.push({
+      code,
+      name,
+      nativeName: safeText(source.nativeName, 80),
+      flag: safeText(source.flag, 8) || '🌍',
+      region: COUNTRY_REGIONS.has(source.region as string) ? source.region as AdminCustomCountry['region'] : 'Global',
+      popularGenres,
+      description: safeText(source.description, 220) || `${name} song guessing packs.`,
+      custom: true
+    });
+  }
+
+  return countries;
+}
+
+function sanitizeCustomPackSong(raw: unknown, fallbackCountryCode: string, fallbackGenre: string): Song | null {
+  const source = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+  const id = safeText(source.id, 180);
+  const title = safeText(source.title, 160);
+  const artist = safeText(source.artist, 160);
+  if (!id || !title || !artist) return null;
+  const difficulty = DIFFICULTIES.has(source.difficulty as string) ? source.difficulty as Song['difficulty'] : 'MEDIUM';
+  return {
+    id,
+    title,
+    titleArabic: safeText(source.titleArabic, 160),
+    nativeTitle: safeText(source.nativeTitle, 160),
+    translatedTitle: safeText(source.translatedTitle, 160),
+    romanizedTitle: safeText(source.romanizedTitle, 160),
+    artist,
+    artistArabic: safeText(source.artistArabic, 160),
+    nativeArtist: safeText(source.nativeArtist, 160),
+    album: safeText(source.album, 160) || 'Spotify Playlist',
+    albumType: ['album', 'single', 'compilation', 'appears_on'].includes(String(source.albumType)) ? source.albumType as Song['albumType'] : 'album',
+    genre: safeText(source.genre, 80) || fallbackGenre,
+    countryCode: safeText(source.countryCode, 12).toUpperCase() || fallbackCountryCode || 'GLOBAL',
+    releaseYear: Number.isFinite(Number(source.releaseYear)) ? Number(source.releaseYear) : undefined,
+    artworkUrl: safePublicImageUrl(source.artworkUrl),
+    previewUrl: safeText(source.previewUrl, MAX_URL_LENGTH),
+    spotifyTrackId: safeText(source.spotifyTrackId, 80),
+    spotifyUri: safeText(source.spotifyUri, 120),
+    spotifyUrl: safeHttpsUrl(source.spotifyUrl),
+    deezerUrl: safeHttpsUrl(source.deezerUrl),
+    appleMusicUrl: safeHttpsUrl(source.appleMusicUrl),
+    smartCueOffsetSec: Number.isFinite(Number(source.smartCueOffsetSec)) ? Number(source.smartCueOffsetSec) : undefined,
+    difficulty
+  };
+}
+
+function sanitizeCustomPacks(raw: unknown): AdminCustomPack[] {
+  const rows = Array.isArray(raw) ? raw : [];
+  const seen = new Set<string>();
+  const packs: AdminCustomPack[] = [];
+
+  for (const item of rows.slice(0, 300)) {
+    const source = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+    const packType = PACK_TYPES.has(source.packType as string) ? source.packType as AdminCustomPack['packType'] : 'playlist';
+    const rawId = safeText(source.id, 120) || `${packType}-${safeText(source.title, 120)}`;
+    const id = slugifyChallenge(rawId);
+    const title = safeText(source.title, 140);
+    if (!id || !title || seen.has(id)) continue;
+    seen.add(id);
+    const countryCode = safeText(source.countryCode, 12).toUpperCase() || 'GLOBAL';
+    const category = safeText(source.category, 80) || (packType === 'genre' ? 'Genre' : packType === 'country' ? 'Country' : 'Spotify Official');
+    const songs = Array.isArray(source.songs)
+      ? source.songs.map((song) => sanitizeCustomPackSong(song, countryCode, category)).filter((song): song is Song => Boolean(song)).slice(0, 120)
+      : [];
+    const songIds = songs.length
+      ? songs.map((song) => song.id)
+      : Array.isArray(source.songIds)
+      ? source.songIds.map((songId) => safeText(songId, 180)).filter(Boolean).slice(0, 120)
+      : [];
+    if (songIds.length === 0) continue;
+
+    packs.push({
+      id,
+      title,
+      description: safeText(source.description, 260) || `${title} Spotify song guessing pack.`,
+      category,
+      countryCode,
+      coverImage: safePublicImageUrl(source.coverImage) || songs[0]?.artworkUrl || '',
+      difficulty: DIFFICULTIES.has(source.difficulty as string) ? source.difficulty as AdminCustomPack['difficulty'] : 'MEDIUM',
+      songsCount: songs.length || songIds.length,
+      songIds,
+      songs,
+      isHot: Boolean(source.isHot),
+      isOfficialSpotify: source.isOfficialSpotify !== false,
+      spotifyPlaylistUrl: safeHttpsUrl(source.spotifyPlaylistUrl),
+      spotifyPlaylistName: safeText(source.spotifyPlaylistName, 160),
+      tags: Array.isArray(source.tags) ? source.tags.map((tag) => safeText(tag, 60)).filter(Boolean).slice(0, 12) : [],
+      custom: true,
+      packType,
+      genreSlug: slugifyChallenge(safeText(source.genreSlug, 100) || category),
+      genreName: safeText(source.genreName, 100) || category,
+      spotifyPlaylistId: safeText(source.spotifyPlaylistId, 100),
+      updatedAt: safeText(source.updatedAt, 40) || new Date().toISOString()
+    });
+  }
+
+  return packs;
+}
+
 function sanitizeAdSlot(raw: unknown, fallback: AdminAdSlot): AdminAdSlot {
   const source = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
   const location = AD_LOCATIONS.has(source.location as AdPlacementLocation)
@@ -1904,6 +2031,8 @@ function sanitizeAdminConfig(raw: unknown, req?: Request): AdminConfigState {
     pageConfigs: sanitizePageConfigs(source.pageConfigs, appUrl),
     routeConfigs: sanitizeRouteConfigs(source.routeConfigs, appUrl),
     featuredArtistSlugs: sanitizeFeaturedArtistSlugs(source.featuredArtistSlugs),
+    customCountries: sanitizeCustomCountries(source.customCountries),
+    customPacks: sanitizeCustomPacks(source.customPacks),
     adSlots: sanitizeAdSlots(source.adSlots),
     robotsTxt: safeMultilineText(source.robotsTxt, 8000),
     updatedAt: safeText(source.updatedAt, 40) || new Date().toISOString()
@@ -2171,6 +2300,20 @@ type SpotifyArtistApiItem = {
   genres?: string[];
 };
 
+type SpotifyPlaylistApiItem = {
+  id?: string;
+  name?: string;
+  description?: string;
+  external_urls?: { spotify?: string };
+  images?: Array<{ url?: string }>;
+  owner?: { display_name?: string };
+  tracks?: {
+    total?: number;
+    items?: Array<{ track?: any }>;
+    next?: string | null;
+  };
+};
+
 type RequestedArtistAlbumPack = NonNullable<RequestedArtist['albumPacks']>[number];
 
 function interleaveSpotifyTracksByAlbum(items: Array<{ track: any; album: any }>): Array<{ track: any; album: any }> {
@@ -2255,6 +2398,163 @@ async function searchSpotifyArtistSuggestions(query: string): Promise<SpotifyArt
   return (search.artists?.items || [])
     .map(normalizeSpotifyArtistSuggestion)
     .filter((artist): artist is SpotifyArtistSuggestion => Boolean(artist));
+}
+
+function extractSpotifyPlaylistId(input: string): string {
+  const clean = safeText(input, 220).trim();
+  if (!clean) return '';
+  const uriMatch = clean.match(/^spotify:playlist:([A-Za-z0-9]+)$/i);
+  if (uriMatch) return uriMatch[1];
+  try {
+    const parsed = new URL(clean);
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    const playlistIndex = parts.findIndex((part) => part === 'playlist');
+    if (playlistIndex >= 0 && parts[playlistIndex + 1]) return safeText(parts[playlistIndex + 1], 100);
+  } catch {}
+  return /^[A-Za-z0-9]{12,100}$/.test(clean) ? clean : '';
+}
+
+function normalizeSpotifyPlaylistSuggestion(playlist: SpotifyPlaylistApiItem): SpotifyPlaylistSuggestion | null {
+  const id = safeText(playlist.id, 100);
+  const name = safeText(playlist.name, 160);
+  if (!id || !name) return null;
+  return {
+    id,
+    name,
+    description: safeText(stripHtml(String(playlist.description || '')), 240),
+    imageUrl: safeHttpsUrl(playlist.images?.[0]?.url),
+    spotifyUrl: safeHttpsUrl(playlist.external_urls?.spotify),
+    ownerName: safeText(playlist.owner?.display_name, 100),
+    tracksTotal: Math.max(0, Number(playlist.tracks?.total || 0))
+  };
+}
+
+async function searchSpotifyPlaylistSuggestions(queryOrId: string): Promise<SpotifyPlaylistSuggestion[]> {
+  if (!isSpotifyConfigured()) {
+    throw new Error('Spotify Web API is not configured. Add SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET.');
+  }
+  const cleanQuery = safeText(queryOrId, 160);
+  if (cleanQuery.length < 2) return [];
+  const playlistId = extractSpotifyPlaylistId(cleanQuery);
+  if (playlistId) {
+    const playlist = await fetchSpotifyJson<SpotifyPlaylistApiItem>(`/playlists/${encodeURIComponent(playlistId)}?${new URLSearchParams({ market: 'US', fields: 'id,name,description,images,external_urls,owner.display_name,tracks.total' }).toString()}`);
+    const suggestion = normalizeSpotifyPlaylistSuggestion(playlist);
+    return suggestion ? [suggestion] : [];
+  }
+  const search = await fetchSpotifyJson<{ playlists?: { items?: SpotifyPlaylistApiItem[] } }>(
+    `/search?${new URLSearchParams({ q: cleanQuery, type: 'playlist', limit: '10', market: 'US' }).toString()}`
+  );
+  return (search.playlists?.items || [])
+    .map(normalizeSpotifyPlaylistSuggestion)
+    .filter((playlist): playlist is SpotifyPlaylistSuggestion => Boolean(playlist));
+}
+
+async function fetchSpotifyPlaylistTracks(playlistId: string): Promise<Array<{ track: any }>> {
+  const tracks: Array<{ track: any }> = [];
+  let nextUrl = `${SPOTIFY_API_URL}/playlists/${encodeURIComponent(playlistId)}/tracks?${new URLSearchParams({
+    market: 'US',
+    limit: '50',
+    fields: 'items(track(id,name,preview_url,artists(name),album(id,name,album_type,release_date,images,external_urls),external_urls,uri)),next,total'
+  }).toString()}`;
+  while (nextUrl && tracks.length < 100) {
+    const page = await fetchSpotifyJson<{ items?: Array<{ track?: any }>; next?: string | null }>(nextUrl);
+    const usableTracks = (page.items || [])
+      .filter((item): item is { track: any } => Boolean(item.track?.id));
+    tracks.push(...usableTracks);
+    nextUrl = page.next || '';
+  }
+  return tracks;
+}
+
+async function buildCustomPackFromSpotifyPlaylist(options: {
+  playlistIdOrUrl: string;
+  packType: AdminCustomPack['packType'];
+  title?: string;
+  countryCode?: string;
+  genreName?: string;
+  genreSlug?: string;
+}): Promise<AdminCustomPack> {
+  if (!isSpotifyConfigured()) {
+    throw new Error('Spotify Web API is not configured. Add SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET.');
+  }
+  const playlistId = extractSpotifyPlaylistId(options.playlistIdOrUrl);
+  if (!playlistId) throw new Error('Enter a Spotify playlist URL or playlist ID.');
+
+  const playlist = await fetchSpotifyJson<SpotifyPlaylistApiItem>(`/playlists/${encodeURIComponent(playlistId)}?${new URLSearchParams({
+    market: 'US',
+    fields: 'id,name,description,images,external_urls,owner.display_name,tracks.total'
+  }).toString()}`);
+  if (!playlist.id) throw new Error('Spotify playlist was not found.');
+
+  const packType = PACK_TYPES.has(options.packType) ? options.packType : 'playlist';
+  const title = safeText(options.title, 140) || safeText(playlist.name, 140) || 'Spotify Playlist';
+  const genreName = safeText(options.genreName, 100) || title;
+  const genreSlug = slugifyChallenge(options.genreSlug || genreName);
+  const countryCode = safeText(options.countryCode, 12).toUpperCase() || 'GLOBAL';
+  const playlistTracks = await fetchSpotifyPlaylistTracks(playlist.id);
+  const seen = new Set<string>();
+  const songs = playlistTracks
+    .map(({ track }, index): Song | null => {
+      const trackId = safeText(track?.id, 80);
+      const trackTitle = safeText(track?.name, 160);
+      const artist = Array.isArray(track?.artists) && track.artists.length > 0
+        ? track.artists.map((item: any) => safeText(item.name, 120)).filter(Boolean).join(' & ')
+        : '';
+      if (!trackId || !trackTitle || !artist) return null;
+      const dedupeKey = `${trackTitle}-${artist}`.toLowerCase();
+      if (seen.has(dedupeKey)) return null;
+      seen.add(dedupeKey);
+      const album = track.album || {};
+      const releaseYear = Number(String(album.release_date || '').slice(0, 4));
+      const artworkUrl = safeHttpsUrl(album.images?.[0]?.url || playlist.images?.[0]?.url);
+      const directPreview = safeHttpsUrl(track.preview_url);
+      const params = new URLSearchParams({ title: trackTitle, artist });
+      if (directPreview) params.set('url', directPreview);
+      return {
+        id: `custom-${slugifyChallenge(title)}-${trackId}`,
+        title: trackTitle,
+        artist,
+        album: safeText(album.name, 160) || title,
+        albumType: album.album_type === 'single' || album.album_type === 'compilation' || album.album_type === 'appears_on' ? album.album_type : 'album',
+        genre: packType === 'genre' ? genreName : title,
+        countryCode,
+        releaseYear: Number.isFinite(releaseYear) ? releaseYear : undefined,
+        artworkUrl,
+        previewUrl: `/api/music/preview?${params.toString()}`,
+        spotifyTrackId: trackId,
+        spotifyUri: safeText(track.uri, 120),
+        spotifyUrl: safeHttpsUrl(track.external_urls?.spotify || album.external_urls?.spotify),
+        difficulty: index < 10 ? 'EASY' : index < 50 ? 'MEDIUM' : 'HARD'
+      };
+    })
+    .filter((song): song is Song => Boolean(song));
+
+  if (songs.length === 0) throw new Error('Spotify returned no usable tracks for that playlist.');
+
+  const idPrefix = packType === 'country' ? `custom-country-${countryCode.toLowerCase()}` : packType === 'genre' ? `custom-genre-${genreSlug}` : 'custom-playlist';
+  return {
+    id: `${idPrefix}-${slugifyChallenge(title)}`,
+    title,
+    description: safeText(stripHtml(String(playlist.description || '')), 240) || `${title} Spotify playlist pack.`,
+    category: packType === 'genre' ? genreName : packType === 'country' ? 'Country Playlist' : 'Spotify Official',
+    countryCode,
+    coverImage: safeHttpsUrl(playlist.images?.[0]?.url) || songs[0]?.artworkUrl || '',
+    difficulty: songs.length >= 30 ? 'MEDIUM' : 'EASY',
+    songsCount: songs.length,
+    songIds: songs.map((song) => song.id),
+    songs,
+    isHot: songs.length >= 30,
+    isOfficialSpotify: true,
+    spotifyPlaylistUrl: safeHttpsUrl(playlist.external_urls?.spotify),
+    spotifyPlaylistName: `Spotify • ${title}`,
+    tags: [title, genreName, countryCode, 'Spotify'].filter(Boolean),
+    custom: true,
+    packType,
+    genreName,
+    genreSlug,
+    spotifyPlaylistId: safeText(playlist.id, 100),
+    updatedAt: new Date().toISOString()
+  };
 }
 
 async function buildRequestedArtistPackFromSpotify(name: string, spotifyArtistId = ''): Promise<RequestedArtist> {
@@ -2470,6 +2770,8 @@ function buildPublicConfig(
     pageConfigs: sanitizePageConfigs(config.pageConfigs, appUrl),
     routeConfigs: sanitizeRouteConfigs(config.routeConfigs, appUrl),
     featuredArtistSlugs: sanitizeFeaturedArtistSlugs(config.featuredArtistSlugs),
+    customCountries: sanitizeCustomCountries(config.customCountries),
+    customPacks: sanitizeCustomPacks(config.customPacks),
     adSlots: sanitizeAdSlots(config.adSlots),
     robotsTxt: safeMultilineText(config.robotsTxt, 8000),
     generatedAt: new Date().toISOString(),
@@ -5240,6 +5542,101 @@ async function startServer() {
     } catch (error) {
       console.error('Admin config save error:', error);
       res.status(500).json({ error: 'Failed to save admin config' });
+    }
+  });
+
+  app.get('/api/admin/spotify/playlists', requireAdmin, async (req, res) => {
+    try {
+      const query = getBoundedQueryValue(req.query.q);
+      res.json({ playlists: await searchSpotifyPlaylistSuggestions(query) });
+    } catch (error) {
+      sendSpotifyError(res, error, 'Could not search Spotify playlists');
+    }
+  });
+
+  app.post('/api/admin/custom-countries', requireAdmin, requireAdminCsrf, async (req, res) => {
+    try {
+      const config = await getAdminConfig(req);
+      const rawCountry = {
+        code: safeText(req.body?.code, 8).toUpperCase(),
+        name: safeText(req.body?.name, 80),
+        nativeName: safeText(req.body?.nativeName, 80),
+        flag: safeText(req.body?.flag, 8) || '🌍',
+        region: safeText(req.body?.region, 40) || 'Global',
+        popularGenres: Array.isArray(req.body?.popularGenres)
+          ? req.body.popularGenres
+          : safeText(req.body?.popularGenres, 240).split(',').map((item) => item.trim()),
+        description: safeText(req.body?.description, 220)
+      };
+      const [country] = sanitizeCustomCountries([rawCountry]);
+      if (!country) {
+        res.status(400).json({ error: 'Enter a unique country code and country name.' });
+        return;
+      }
+      const nextConfig = await saveAdminConfig({
+        ...config,
+        customCountries: [
+          country,
+          ...config.customCountries.filter((item) => item.code !== country.code)
+        ],
+        pageConfigs: {
+          ...config.pageConfigs,
+          [country.code]: config.pageConfigs[country.code] || {
+            ...createDefaultPageConfig('GLOBAL', config.appUrl),
+            countryCode: country.code,
+            slug: slugifyRouteSegment(country.name),
+            pageTitle: `${country.name} Song Guess Game - Daily Music Trivia`,
+            metaDescription: `Play the daily ${country.name} music quiz. Guess hit songs from short audio snippets and explore ${country.name} playlists.`,
+            keywords: `song guess game, ${country.name} music quiz, ${country.name} songs`,
+            canonicalUrl: `${config.appUrl}/play/${slugifyRouteSegment(country.name)}`,
+            customHeading: `${country.name} Song Guess - Heardle`,
+            socialTitle: `${country.name} Song Guess Game`,
+            socialDescription: `Can you recognize ${country.name} songs from tiny snippets?`,
+            updatedAt: new Date().toISOString()
+          }
+        }
+      }, req);
+      res.json({ country, config: nextConfig });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Could not add country' });
+    }
+  });
+
+  app.post('/api/admin/custom-packs/spotify-playlist', requireAdmin, requireAdminCsrf, async (req, res) => {
+    try {
+      const config = await getAdminConfig(req);
+      const pack = await buildCustomPackFromSpotifyPlaylist({
+        playlistIdOrUrl: safeText(req.body?.playlistIdOrUrl || req.body?.spotifyPlaylistId || req.body?.url, 260),
+        packType: PACK_TYPES.has(req.body?.packType) ? req.body.packType : 'playlist',
+        title: safeText(req.body?.title, 140),
+        countryCode: safeText(req.body?.countryCode, 12).toUpperCase() || 'GLOBAL',
+        genreName: safeText(req.body?.genreName, 100),
+        genreSlug: safeText(req.body?.genreSlug, 100)
+      });
+      const nextConfig = await saveAdminConfig({
+        ...config,
+        customPacks: [
+          pack,
+          ...config.customPacks.filter((item) => item.id !== pack.id)
+        ]
+      }, req);
+      res.json({ pack, config: nextConfig });
+    } catch (error) {
+      sendSpotifyError(res, error, 'Could not add Spotify playlist pack');
+    }
+  });
+
+  app.delete('/api/admin/custom-packs/:id', requireAdmin, requireAdminCsrf, async (req, res) => {
+    try {
+      const config = await getAdminConfig(req);
+      const id = slugifyChallenge(safeText(req.params.id, 120));
+      const nextConfig = await saveAdminConfig({
+        ...config,
+        customPacks: config.customPacks.filter((pack) => pack.id !== id)
+      }, req);
+      res.json({ ok: true, config: nextConfig });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Could not delete pack' });
     }
   });
 

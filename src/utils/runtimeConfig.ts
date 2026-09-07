@@ -153,6 +153,8 @@ export function createDefaultPublicRuntimeConfig(): PublicRuntimeConfig {
     pageConfigs,
     routeConfigs: {},
     featuredArtistSlugs: [],
+    customCountries: [],
+    customPacks: [],
     adSlots: [],
     robotsTxt: '',
     generatedAt: new Date().toISOString(),
