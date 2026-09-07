@@ -206,7 +206,7 @@ export const SidebarControls: React.FC<SidebarControlsProps> = ({
               NO ADS
             </span>
           </div>
-          <ul className="grid grid-cols-2 gap-1 text-[10px] font-bold text-white/50">
+          <ul className="space-y-1 text-[10px] font-bold text-white/50">
             <li className="rounded-md bg-white/[0.04] px-2 py-1">All artists</li>
             <li className="rounded-md bg-white/[0.04] px-2 py-1">All countries</li>
             <li className="rounded-md bg-white/[0.04] px-2 py-1">All genres</li>

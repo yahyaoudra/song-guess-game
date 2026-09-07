@@ -2100,6 +2100,22 @@ async function getRequestedArtists(): Promise<RequestedArtist[]> {
         : [];
       const hasSpotifyBuiltSongs = songs.length > 0;
       const requestedStatus = artist.status === 'queued' || artist.status === 'pending' ? artist.status : undefined;
+      const storedAlbumPacks = Array.isArray(artist.albumPacks)
+        ? artist.albumPacks.map((pack) => ({
+            id: slugifyChallenge(pack.id || pack.title),
+            title: safeText(pack.title, 160),
+            type: (pack.type === 'single' || pack.type === 'compilation' || pack.type === 'appears_on' || pack.type === 'singles' ? pack.type : 'album') as RequestedArtistAlbumPack['type'],
+            coverImage: safePublicImageUrl(pack.coverImage),
+            songIds: Array.isArray(pack.songIds) ? pack.songIds.map((id) => safeText(id, 120)).filter(Boolean).slice(0, 80) : [],
+            songsCount: Math.max(0, Math.min(80, Number(pack.songsCount) || 0)),
+            releaseYear: Number.isFinite(Number(pack.releaseYear)) ? Number(pack.releaseYear) : undefined
+          })).filter((pack) => pack.id && pack.title && pack.songIds.length > 0)
+        : [];
+      const albumPacks = storedAlbumPacks.length > 0
+        ? storedAlbumPacks
+        : hasSpotifyBuiltSongs
+        ? buildRequestedArtistAlbumPacks(safeText(artist.name, 100), songs)
+        : undefined;
       return {
         ...artist,
         slug: slugifyChallenge(artist.slug),
@@ -2117,17 +2133,7 @@ async function getRequestedArtists(): Promise<RequestedArtist[]> {
         lastRefreshType: artist.lastRefreshType === 'manual' || artist.lastRefreshType === 'automatic' || artist.lastRefreshType === 'request'
           ? artist.lastRefreshType
           : undefined,
-        albumPacks: Array.isArray(artist.albumPacks)
-          ? artist.albumPacks.map((pack) => ({
-              id: slugifyChallenge(pack.id || pack.title),
-              title: safeText(pack.title, 160),
-              type: (pack.type === 'single' || pack.type === 'compilation' || pack.type === 'appears_on' || pack.type === 'singles' ? pack.type : 'album') as RequestedArtistAlbumPack['type'],
-              coverImage: safePublicImageUrl(pack.coverImage),
-              songIds: Array.isArray(pack.songIds) ? pack.songIds.map((id) => safeText(id, 120)).filter(Boolean).slice(0, 80) : [],
-              songsCount: Math.max(0, Math.min(80, Number(pack.songsCount) || 0)),
-              releaseYear: Number.isFinite(Number(pack.releaseYear)) ? Number(pack.releaseYear) : undefined
-            })).filter((pack) => pack.id && pack.title && pack.songIds.length > 0)
-          : undefined
+        albumPacks
       };
     });
   return dedupeRequestedArtists(normalized);
