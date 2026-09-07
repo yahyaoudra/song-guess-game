@@ -103,6 +103,7 @@ export default function App() {
   const checkoutAttemptIdRef = useRef('');
   const roundTimeoutRef = useRef(false);
   const albumAccessTooltipTimeoutRef = useRef<number | null>(null);
+  const correctCoverPopTimeoutRef = useRef<number | null>(null);
 
   // Modals state
   const [isCollectionsOpen, setIsCollectionsOpen] = useState(false);
@@ -143,6 +144,7 @@ export default function App() {
   });
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [accessNotice, setAccessNotice] = useState<string | null>(null);
+  const [correctCoverPopSong, setCorrectCoverPopSong] = useState<Song | null>(null);
   const [requestedArtists, setRequestedArtists] = useState<RequestedArtist[]>([]);
   const [requestedArtistsLoaded, setRequestedArtistsLoaded] = useState(false);
   const [activeArtistAlbumPackId, setActiveArtistAlbumPackId] = useState('all');
@@ -813,6 +815,9 @@ export default function App() {
       if (albumAccessTooltipTimeoutRef.current) {
         window.clearTimeout(albumAccessTooltipTimeoutRef.current);
       }
+      if (correctCoverPopTimeoutRef.current) {
+        window.clearTimeout(correctCoverPopTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -885,6 +890,17 @@ export default function App() {
       origin: { y: 0.72 },
       colors
     });
+  }, []);
+
+  const showCorrectCoverPop = useCallback((song: Song) => {
+    setCorrectCoverPopSong(song);
+    if (correctCoverPopTimeoutRef.current) {
+      window.clearTimeout(correctCoverPopTimeoutRef.current);
+    }
+    correctCoverPopTimeoutRef.current = window.setTimeout(() => {
+      setCorrectCoverPopSong(null);
+      correctCoverPopTimeoutRef.current = null;
+    }, 1500);
   }, []);
 
   const handleSelectCountry = (countryCode: string, updateRoute = true) => {
@@ -975,6 +991,7 @@ export default function App() {
     if (isCorrect) {
       const earned = SNIPPET_TIERS[currentStepIndex]?.points || 250;
       fireCorrectGuessConfetti();
+      showCorrectCoverPop(currentSong);
       if (settings.enableSfx) audioEngine.playSfx('correct');
       completeRound(true, earned);
     } else {
@@ -2273,6 +2290,23 @@ export default function App() {
         {wrongFeedback && (
           <div className="absolute top-0 z-30 px-4 py-1.5 bg-[#ef4444]/90 text-white font-bold text-xs rounded-full shadow-lg backdrop-blur-md animate-in fade-in slide-in-from-top-2 duration-200">
             {wrongFeedback}
+          </div>
+        )}
+
+        {correctCoverPopSong && (
+          <div className="pointer-events-none absolute top-10 z-40 flex flex-col items-center animate-in fade-in zoom-in-75 slide-in-from-bottom-4 duration-300">
+            <div className="relative">
+              <div className="absolute -inset-3 rounded-3xl bg-[#00e676]/25 blur-2xl" />
+              <img
+                src={correctCoverPopSong.artworkUrl}
+                alt=""
+                className="relative h-28 w-28 rounded-2xl border border-[#00e676]/60 object-cover shadow-[0_18px_60px_rgba(0,230,118,0.35)] sm:h-36 sm:w-36"
+                referrerPolicy="no-referrer"
+              />
+            </div>
+            <div className="mt-2 max-w-[280px] rounded-full border border-[#00e676]/35 bg-[#07110c]/90 px-4 py-1 text-center text-xs font-black text-[#00e676] shadow-xl">
+              Correct
+            </div>
           </div>
         )}
 
