@@ -292,6 +292,7 @@ export interface RequestedArtist {
 export interface ArtistRequestResponse {
   artist: RequestedArtist;
   queued?: boolean;
+  queuePosition?: number;
   message?: string;
   requiresAuth?: boolean;
 }

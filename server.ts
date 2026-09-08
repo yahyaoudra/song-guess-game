@@ -916,17 +916,37 @@ async function sendWelcomeEmail(email: string, name: string): Promise<boolean> {
   return true;
 }
 
-async function sendArtistRequestReceivedEmail(user: UserSession, artist: RequestedArtist): Promise<boolean> {
+function getRequestedArtistQueuePosition(artist: RequestedArtist, artists: RequestedArtist[]): number {
+  const queuedArtists = artists
+    .filter((item) => item.status === 'queued' || item.status === 'pending' || (item.songsCount || item.songs?.length || 0) === 0)
+    .sort((a, b) => {
+      const aDate = Date.parse(a.createdAt || a.updatedAt || '');
+      const bDate = Date.parse(b.createdAt || b.updatedAt || '');
+      const aTime = Number.isFinite(aDate) ? aDate : 0;
+      const bTime = Number.isFinite(bDate) ? bDate : 0;
+      return aTime - bTime;
+    });
+  const index = queuedArtists.findIndex((item) =>
+    item.slug === artist.slug ||
+    (!!artist.spotifyArtistId && item.spotifyArtistId === artist.spotifyArtistId)
+  );
+  return index >= 0 ? index + 1 : queuedArtists.length + 1;
+}
+
+async function sendArtistRequestReceivedEmail(user: UserSession, artist: RequestedArtist, queuePosition?: number): Promise<boolean> {
   if (!isEmailProviderConfigured()) return false;
   const safeName = user.name || user.email.split('@')[0] || 'Player';
   const image = safePublicImageUrl(artist.coverImage);
   const browseUrl = addEmailUtm(`${getProductionAppUrl()}/artist`, 'artist_request_received', 'browse_artists');
+  const queueLine = Number.isFinite(queuePosition) && Number(queuePosition) > 0
+    ? `You are on the queue number ${queuePosition}.`
+    : 'You are in the queue.';
   const text = [
     `Hi ${safeName},`,
     '',
     `We received your request for ${artist.name}. It is in the queue and we will email you when the Spotify pack is ready.`,
     '',
-    'We are handling artist requests in order while respecting Spotify API limits.',
+    queueLine,
     '',
     `Browse artists: ${browseUrl}`
   ].join('\n');
@@ -936,7 +956,7 @@ async function sendArtistRequestReceivedEmail(user: UserSession, artist: Request
     [
       `<p style="margin:0 0 14px;color:#f5fff8;font-size:16px;line-height:24px;">Hi ${escapeHtml(safeName)},</p>`,
       image ? `<img src="${escapeHtml(image)}" alt="${escapeHtml(artist.name)}" width="96" height="96" style="display:block;width:96px;height:96px;object-fit:cover;border-radius:16px;border:1px solid #244231;margin:0 0 18px;">` : '',
-      `<p style="margin:0 0 18px;color:#a7b4ad;font-size:15px;line-height:24px;">We received your request for <strong style="color:#ffffff;">${escapeHtml(artist.name)}</strong>. It is in the queue while we respect Spotify API limits.</p>`,
+      `<p style="margin:0 0 18px;color:#a7b4ad;font-size:15px;line-height:24px;">We received your request for <strong style="color:#ffffff;">${escapeHtml(artist.name)}</strong>. ${escapeHtml(queueLine)}</p>`,
       '<p style="margin:0 0 18px;color:#a7b4ad;font-size:15px;line-height:24px;">We will send you a Play Now link as soon as the pack is built.</p>',
       createPrimaryEmailButton(browseUrl, 'Browse artists')
     ].join('')
@@ -2312,7 +2332,7 @@ function createQueuedRequestedArtist(name: string, spotifyArtistId = '', spotify
   };
 }
 
-async function subscribeToArtistRequest(user: UserSession, artist: RequestedArtist): Promise<boolean> {
+async function subscribeToArtistRequest(user: UserSession, artist: RequestedArtist, queuePosition?: number): Promise<boolean> {
   if (!isDatabaseConfigured()) return false;
   const rows = await queryDb<{ id: string }>(
     `INSERT INTO sg_artist_request_subscribers
@@ -2340,7 +2360,7 @@ async function subscribeToArtistRequest(user: UserSession, artist: RequestedArti
     detail: `${artist.name} added to artist request queue`,
     metadata: { artistSlug: artist.slug, spotifyArtistId: artist.spotifyArtistId }
   });
-  await sendArtistRequestReceivedEmail(user, artist).catch((error) => {
+  await sendArtistRequestReceivedEmail(user, artist, queuePosition).catch((error) => {
     console.warn('Artist request received email failed:', error instanceof Error ? error.message : error);
     return false;
   });
@@ -4751,13 +4771,15 @@ async function startServer() {
         });
         return;
       }
-      await subscribeToArtistRequest(user, existing);
+      const existingQueuePosition = getRequestedArtistQueuePosition(existing, artists);
+      await subscribeToArtistRequest(user, existing, existingQueuePosition);
       const nextRefresh = Date.parse(existing.nextRefreshAt || '');
       if (Number.isFinite(nextRefresh) && nextRefresh > Date.now()) {
         res.json({
           artist: existing,
           queued: true,
-          message: `${existing.name} is already in the queue. We will email you when it is ready to play.`
+          queuePosition: existingQueuePosition,
+          message: `${existing.name} is already in the queue. You're on the queue number ${existingQueuePosition}. We will email you when it is ready to play.`
         });
         return;
       }
@@ -4780,10 +4802,12 @@ async function startServer() {
         existing.updatedAt = new Date().toISOString();
         existing.nextRefreshAt = new Date(Date.now() + retryAfterMs).toISOString();
         await saveRequestedArtists(artists);
+        const existingRetryQueuePosition = getRequestedArtistQueuePosition(existing, artists);
         res.json({
           artist: existing,
           queued: true,
-          message: `${existing.name} is in the queue. We will email you when it is ready to play.`
+          queuePosition: existingRetryQueuePosition,
+          message: `${existing.name} is in the queue. You're on the queue number ${existingRetryQueuePosition}. We will email you when it is ready to play.`
         });
         return;
       }
@@ -4818,12 +4842,15 @@ async function startServer() {
         }
         const queuedArtist = createQueuedRequestedArtist(name, spotifyArtistId, '', spotifyArtistImageUrl);
         queuedArtist.nextRefreshAt = new Date(Date.now() + (error.retryAfterSeconds ? error.retryAfterSeconds * 1000 : 24 * 60 * 60 * 1000)).toISOString();
-        await saveRequestedArtists([queuedArtist, ...artists]);
-        await subscribeToArtistRequest(user, queuedArtist);
+        const nextArtists = [queuedArtist, ...artists];
+        await saveRequestedArtists(nextArtists);
+        const queuePosition = getRequestedArtistQueuePosition(queuedArtist, nextArtists);
+        await subscribeToArtistRequest(user, queuedArtist, queuePosition);
         res.json({
           artist: queuedArtist,
           queued: true,
-          message: `${queuedArtist.name} has been added to the queue. We are handling thousands of requests while respecting Spotify API limits, and we will email you when it is ready.`
+          queuePosition,
+          message: `${queuedArtist.name} has been added to the queue. You're on the queue number ${queuePosition}, and we will email you when it is ready.`
         });
         return;
       }
