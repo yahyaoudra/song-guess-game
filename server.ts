@@ -3708,6 +3708,52 @@ function getArchivePaginationSeo(req: Request, publicConfig: PublicRuntimeConfig
   };
 }
 
+function createServerRenderedSeoContent(req: Request, publicConfig: PublicRuntimeConfig, seo: AdminPageConfig): string {
+  const pathname = req.path;
+  const segments = pathname.split('/').filter(Boolean).map((segment) => decodeURIComponent(segment).toLowerCase());
+  const heading = stripHtml(seo.customHeading || seo.pageTitle || 'Song Guess Game');
+  const intro = stripHtml(seo.customIntroText || seo.metaDescription || 'Play Song Guess Game and guess songs from short audio snippets.');
+  const links: Array<{ href: string; label: string }> = [
+    { href: '/', label: 'Song Guess Game home' },
+    { href: '/play', label: 'Play Song Guess Game' },
+    { href: '/artist', label: 'Artist song games' },
+    { href: '/play/country', label: 'Play by country' },
+    { href: '/play/genre', label: 'Play by genre' }
+  ];
+
+  if (segments[0] === 'play' && segments[1] && segments[1] !== 'country' && segments[1] !== 'genre') {
+    const country = COUNTRIES.find((item) => getCountryCanonicalPath(item.code, publicConfig) === pathname);
+    if (country) {
+      links.unshift({ href: getCountryCanonicalPath(country.code, publicConfig), label: `${country.name} song guessing game` });
+    }
+  }
+
+  if (segments[0] === 'play' && segments[1] === 'genre' && segments[2]) {
+    const genre = getGenreChallenge(segments[2]);
+    if (genre) {
+      links.unshift({ href: `/play/genre/${genre.slug}`, label: `${genre.name} Heardle song game` });
+    }
+  }
+
+  if (segments[0] === 'artist' && segments[1]) {
+    const artistName = stripArtistGeneratedIdFromText(artistNameFromSlugFallback(segments[1]), segments[1]);
+    links.unshift({ href: `/artist/${segments[1]}`, label: `${artistName} Heardle song game` });
+  }
+
+  const uniqueLinks = Array.from(new Map(links.map((link) => [link.href, link])).values()).slice(0, 6);
+  return [
+    '<main class="server-seo-content" aria-label="Song Guess Game page summary">',
+    `  <h1>${escapeHtml(heading)}</h1>`,
+    `  <p>${escapeHtml(intro)}</p>`,
+    '  <nav aria-label="Important Song Guess Game pages">',
+    '    <ul>',
+    ...uniqueLinks.map((link) => `      <li><a href="${escapeHtml(link.href)}">${escapeHtml(link.label)}</a></li>`),
+    '    </ul>',
+    '  </nav>',
+    '</main>'
+  ].join('\n');
+}
+
 function injectRuntimeHtml(html: string, req: Request, publicConfig: PublicRuntimeConfig, nonce?: string): string {
   const seo = getRouteSeo(req, publicConfig);
   const title = seo.socialTitle || seo.pageTitle;
@@ -3770,6 +3816,7 @@ function injectRuntimeHtml(html: string, req: Request, publicConfig: PublicRunti
     adsenseScript,
     runtimeScript
   ].filter(Boolean).join('\n    ');
+  const serverSeoContent = createServerRenderedSeoContent(req, publicConfig, seo);
 
   return html
     .replace(/<title>[\s\S]*?<\/title>/i, '')
@@ -3778,7 +3825,8 @@ function injectRuntimeHtml(html: string, req: Request, publicConfig: PublicRunti
     .replace(/<link\s+rel=["']canonical["'][^>]*>\s*/gi, '')
     .replace(/<meta\s+property=["']og:[^"']+["'][^>]*>\s*/gi, '')
     .replace(/<meta\s+name=["']twitter:[^"']+["'][^>]*>\s*/gi, '')
-    .replace('</head>', `    ${metaBlock}\n  </head>`);
+    .replace('</head>', `    ${metaBlock}\n  </head>`)
+    .replace('<div id="root"></div>', `<div id="root">\n${serverSeoContent}\n    </div>`);
 }
 
 function escapeXml(value: string): string {
