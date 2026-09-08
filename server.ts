@@ -70,6 +70,11 @@ const ABANDONED_CHECKOUT_CHECK_MS = 5 * 60 * 1000;
 const ABANDONED_CHECKOUT_START_DELAY_MS = 60 * 1000;
 const ABANDONED_CHECKOUT_BACKFILL_DAYS = Math.max(1, Math.min(30, Number(process.env.ABANDONED_CHECKOUT_BACKFILL_DAYS || '7') || 7));
 const ABANDONED_CHECKOUT_BACKFILL_LIMIT = Math.max(25, Math.min(500, Number(process.env.ABANDONED_CHECKOUT_BACKFILL_LIMIT || '200') || 200));
+const FEEDBACK_REWARD_DAYS = Math.max(1, Math.min(14, Number(process.env.FEEDBACK_REWARD_DAYS || '2') || 2));
+const FEEDBACK_EMAIL_DELAY_DAYS = Math.max(1, Math.min(14, Number(process.env.FEEDBACK_EMAIL_DELAY_DAYS || '2') || 2));
+const FEEDBACK_EMAIL_BATCH_LIMIT = Math.max(10, Math.min(200, Number(process.env.FEEDBACK_EMAIL_BATCH_LIMIT || '50') || 50));
+const FEEDBACK_EMAIL_CHECK_MS = 6 * 60 * 60 * 1000;
+const FEEDBACK_EMAIL_START_DELAY_MS = 2 * 60 * 1000;
 const REQUESTED_ARTIST_MAX_SONGS = Math.max(50, Math.min(300, Number(process.env.REQUESTED_ARTIST_MAX_SONGS || '150') || 150));
 const REQUESTED_ARTIST_MIN_SONGS = Math.max(10, Math.min(REQUESTED_ARTIST_MAX_SONGS, Number(process.env.REQUESTED_ARTIST_MIN_SONGS || '80') || 80));
 const SPOTIFY_ARTIST_ALBUM_LIMIT = Math.max(20, Math.min(200, Number(process.env.SPOTIFY_ARTIST_ALBUM_LIMIT || '80') || 80));
@@ -154,6 +159,7 @@ let dbUnavailableLogged = false;
 let spotifyAccessTokenCache: { token: string; expiresAt: number } | null = null;
 let abandonedCheckoutTimer: NodeJS.Timeout | null = null;
 let abandonedCheckoutBackfillStarted = false;
+let feedbackEmailTimer: NodeJS.Timeout | null = null;
 
 class SpotifyApiError extends Error {
   status: number;
@@ -353,6 +359,23 @@ async function ensureDatabaseSchema(): Promise<void> {
       created_at timestamptz NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS sg_feedback_submissions (
+      id uuid PRIMARY KEY,
+      user_id uuid REFERENCES sg_users(id) ON DELETE SET NULL,
+      email text NOT NULL,
+      name text NOT NULL DEFAULT '',
+      overall_rating integer NOT NULL DEFAULT 0,
+      gameplay_rating integer NOT NULL DEFAULT 0,
+      audio_rating integer NOT NULL DEFAULT 0,
+      packs_rating integer NOT NULL DEFAULT 0,
+      multiplayer_rating integer NOT NULL DEFAULT 0,
+      comment text NOT NULL DEFAULT '',
+      reward_days integer NOT NULL DEFAULT 2,
+      reward_access_until timestamptz,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS sg_multiplayer_rooms (
       code text PRIMARY KEY,
       host_user_id uuid REFERENCES sg_users(id) ON DELETE SET NULL,
@@ -408,6 +431,8 @@ async function ensureDatabaseSchema(): Promise<void> {
   await queryDb('CREATE UNIQUE INDEX IF NOT EXISTS sg_payments_payment_intent_unique ON sg_payments (stripe_payment_intent_id) WHERE stripe_payment_intent_id IS NOT NULL AND stripe_payment_intent_id <> \'\'');
   await queryDb('CREATE INDEX IF NOT EXISTS sg_email_events_user_created_idx ON sg_email_events (user_id, created_at DESC)');
   await queryDb('CREATE INDEX IF NOT EXISTS sg_user_journey_events_user_created_idx ON sg_user_journey_events (user_id, created_at DESC)');
+  await queryDb('CREATE UNIQUE INDEX IF NOT EXISTS sg_feedback_submissions_user_unique ON sg_feedback_submissions (user_id) WHERE user_id IS NOT NULL');
+  await queryDb('CREATE INDEX IF NOT EXISTS sg_feedback_submissions_created_idx ON sg_feedback_submissions (created_at DESC)');
   await queryDb('CREATE INDEX IF NOT EXISTS sg_multiplayer_rooms_updated_idx ON sg_multiplayer_rooms (updated_at DESC)');
   await queryDb('CREATE UNIQUE INDEX IF NOT EXISTS sg_leaderboard_nickname_unique ON sg_leaderboard_entries (lower(nickname))');
 }
@@ -916,6 +941,43 @@ async function sendWelcomeEmail(email: string, name: string): Promise<boolean> {
   return true;
 }
 
+async function sendFeedbackRequestEmail(email: string, name: string): Promise<boolean> {
+  if (!isEmailProviderConfigured()) return false;
+  const safeName = name || email.split('@')[0] || 'Player';
+  const feedbackUrl = addEmailUtm(`${getProductionAppUrl()}/feedback`, 'feedback_request', 'share_feedback');
+  const text = [
+    `Hi ${safeName},`,
+    '',
+    'How was Song Guess Game so far?',
+    '',
+    'Share quick feedback about the song clips, guessing flow, artist packs, multiplayer, and anything we should improve.',
+    '',
+    `As a thank you, we will add ${FEEDBACK_REWARD_DAYS} days of unlimited access after you submit it.`,
+    '',
+    `Share feedback: ${feedbackUrl}`
+  ].join('\n');
+  const html = createEmailShell(
+    'How was your Song Guess experience?',
+    `Share quick feedback and get ${FEEDBACK_REWARD_DAYS} days of unlimited access.`,
+    [
+      `<p style="margin:0 0 14px;color:#f5fff8;font-size:16px;line-height:24px;">Hi ${escapeHtml(safeName)},</p>`,
+      '<p style="margin:0 0 18px;color:#a7b4ad;font-size:15px;line-height:24px;">Tell us what felt good, what felt slow, and what would make Song Guess better for your next game.</p>',
+      `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:0 0 22px;">
+        ${['Song clips and audio', 'Guessing experience', 'Artist, country, genre, and album packs', 'Multiplayer rooms', 'Overall comment'].map((item) => `
+          <tr>
+            <td style="padding:7px 0;color:#00e676;font-size:16px;line-height:22px;width:28px;">&#10003;</td>
+            <td style="padding:7px 0;color:#ffffff;font-size:15px;line-height:22px;font-weight:700;">${escapeHtml(item)}</td>
+          </tr>
+        `).join('')}
+      </table>`,
+      `<p style="margin:0 0 18px;color:#a7b4ad;font-size:15px;line-height:24px;">After submitting, your account gets <strong style="color:#ffffff;">${FEEDBACK_REWARD_DAYS} days of unlimited access</strong>.</p>`,
+      createPrimaryEmailButton(feedbackUrl, 'Share feedback')
+    ].join('')
+  );
+  await sendTransactionalEmail(email, safeName, 'How was your Song Guess experience?', text, html, 'feedback_request');
+  return true;
+}
+
 function getRequestedArtistQueuePosition(artist: RequestedArtist, artists: RequestedArtist[]): number {
   const queuedArtists = artists
     .filter((item) => item.status === 'queued' || item.status === 'pending' || (item.songsCount || item.songs?.length || 0) === 0)
@@ -1301,6 +1363,64 @@ function startAbandonedCheckoutScheduler(): void {
     abandonedCheckoutTimer.unref?.();
   }, ABANDONED_CHECKOUT_START_DELAY_MS);
   abandonedCheckoutTimer.unref?.();
+}
+
+async function processFeedbackRequestEmails(): Promise<void> {
+  if (!isDatabaseConfigured() || !isEmailProviderConfigured()) return;
+
+  const users = await queryDb<{ id: string; email: string; name: string }>(
+    `SELECT u.id, u.email, u.name
+     FROM sg_users u
+     WHERE u.created_at <= now() - ($1 || ' days')::interval
+       AND NOT EXISTS (
+         SELECT 1 FROM sg_feedback_submissions f WHERE f.user_id = u.id
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM sg_email_events e
+         WHERE e.user_id = u.id
+           AND e.category = 'feedback_request'
+           AND e.status = 'sent'
+       )
+     ORDER BY u.created_at ASC
+     LIMIT $2`,
+    [FEEDBACK_EMAIL_DELAY_DAYS, FEEDBACK_EMAIL_BATCH_LIMIT]
+  );
+
+  for (const user of users) {
+    try {
+      await sendFeedbackRequestEmail(user.email, user.name);
+      await logUserJourneyEvent({
+        userId: user.id,
+        email: user.email,
+        eventType: 'feedback_email',
+        status: 'completed',
+        detail: `Feedback request email sent ${FEEDBACK_EMAIL_DELAY_DAYS} days after signup`,
+        metadata: { delayDays: FEEDBACK_EMAIL_DELAY_DAYS }
+      });
+    } catch (error) {
+      console.warn('Feedback request email failed:', error instanceof Error ? error.message : error);
+      await logUserJourneyEvent({
+        userId: user.id,
+        email: user.email,
+        eventType: 'feedback_email',
+        status: 'failed',
+        detail: error instanceof Error ? error.message : 'Feedback request email failed',
+        metadata: { delayDays: FEEDBACK_EMAIL_DELAY_DAYS }
+      });
+    }
+  }
+}
+
+function startFeedbackEmailScheduler(): void {
+  if (feedbackEmailTimer) return;
+  feedbackEmailTimer = setTimeout(() => {
+    void processFeedbackRequestEmails();
+    feedbackEmailTimer = setInterval(() => {
+      void processFeedbackRequestEmails();
+    }, FEEDBACK_EMAIL_CHECK_MS);
+    feedbackEmailTimer.unref?.();
+  }, FEEDBACK_EMAIL_START_DELAY_MS);
+  feedbackEmailTimer.unref?.();
 }
 
 function isSpotifyConfigured(): boolean {
@@ -3218,6 +3338,25 @@ async function grantWeeklyEntitlement(userId: string, source = 'stripe', stripeC
   return value instanceof Date ? value.toISOString() : String(value || '');
 }
 
+async function grantFeedbackEntitlement(userId: string): Promise<string> {
+  const rows = await queryDb<Record<string, unknown>>(
+    `INSERT INTO sg_entitlements (user_id, access_until, source, stripe_customer_id, updated_at)
+     VALUES ($1, now() + ($2 || ' days')::interval, 'feedback_reward', NULL, now())
+     ON CONFLICT (user_id)
+     DO UPDATE SET
+       access_until = GREATEST(sg_entitlements.access_until, now()) + ($2 || ' days')::interval,
+       source = CASE
+         WHEN sg_entitlements.source = 'stripe' AND sg_entitlements.access_until > now() THEN sg_entitlements.source
+         ELSE 'feedback_reward'
+       END,
+       updated_at = now()
+     RETURNING access_until`,
+    [userId, FEEDBACK_REWARD_DAYS]
+  );
+  const value = rows[0]?.access_until;
+  return value instanceof Date ? value.toISOString() : String(value || '');
+}
+
 function createAdminSession(req: Request, res: ExpressResponse, username: string): AdminSession {
   const token = randomBytes(32).toString('base64url');
   const session: AdminSession = {
@@ -4695,6 +4834,131 @@ async function startServer() {
     }
   });
 
+  app.get('/api/feedback/me', requireUser, async (_req, res) => {
+    if (!isDatabaseConfigured()) {
+      res.status(503).json({ error: 'Postgres DATABASE_URL is required for feedback' });
+      return;
+    }
+    const user = res.locals.user as UserSession;
+    try {
+      const rows = await queryDb<Record<string, unknown>>(
+        `SELECT id, overall_rating AS "overallRating", gameplay_rating AS "gameplayRating",
+                audio_rating AS "audioRating", packs_rating AS "packsRating",
+                multiplayer_rating AS "multiplayerRating", comment,
+                reward_days AS "rewardDays", reward_access_until AS "rewardAccessUntil",
+                created_at AS "createdAt", updated_at AS "updatedAt"
+         FROM sg_feedback_submissions
+         WHERE user_id = $1
+         LIMIT 1`,
+        [user.id]
+      );
+      res.json({
+        feedback: rows[0] || null,
+        rewardDays: FEEDBACK_REWARD_DAYS,
+        entitlement: await getUserEntitlement(user.id)
+      });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Could not load feedback' });
+    }
+  });
+
+  app.post('/api/feedback', createRateLimit(20, 10 * 60_000), requireUser, async (req, res) => {
+    if (!isDatabaseConfigured()) {
+      res.status(503).json({ error: 'Postgres DATABASE_URL is required for feedback' });
+      return;
+    }
+    const user = res.locals.user as UserSession;
+    const rating = (value: unknown) => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? Math.max(1, Math.min(5, Math.round(parsed))) : 0;
+    };
+    const overallRating = rating(req.body?.overallRating);
+    const gameplayRating = rating(req.body?.gameplayRating);
+    const audioRating = rating(req.body?.audioRating);
+    const packsRating = rating(req.body?.packsRating);
+    const multiplayerRating = rating(req.body?.multiplayerRating);
+    const comment = safeMultilineText(req.body?.comment, 2000);
+    if ([overallRating, gameplayRating, audioRating, packsRating, multiplayerRating].some((value) => value < 1)) {
+      res.status(400).json({ error: 'All feedback ratings are required.' });
+      return;
+    }
+    if (comment.length < 10) {
+      res.status(400).json({ error: 'Please add a short comment with your feedback.' });
+      return;
+    }
+
+    try {
+      const existing = await queryDb<{ id: string; rewardAccessUntil?: string }>(
+        'SELECT id, reward_access_until AS "rewardAccessUntil" FROM sg_feedback_submissions WHERE user_id = $1 LIMIT 1',
+        [user.id]
+      );
+      let rewardAccessUntil = existing[0]?.rewardAccessUntil || '';
+      const isNewSubmission = existing.length === 0;
+      if (isNewSubmission) {
+        rewardAccessUntil = await grantFeedbackEntitlement(user.id);
+        await queryDb(
+          `INSERT INTO sg_feedback_submissions
+             (id, user_id, email, name, overall_rating, gameplay_rating, audio_rating, packs_rating,
+              multiplayer_rating, comment, reward_days, reward_access_until)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+          [
+            randomUUID(),
+            user.id,
+            user.email,
+            user.name,
+            overallRating,
+            gameplayRating,
+            audioRating,
+            packsRating,
+            multiplayerRating,
+            comment,
+            FEEDBACK_REWARD_DAYS,
+            rewardAccessUntil || null
+          ]
+        );
+      } else {
+        await queryDb(
+          `UPDATE sg_feedback_submissions
+           SET overall_rating = $2,
+               gameplay_rating = $3,
+               audio_rating = $4,
+               packs_rating = $5,
+               multiplayer_rating = $6,
+               comment = $7,
+               updated_at = now()
+           WHERE user_id = $1`,
+          [user.id, overallRating, gameplayRating, audioRating, packsRating, multiplayerRating, comment]
+        );
+      }
+
+      await logUserJourneyEvent({
+        userId: user.id,
+        email: user.email,
+        eventType: 'feedback_submitted',
+        status: 'completed',
+        detail: isNewSubmission ? `${FEEDBACK_REWARD_DAYS} day feedback reward granted` : 'Feedback updated',
+        metadata: {
+          overallRating,
+          gameplayRating,
+          audioRating,
+          packsRating,
+          multiplayerRating,
+          rewardDays: isNewSubmission ? FEEDBACK_REWARD_DAYS : 0
+        }
+      });
+
+      res.json({
+        ok: true,
+        rewardGranted: isNewSubmission,
+        rewardDays: FEEDBACK_REWARD_DAYS,
+        rewardAccessUntil,
+        session: await buildAuthSessionResponseForUser(user)
+      });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Could not save feedback' });
+    }
+  });
+
   app.get('/robots.txt', async (req, res) => {
     try {
       const adminConfig = await getAdminConfig(req);
@@ -4811,6 +5075,14 @@ async function startServer() {
         });
         return;
       }
+    }
+
+    if (!user) {
+      res.status(401).json({
+        requiresAuth: true,
+        error: 'Create an account or log in to request this artist and receive the Play Now email.'
+      });
+      return;
     }
 
     try {
@@ -5907,6 +6179,7 @@ async function startServer() {
           topPlayers: 0,
           returningPlayers: 0,
           queuedRequesters: 0,
+          feedbackRewards: 0,
           unverified: 0
         }
       });
@@ -5923,6 +6196,7 @@ async function startServer() {
            (SELECT count(DISTINCT user_id) FROM sg_leaderboard_entries WHERE user_id IS NOT NULL AND points >= 4000)::int AS "topPlayers",
            (SELECT count(*) FROM sg_users WHERE last_seen_at IS NOT NULL AND last_seen_at > created_at + interval '1 day')::int AS "returningPlayers",
            (SELECT count(DISTINCT user_id) FROM sg_artist_request_subscribers WHERE user_id IS NOT NULL AND status = 'queued')::int AS "queuedRequesters",
+           (SELECT count(DISTINCT user_id) FROM sg_feedback_submissions WHERE user_id IS NOT NULL)::int AS "feedbackRewards",
            (SELECT count(*) FROM sg_users WHERE email_verified = false)::int AS unverified`
       );
       res.json({ segments: rows[0] || {} });
@@ -6227,7 +6501,7 @@ async function startServer() {
           return [];
         }
       };
-      const [payments, journey, emails, queuedRequests, leaderboard] = await Promise.all([
+      const [payments, journey, emails, queuedRequests, leaderboard, feedback] = await Promise.all([
         optionalProfileQuery<any>(
           'payments',
           `SELECT id, user_id AS "userId", email, amount_cents AS "amountCents", currency, status,
@@ -6276,6 +6550,16 @@ async function startServer() {
           'leaderboard',
           'SELECT max(points)::int AS points FROM sg_leaderboard_entries WHERE user_id = $1',
           [userId]
+        ),
+        optionalProfileQuery<any>(
+          'feedback',
+          `SELECT id, overall_rating AS "overallRating", reward_days AS "rewardDays",
+                  reward_access_until AS "rewardAccessUntil", created_at AS "createdAt"
+           FROM sg_feedback_submissions
+           WHERE user_id = $1
+           ORDER BY created_at DESC
+           LIMIT 5`,
+          [userId]
         )
       ]);
       const hasPaid = payments.some((payment: any) => ['paid', 'succeeded'].includes(String(payment.status)));
@@ -6285,9 +6569,10 @@ async function startServer() {
         Number(leaderboard[0]?.points || 0) >= 4000 ? 'Top player' : '',
         user.lastSeenAt && Date.parse(String(user.lastSeenAt)) > Date.parse(String(user.createdAt)) + 24 * 60 * 60 * 1000 ? 'Returning player' : '',
         queuedRequests.some((request: any) => request.status === 'queued') ? 'Queued requester' : '',
+        feedback.length > 0 ? 'Feedback reward' : '',
         !user.emailVerified ? 'Unverified' : ''
       ].filter(Boolean);
-      res.json({ user, segments, payments, journey, emails, queuedRequests });
+      res.json({ user, segments, payments, journey, emails, queuedRequests, feedback });
     } catch (error) {
       console.error('Admin user profile load error:', error);
       res.status(503).json({ error: 'Could not load user profile' });
@@ -6646,6 +6931,7 @@ async function startServer() {
   attachMultiplayerServer(server);
   startArtistPackRefreshScheduler();
   startAbandonedCheckoutScheduler();
+  startFeedbackEmailScheduler();
 
   server.listen(PORT, HOST, () => {
     console.log(`Moroccan Heardle server running on http://${HOST}:${PORT}`);

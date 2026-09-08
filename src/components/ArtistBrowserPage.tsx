@@ -3,7 +3,7 @@ import { CheckCircle2, ExternalLink, Loader2, Search, Star } from 'lucide-react'
 import { getArtistChallenges, orderArtistsByFeaturedPriority } from '../utils/challengeCatalog';
 import { getArtistPath } from '../utils/runtimeConfig';
 import { ArtistRequestResponse, RequestedArtist, SpotifyArtistSuggestion } from '../adminTypes';
-import { searchSpotifyArtists } from '../utils/authApi';
+import { ApiRequestError, searchSpotifyArtists } from '../utils/authApi';
 import { ALL_SONGS } from '../data/moroccanSongs';
 import { Song } from '../types';
 import {
@@ -24,6 +24,7 @@ interface ArtistBrowserPageProps {
   onOpenArtist: (slug: string) => void;
   requestedArtists?: RequestedArtist[];
   onRequestArtist?: (artistName: string, spotifyArtistId?: string, spotifyArtistImageUrl?: string) => Promise<ArtistRequestResponse>;
+  externalNotice?: string | null;
 }
 
 interface ArtistBrowserCard {
@@ -39,7 +40,8 @@ interface ArtistBrowserCard {
 export const ArtistBrowserPage: React.FC<ArtistBrowserPageProps> = ({
   onOpenArtist,
   requestedArtists = [],
-  onRequestArtist
+  onRequestArtist,
+  externalNotice
 }) => {
   const basePath = '/artist';
   const [query, setQuery] = useState('');
@@ -135,7 +137,9 @@ export const ArtistBrowserPage: React.FC<ArtistBrowserPageProps> = ({
       setRequestStatus('done');
       onOpenArtist(artist.slug);
     } catch (error) {
-      setRequestError(error instanceof Error ? error.message : 'Could not request artist');
+      if (!(error instanceof ApiRequestError && error.requiresAuth)) {
+        setRequestError(error instanceof Error ? error.message : 'Could not request artist');
+      }
       setRequestStatus('idle');
     }
   };
@@ -210,6 +214,9 @@ export const ArtistBrowserPage: React.FC<ArtistBrowserPageProps> = ({
               className="w-full h-16 rounded-lg bg-white/[0.055] border border-white/12 focus:border-yellow-300/70 outline-none pl-14 pr-5 text-lg text-white placeholder:text-white/35 shadow-2xl"
             />
           </div>
+          {externalNotice && (
+            <p className="mx-auto mt-4 max-w-xl rounded-lg border border-[#00e676]/25 bg-[#00e676]/10 p-3 text-sm font-bold text-[#b8ffd7]">{externalNotice}</p>
+          )}
         </section>
 
         {shouldShowSpotifySearch && (
@@ -233,6 +240,9 @@ export const ArtistBrowserPage: React.FC<ArtistBrowserPageProps> = ({
             )}
             {requestNotice && (
               <p className="mt-3 rounded-lg border border-[#00e676]/25 bg-[#00e676]/10 p-3 text-sm font-bold text-[#b8ffd7]">{requestNotice}</p>
+            )}
+            {externalNotice && !requestNotice && (
+              <p className="mt-3 rounded-lg border border-[#00e676]/25 bg-[#00e676]/10 p-3 text-sm font-bold text-[#b8ffd7]">{externalNotice}</p>
             )}
             <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
               {spotifySuggestions.map((artist) => {

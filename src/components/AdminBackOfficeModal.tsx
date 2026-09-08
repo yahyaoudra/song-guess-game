@@ -1877,6 +1877,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                     ['Top players', adminSegments.topPlayers],
                     ['Returning', adminSegments.returningPlayers],
                     ['Queued requests', adminSegments.queuedRequesters],
+                    ['Feedback rewards', adminSegments.feedbackRewards],
                     ['Unverified', adminSegments.unverified]
                   ].map(([label, value]) => (
                     <div key={String(label)} className="rounded-xl border border-white/10 bg-[#0b100d] p-3">

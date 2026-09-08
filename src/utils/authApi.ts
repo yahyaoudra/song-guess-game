@@ -116,6 +116,48 @@ export async function createCheckout(): Promise<string> {
   return body.url;
 }
 
+export interface FeedbackSubmission {
+  id: string;
+  overallRating: number;
+  gameplayRating: number;
+  audioRating: number;
+  packsRating: number;
+  multiplayerRating: number;
+  comment: string;
+  rewardDays: number;
+  rewardAccessUntil?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function fetchMyFeedback(): Promise<{
+  feedback: FeedbackSubmission | null;
+  rewardDays: number;
+  entitlement: AuthSessionResponse['entitlement'];
+}> {
+  return requestJson('/api/feedback/me');
+}
+
+export async function submitFeedback(input: {
+  overallRating: number;
+  gameplayRating: number;
+  audioRating: number;
+  packsRating: number;
+  multiplayerRating: number;
+  comment: string;
+}): Promise<{
+  ok: true;
+  rewardGranted: boolean;
+  rewardDays: number;
+  rewardAccessUntil?: string;
+  session: AuthSessionResponse;
+}> {
+  return requestJson('/api/feedback', {
+    method: 'POST',
+    body: JSON.stringify(input)
+  });
+}
+
 export async function fetchRequestedArtists(): Promise<RequestedArtist[]> {
   const body = await requestJson<{ artists: RequestedArtist[] }>('/api/artist-requests');
   return body.artists;

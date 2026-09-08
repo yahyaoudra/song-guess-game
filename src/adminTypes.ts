@@ -201,6 +201,13 @@ export interface AdminUserProfile {
   journey: AdminUserJourneyEvent[];
   emails: AdminEmailEvent[];
   queuedRequests: AdminQueuedArtistRequest[];
+  feedback?: Array<{
+    id: string;
+    overallRating: number;
+    rewardDays: number;
+    rewardAccessUntil?: string;
+    createdAt: string;
+  }>;
 }
 
 export interface AdminUserSegments {
@@ -210,6 +217,7 @@ export interface AdminUserSegments {
   topPlayers: number;
   returningPlayers: number;
   queuedRequesters: number;
+  feedbackRewards: number;
   unverified: number;
 }
 

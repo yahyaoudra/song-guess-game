@@ -30,6 +30,7 @@ import { MultiplayerModal } from './components/MultiplayerModal';
 import { PaywallModal } from './components/PaywallModal';
 import { HomePage } from './components/HomePage';
 import { ContactPage } from './components/ContactPage';
+import { FeedbackPage } from './components/FeedbackPage';
 import {
   getStoredSettings,
   saveStoredSettings,
@@ -74,7 +75,7 @@ function baseArtistSlug(slug: string): string {
   return slug.replace(SPOTIFY_ARTIST_SUFFIX_PATTERN, '');
 }
 
-type ActiveView = 'home' | 'game' | 'legal' | 'artists' | 'genres' | 'countries' | 'contact';
+type ActiveView = 'home' | 'game' | 'legal' | 'artists' | 'genres' | 'countries' | 'contact' | 'feedback';
 type ActiveChallenge =
   | { type: 'artist'; slug: string; title: string; songIds?: string[]; songs?: Song[]; albumPacks?: RequestedArtist['albumPacks'] }
   | { type: 'genre'; slug: string; title: string }
@@ -143,6 +144,7 @@ export default function App() {
   });
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [accessNotice, setAccessNotice] = useState<string | null>(null);
+  const [artistRequestNotice, setArtistRequestNotice] = useState<string | null>(null);
   const [requestedArtists, setRequestedArtists] = useState<RequestedArtist[]>([]);
   const [requestedArtistsLoaded, setRequestedArtistsLoaded] = useState(false);
   const [activeArtistAlbumPackId, setActiveArtistAlbumPackId] = useState('all');
@@ -454,6 +456,14 @@ export default function App() {
           setActiveChallenge(null);
           setActiveArtistAlbumPackId('all');
           setActiveView('contact');
+          return;
+        }
+
+        if (segments[0] === 'feedback') {
+          audioEngine.stop();
+          setActiveChallenge(null);
+          setActiveArtistAlbumPackId('all');
+          setActiveView('feedback');
           return;
         }
 
@@ -1158,6 +1168,16 @@ export default function App() {
     socialTitle: 'Contact Song Guess Game',
     socialDescription: 'Send a message to the Song Guess Game team.'
   };
+  const feedbackSeo: AdminPageConfig = {
+    ...homeSeo,
+    pageTitle: 'Song Guess Game Feedback',
+    metaDescription: 'Share Song Guess Game feedback about gameplay, song clips, packs, albums, and multiplayer.',
+    keywords: 'song guess feedback, music quiz feedback, song game feedback',
+    canonicalUrl: `${publicConfig.appUrl}/feedback`,
+    customHeading: 'Song Guess Game Feedback',
+    socialTitle: 'Song Guess Game Feedback',
+    socialDescription: 'Share feedback and help improve Song Guess Game.'
+  };
   const playSeo =
     settings.selectedCountry === 'GLOBAL'
       ? getRouteConfig('system:play', publicConfig)
@@ -1210,6 +1230,8 @@ export default function App() {
       ? '/'
       : activeView === 'contact'
       ? '/contact'
+      : activeView === 'feedback'
+      ? '/feedback'
       : activeView === 'legal'
       ? getLegalPath(legalSection)
       : activeView === 'artists'
@@ -1223,11 +1245,11 @@ export default function App() {
       : activeChallenge?.type === 'genre'
       ? getGenrePath(activeChallenge.slug)
       : getCountryPath(settings.selectedCountry, publicConfig);
-  const pageTitle = activeView === 'home' ? homeSeo.pageTitle : activeView === 'contact' ? contactSeo.pageTitle : activeView === 'legal' ? legalSeo[legalSection].title : activeSeo.pageTitle;
-  const pageDescription = activeView === 'home' ? homeSeo.metaDescription : activeView === 'contact' ? contactSeo.metaDescription : activeView === 'legal' ? legalSeo[legalSection].description : activeSeo.metaDescription;
-  const pageKeywords = activeView === 'home' ? homeSeo.keywords : activeView === 'contact' ? contactSeo.keywords : activeView === 'legal' ? 'song guess game privacy, music quiz terms' : activeSeo.keywords;
-  const socialTitle = activeView === 'home' ? homeSeo.socialTitle : activeView === 'contact' ? contactSeo.socialTitle : activeView === 'legal' ? pageTitle : activeSeo.socialTitle || pageTitle;
-  const socialDescription = activeView === 'home' ? homeSeo.socialDescription : activeView === 'contact' ? contactSeo.socialDescription : activeView === 'legal' ? pageDescription : activeSeo.socialDescription || pageDescription;
+  const pageTitle = activeView === 'home' ? homeSeo.pageTitle : activeView === 'contact' ? contactSeo.pageTitle : activeView === 'feedback' ? feedbackSeo.pageTitle : activeView === 'legal' ? legalSeo[legalSection].title : activeSeo.pageTitle;
+  const pageDescription = activeView === 'home' ? homeSeo.metaDescription : activeView === 'contact' ? contactSeo.metaDescription : activeView === 'feedback' ? feedbackSeo.metaDescription : activeView === 'legal' ? legalSeo[legalSection].description : activeSeo.metaDescription;
+  const pageKeywords = activeView === 'home' ? homeSeo.keywords : activeView === 'contact' ? contactSeo.keywords : activeView === 'feedback' ? feedbackSeo.keywords : activeView === 'legal' ? 'song guess game privacy, music quiz terms' : activeSeo.keywords;
+  const socialTitle = activeView === 'home' ? homeSeo.socialTitle : activeView === 'contact' ? contactSeo.socialTitle : activeView === 'feedback' ? feedbackSeo.socialTitle : activeView === 'legal' ? pageTitle : activeSeo.socialTitle || pageTitle;
+  const socialDescription = activeView === 'home' ? homeSeo.socialDescription : activeView === 'contact' ? contactSeo.socialDescription : activeView === 'feedback' ? feedbackSeo.socialDescription : activeView === 'legal' ? pageDescription : activeSeo.socialDescription || pageDescription;
   const shouldShowAds = !authSession.entitlement.active;
 
   useEffect(() => {
@@ -1472,6 +1494,7 @@ export default function App() {
       throw error;
     }
     const artist = response.artist;
+    setArtistRequestNotice(null);
     setRequestedArtists((current) => {
       const filtered = current.filter((item) => item.slug !== artist.slug);
       return [artist, ...filtered];
@@ -1551,7 +1574,11 @@ export default function App() {
       void handleRequestArtist(artistRequest.name, artistRequest.spotifyArtistId, artistRequest.imageUrl)
         .then((result) => {
           if (result.queued || result.artist.status !== 'ready') {
-            setAccessNotice(`${result.artist.name} is in the queue. We will email you when it is ready to play.`);
+            const message = result.message || `${result.artist.name} is in the queue. We will email you when it is ready to play.`;
+            setArtistRequestNotice(message);
+            setAccessNotice(message);
+            setActiveView('artists');
+            navigateToPage('/artist');
           }
         })
         .catch(() => {});
@@ -1573,6 +1600,7 @@ export default function App() {
     activateArtistAlbumPack,
     handleRequestArtist,
     multiplayerAuthReturn,
+    navigateToPage,
     pendingArtistAlbumPackId,
     pendingArtistRequest,
     pendingUnlockAfterAuth,
@@ -2161,6 +2189,30 @@ export default function App() {
     );
   }
 
+  if (activeView === 'feedback') {
+    return (
+      <div className="relative min-h-screen w-full bg-[#080c0a] text-white flex flex-col overflow-x-hidden font-sans selection:bg-[#00e676] selection:text-black">
+        <GoogleIntegrations config={publicConfig} pageTitle={pageTitle} pagePath={pagePath} />
+        <StageLighting
+          difficulty={currentDifficulty}
+          themeOverride={settings.accentColorOverride}
+          isComplete={false}
+        />
+        {renderAppHeader()}
+        <FeedbackPage
+          authSession={authSession}
+          onOpenAuth={() => {
+            setAuthInitialMode('login');
+            setIsAuthOpen(true);
+          }}
+          onSessionChange={setAuthSession}
+          onPlay={() => navigateToPage('/play')}
+        />
+        {renderNavigationModals()}
+      </div>
+    );
+  }
+
   // If user opened the dedicated full-page Legal & Privacy page
   if (activeView === 'legal') {
     return (
@@ -2206,6 +2258,7 @@ export default function App() {
           onOpenArtist={(slug) => navigateToPage(getArtistPath(slug))}
           requestedArtists={requestedArtists}
           onRequestArtist={handleRequestArtist}
+          externalNotice={artistRequestNotice}
         />
         {renderNavigationModals()}
       </div>
