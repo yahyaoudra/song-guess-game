@@ -5,6 +5,7 @@ import { DIFFICULTY_COLORS } from '../data/moroccanSongs';
 import { getArtistPath } from '../utils/runtimeConfig';
 import { RequestedArtist, PublicRuntimeConfig } from '../adminTypes';
 import { getCollectionSongs as getRuntimeCollectionSongs, getRuntimeCollections, getRuntimeCountries } from '../utils/customCatalog';
+import { getPackSearchRank } from '../utils/searchRanking';
 
 interface QuizCollectionModalProps {
   selectedCountryCode: string;
@@ -160,7 +161,8 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
   }, [categories, selectedCategory]);
 
   const filteredCollections = useMemo(() => {
-    return libraryCollections.filter((col) => {
+    return libraryCollections
+      .map((col, index) => {
       const matchesTab = getCollectionLibraryTab(col) === activeTab;
 
       const matchesCountry =
@@ -178,25 +180,31 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
           : col.category.toLowerCase().includes(selectedCategory.toLowerCase()) ||
             (col.tags && col.tags.some(t => t.toLowerCase().includes(selectedCategory.toLowerCase())));
 
-      const q = searchQuery.toLowerCase().trim();
       const songs = getRuntimeCollectionSongs(col);
-      const matchesSearch =
-        !q ||
-        getDisplayTitle(col, activeTab).toLowerCase().includes(q) ||
-        col.title.toLowerCase().includes(q) ||
-        (col.titleArabic && col.titleArabic.toLowerCase().includes(q)) ||
-        (col.nativeTitle && col.nativeTitle.toLowerCase().includes(q)) ||
-        col.description.toLowerCase().includes(q) ||
-        col.category.toLowerCase().includes(q) ||
-        (col.tags && col.tags.some((t) => t.toLowerCase().includes(q))) ||
-        songs.some((song) => (
-          song.title.toLowerCase().includes(q) ||
-          song.artist.toLowerCase().includes(q) ||
-          song.genre.toLowerCase().includes(q)
-        ));
+      const searchRank = getPackSearchRank({
+        query: searchQuery,
+        title: getDisplayTitle(col, activeTab),
+        alternateTitles: [col.title, col.titleArabic, col.nativeTitle],
+        metadata: [col.description, col.category, ...(col.tags || [])],
+        songs
+      });
 
-      return matchesTab && matchesCountry && matchesCategory && matchesSearch;
-    });
+      return {
+        collection: col,
+        index,
+        searchRank,
+        matches: matchesTab && matchesCountry && matchesCategory && searchRank !== null
+      };
+    })
+      .filter((item) => item.matches)
+      .sort((left, right) => {
+        if (activeTab === 'artists' && searchQuery.trim()) {
+          const rankDelta = (left.searchRank ?? 0) - (right.searchRank ?? 0);
+          if (rankDelta !== 0) return rankDelta;
+        }
+        return left.index - right.index;
+      })
+      .map((item) => item.collection);
   }, [activeTab, filterCountry, selectedCategory, searchQuery, libraryCollections]);
 
   useEffect(() => {

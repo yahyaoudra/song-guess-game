@@ -14,6 +14,7 @@ import {
   orderArtistsByFeaturedPriority
 } from '../utils/challengeCatalog';
 import { recordFeatureEvent } from '../utils/adminApi';
+import { getPackSearchRank } from '../utils/searchRanking';
 
 interface MultiplayerModalProps {
   onClose: () => void;
@@ -271,20 +272,29 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
   }, [activeCollection, challengeSlug, challengeType, requestedArtists]);
 
   const filteredChallengeOptions = useMemo(() => {
-    const query = packSearchQuery.trim().toLowerCase();
+    const query = packSearchQuery.trim();
     if (!query) return challengeOptions;
-    return challengeOptions.filter((option) => (
-      option.title.toLowerCase().includes(query) ||
-      option.subtitle.toLowerCase().includes(query) ||
-      option.description?.toLowerCase().includes(query) ||
-      option.songs?.some((song) =>
-        song.title.toLowerCase().includes(query) ||
-        song.artist.toLowerCase().includes(query) ||
-        song.album.toLowerCase().includes(query) ||
-        song.genre.toLowerCase().includes(query)
-      )
-    ));
-  }, [challengeOptions, packSearchQuery]);
+    return challengeOptions
+      .map((option, index) => ({
+        option,
+        index,
+        searchRank: getPackSearchRank({
+          query,
+          title: option.title,
+          metadata: [option.subtitle, option.description],
+          songs: option.songs || []
+        })
+      }))
+      .filter((item) => item.searchRank !== null)
+      .sort((left, right) => {
+        if (challengeType === 'artist') {
+          const rankDelta = (left.searchRank ?? 0) - (right.searchRank ?? 0);
+          if (rankDelta !== 0) return rankDelta;
+        }
+        return left.index - right.index;
+      })
+      .map((item) => item.option);
+  }, [challengeOptions, challengeType, packSearchQuery]);
 
   const selectedChallenge = useMemo(
     () => challengeOptions.find((item) => item.slug === challengeSlug) || null,
