@@ -41,13 +41,22 @@ export const GoogleIntegrations: React.FC<GoogleIntegrationsProps> = ({
       window.dataLayer?.push(args);
     };
 
-    if (initializedAnalyticsId.current !== measurementId) {
+    const configuredIds = window.__SONG_GUESS_GA_CONFIGURED_IDS__ || [];
+    const isAlreadyConfigured = configuredIds.includes(measurementId);
+
+    if (initializedAnalyticsId.current !== measurementId && !isAlreadyConfigured) {
       window.gtag('js', new Date());
       window.gtag('config', measurementId, {
         send_page_view: false
       });
+      window.__SONG_GUESS_GA_CONFIGURED_IDS__ = [...configuredIds, measurementId];
       initializedAnalyticsId.current = measurementId;
     }
+
+    const pageViewKey = `${measurementId}:${pagePath}:${pageTitle}`;
+    const sentPageViews = window.__SONG_GUESS_PAGE_VIEWS_SENT__ || [];
+    if (sentPageViews.includes(pageViewKey)) return;
+    window.__SONG_GUESS_PAGE_VIEWS_SENT__ = [...sentPageViews, pageViewKey].slice(-50);
 
     window.gtag('event', 'page_view', {
       page_title: pageTitle,

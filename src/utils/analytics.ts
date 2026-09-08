@@ -20,12 +20,19 @@ function saveTrackedSet(key: string, values: Set<string>): void {
 
 export function trackEvent(eventName: string, params: AnalyticsParams = {}): void {
   if (typeof window === 'undefined') return;
+  const eventId = typeof params.event_id === 'string' ? params.event_id : '';
+  const recentKey = eventId ? `${eventName}:${eventId}` : '';
+  if (recentKey) {
+    const recent = window.__SONG_GUESS_RECENT_ANALYTICS_EVENTS__ || [];
+    if (recent.includes(recentKey)) return;
+    window.__SONG_GUESS_RECENT_ANALYTICS_EVENTS__ = [...recent, recentKey].slice(-100);
+  }
   if (typeof window.gtag === 'function') {
-    window.gtag('event', eventName, params);
+    window.gtag('event', eventName, eventId ? params : { ...params, event_id: `${eventName}-${Date.now()}` });
     return;
   }
   window.dataLayer = window.dataLayer || [];
-  window.dataLayer.push(['event', eventName, params]);
+  window.dataLayer.push(['event', eventName, eventId ? params : { ...params, event_id: `${eventName}-${Date.now()}` }]);
 }
 
 export function trackEventOnce(eventName: string, dedupeId: string, params: AnalyticsParams = {}): boolean {
@@ -35,7 +42,7 @@ export function trackEventOnce(eventName: string, dedupeId: string, params: Anal
   if (tracked.has(key)) return false;
   tracked.add(key);
   saveTrackedSet(EVENT_DEDUPE_KEY, tracked);
-  trackEvent(eventName, params);
+  trackEvent(eventName, { ...params, event_id: key });
   return true;
 }
 

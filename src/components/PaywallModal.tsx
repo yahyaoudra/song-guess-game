@@ -73,7 +73,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
               Play unlimited Song Guess
             </h2>
             <p className="mt-3 max-w-lg text-xs leading-relaxed text-white/58 sm:mt-4 sm:text-sm">
-              One $3.99 payment unlocks every mode for a week. No subscription, no daily wall, and no ads while your pass is active.
+              <strong className="font-black text-white">One $3.99 payment for one week unlimited access.</strong> No subscription, no daily wall, and no ads while your pass is active.
             </p>
 
             <div className="mt-4 grid gap-2 sm:mt-6 sm:grid-cols-2">
@@ -93,14 +93,19 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
               ))}
             </div>
 
-            <button
-              onClick={isAuthenticated && stripeConfigured && databaseConfigured ? onCheckout : onLogin}
-              disabled={!databaseConfigured}
-              className="mt-5 flex h-11 w-full max-w-sm items-center justify-center gap-2 rounded-lg bg-[#00e676] text-sm font-black text-black shadow-[0_18px_48px_rgba(0,230,118,0.22)] hover:bg-[#1fe682] disabled:cursor-not-allowed disabled:opacity-50 sm:mt-7 sm:h-12"
-            >
-              <Lock className="h-4 w-4" />
-              {actionLabel}
-            </button>
+            <div className="mt-5 flex flex-col gap-3 sm:mt-7">
+              <div className="inline-flex w-fit items-center gap-2 rounded-full border border-[#00e676]/35 bg-[#00e676]/10 px-3 py-1.5 text-xs font-black text-[#00e676]">
+                $3.99 <span className="text-white">7-day pass</span>
+              </div>
+              <button
+                onClick={isAuthenticated && stripeConfigured && databaseConfigured ? onCheckout : onLogin}
+                disabled={!databaseConfigured}
+                className="flex h-11 w-full max-w-sm items-center justify-center gap-2 rounded-lg bg-[#00e676] text-sm font-black text-black shadow-[0_18px_48px_rgba(0,230,118,0.22)] hover:bg-[#1fe682] disabled:cursor-not-allowed disabled:opacity-50 sm:h-12"
+              >
+                <Lock className="h-4 w-4" />
+                {actionLabel}
+              </button>
+            </div>
             {!stripeConfigured && isAuthenticated && databaseConfigured && (
               <p className="mt-2 text-xs text-yellow-100/70">Stripe checkout needs `STRIPE_SECRET_KEY` before live payments can start.</p>
             )}

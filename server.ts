@@ -3769,7 +3769,7 @@ function injectRuntimeHtml(html: string, req: Request, publicConfig: PublicRunti
   const googleTagScript = googleAnalyticsId
     ? [
         `<script id="song-guess-google-tag" async src="https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(googleAnalyticsId)}"></script>`,
-        `<script${nonce ? ` nonce="${escapeHtml(nonce)}"` : ''}>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','${escapeHtml(googleAnalyticsId)}',{send_page_view:false});</script>`
+        `<script${nonce ? ` nonce="${escapeHtml(nonce)}"` : ''}>window.dataLayer=window.dataLayer||[];window.__SONG_GUESS_GA_CONFIGURED_IDS__=window.__SONG_GUESS_GA_CONFIGURED_IDS__||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','${escapeHtml(googleAnalyticsId)}',{send_page_view:false});if(!window.__SONG_GUESS_GA_CONFIGURED_IDS__.includes('${escapeHtml(googleAnalyticsId)}'))window.__SONG_GUESS_GA_CONFIGURED_IDS__.push('${escapeHtml(googleAnalyticsId)}');</script>`
       ].join('\n    ')
     : '';
   const clarityProjectId = publicConfig.integrations.clarityEnabled

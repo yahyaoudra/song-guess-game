@@ -838,15 +838,9 @@ export default function App() {
   }, []);
 
   const handleAccessNoticeUnlock = useCallback(() => {
-    if (authSession.authenticated) {
-      void handleUnlock();
-      return;
-    }
-    setPendingUnlockAfterAuth(true);
-    setAuthInitialMode('register');
-    setIsPaywallOpen(false);
-    setIsAuthOpen(true);
-  }, [authSession.authenticated, handleUnlock]);
+    setShowAlbumAccessTooltip(false);
+    setIsPaywallOpen(true);
+  }, []);
 
   const activateArtistAlbumPack = useCallback((albumPackId: string) => {
     setActiveArtistAlbumPackId(albumPackId);
@@ -2121,7 +2115,9 @@ export default function App() {
         <PaywallModal
           onClose={() => setIsPaywallOpen(false)}
           onLogin={() => {
+            setPendingUnlockAfterAuth(true);
             setIsPaywallOpen(false);
+            setAuthInitialMode('register');
             setIsAuthOpen(true);
           }}
           onCheckout={handleUnlock}
@@ -2821,7 +2817,9 @@ export default function App() {
         <PaywallModal
           onClose={() => setIsPaywallOpen(false)}
           onLogin={() => {
+            setPendingUnlockAfterAuth(true);
             setIsPaywallOpen(false);
+            setAuthInitialMode('register');
             setIsAuthOpen(true);
           }}
           onCheckout={handleUnlock}

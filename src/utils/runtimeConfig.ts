@@ -14,6 +14,9 @@ declare global {
     gtag?: (...args: unknown[]) => void;
     clarity?: (...args: unknown[]) => void;
     adsbygoogle?: unknown[];
+    __SONG_GUESS_GA_CONFIGURED_IDS__?: string[];
+    __SONG_GUESS_PAGE_VIEWS_SENT__?: string[];
+    __SONG_GUESS_RECENT_ANALYTICS_EVENTS__?: string[];
   }
 }
 
