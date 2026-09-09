@@ -67,20 +67,21 @@ export function trackReturningUser(userId: string): void {
   });
 }
 
-export function trackPurchaseOnce(sessionId: string): void {
+export function trackPurchaseOnce(sessionId: string, amountCents = 399): void {
   if (!sessionId) return;
   const tracked = getTrackedSet(PURCHASE_TRACKED_KEY);
   if (tracked.has(sessionId)) return;
   tracked.add(sessionId);
   saveTrackedSet(PURCHASE_TRACKED_KEY, tracked);
+  const value = Number((amountCents / 100).toFixed(2));
   trackEvent('purchase', {
     transaction_id: sessionId,
     currency: 'USD',
-    value: 3.99,
+    value,
     items: [{
       item_id: 'song_guess_unlimited_7_day_pass',
       item_name: 'Song Guess Unlimited - 7 Day Pass',
-      price: 3.99,
+      price: value,
       quantity: 1
     }]
   });

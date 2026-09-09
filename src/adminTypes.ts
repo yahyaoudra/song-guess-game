@@ -45,10 +45,29 @@ export interface IntegrationSettings {
   searchConsoleVerification: string;
 }
 
+export interface PricingExperimentVariant {
+  amountCents: number;
+  purchases: number;
+  revenueCents: number;
+}
+
+export interface PricingSettings {
+  defaultAmountCents: number;
+  activeAmountCents: number;
+  originalAmountCents?: number;
+  experimentEnabled: boolean;
+  experimentStartedAt?: string;
+  experimentMinAmountCents?: number;
+  experimentMaxAmountCents?: number;
+  experimentStepCents?: number;
+  experimentVariants?: PricingExperimentVariant[];
+}
+
 export interface AdminConfigState {
   version: number;
   appUrl: string;
   integrations: IntegrationSettings;
+  pricing: PricingSettings;
   pageConfigs: Record<string, AdminPageConfig>;
   routeConfigs: Record<string, AdminPageConfig>;
   featuredArtistSlugs: string[];
@@ -65,6 +84,7 @@ export interface PublicRuntimeConfig {
   host: string;
   recaptchaSiteKey?: string;
   integrations: IntegrationSettings;
+  pricing?: PricingSettings;
   pageConfigs: Record<string, AdminPageConfig>;
   routeConfigs: Record<string, AdminPageConfig>;
   featuredArtistSlugs: string[];

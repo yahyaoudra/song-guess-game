@@ -5,6 +5,7 @@ import {
   CalendarDays,
   Check,
   CreditCard,
+  Download,
   Eye,
   FileText,
   Globe,
@@ -59,11 +60,13 @@ import { baseArtistSlug, getArtistChallenges, getGenreChallenges, orderArtistsBy
 import { createDefaultRouteConfig } from '../utils/runtimeConfig';
 import { getSafeImageUrl } from '../utils/safeUrl';
 
-type AdminTab = 'overview' | 'seo' | 'ads' | 'integrations' | 'packs' | 'genrePacks' | 'countryPacks' | 'decadePacks' | 'themePacks' | 'emails' | 'monetization' | 'activity' | 'robots' | 'security';
+type AdminTab = 'overview' | 'seo' | 'ads' | 'integrations' | 'packs' | 'genrePacks' | 'countryPacks' | 'decadePacks' | 'themePacks' | 'emails' | 'users' | 'pricing' | 'monetization' | 'activity' | 'robots' | 'security';
 type SeoTargetType = 'home' | 'country' | 'genre' | 'artist';
 type ArtistPackSort = 'name-asc' | 'name-desc' | 'songs-desc' | 'songs-asc' | 'updated-desc' | 'updated-asc' | 'played-desc';
 type ArtistPackStatusFilter = 'all' | 'ready' | 'queued' | 'pending' | 'needs-update';
 type ArtistPackSourceFilter = 'all' | 'spotify' | 'catalog';
+type UserFilter = 'all' | 'active-now' | 'inactive' | 'paid-active' | 'paid-ended' | 'free' | 'unverified';
+type SignupDateFilter = 'all' | 'today' | '7d' | '30d';
 
 interface AdminBackOfficeModalProps {
   onClose: () => void;
@@ -82,6 +85,8 @@ const TABS: Array<{ id: AdminTab; label: string; icon: React.ElementType }> = [
   { id: 'decadePacks', label: 'Decades', icon: CalendarDays },
   { id: 'themePacks', label: 'Themes', icon: Star },
   { id: 'emails', label: 'Emails', icon: Mail },
+  { id: 'users', label: 'Users', icon: Users },
+  { id: 'pricing', label: 'Price Test', icon: CreditCard },
   { id: 'monetization', label: 'Monetization', icon: CreditCard },
   { id: 'activity', label: 'Activity', icon: Activity },
   { id: 'robots', label: 'Robots', icon: FileText },
@@ -98,6 +103,22 @@ const LOCATION_LABELS: Record<AdPlacementLocation, string> = {
   reveal_modal: 'Reveal modal',
   popup: 'Popup'
 };
+
+const EMAIL_TEMPLATES = [
+  { key: 'email_verification', label: 'Email verification', match: (category: string) => category === 'email_verification' || category === 'email_change_verification' || category === 'email_verification_reminder' },
+  { key: 'welcome', label: 'Welcome email', match: (category: string) => category === 'welcome' },
+  { key: 'artist_request_received', label: 'Artist request received', match: (category: string) => category === 'artist_request_received' },
+  { key: 'artist_ready', label: 'Artist ready', match: (category: string) => category === 'artist_ready' },
+  { key: 'feedback_request', label: 'Feedback request after 2 days', match: (category: string) => category === 'feedback_request' },
+  { key: 'abandoned_checkout_30m', label: 'Checkout abandoned after 30 min', match: (category: string) => category === 'abandoned_checkout_30m' },
+  { key: 'abandoned_checkout_5h', label: 'Checkout abandoned after 5 hours', match: (category: string) => category === 'abandoned_checkout_5h' },
+  { key: 'abandoned_checkout_12h', label: 'Checkout abandoned after 12 hours', match: (category: string) => category === 'abandoned_checkout_12h' },
+  { key: 'abandoned_checkout_3d', label: 'Checkout abandoned after 3 days', match: (category: string) => category === 'abandoned_checkout_3d' }
+];
+
+function formatMoneyFromCents(amountCents?: number): string {
+  return `$${((amountCents || 0) / 100).toFixed(2)}`;
+}
 
 function buildCanonical(appUrl: string, page: AdminPageConfig): string {
   const cleanBase = appUrl.replace(/\/+$/, '');
@@ -176,6 +197,11 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
   const [loadingUserProfileId, setLoadingUserProfileId] = useState('');
   const [retryingEmailId, setRetryingEmailId] = useState('');
   const [emailBackfillAction, setEmailBackfillAction] = useState<'verification' | 'abandoned' | ''>('');
+  const [selectedEmailTemplateKey, setSelectedEmailTemplateKey] = useState(EMAIL_TEMPLATES[0].key);
+  const [previewEmailEvent, setPreviewEmailEvent] = useState<AdminEmailEvent | null>(null);
+  const [userSearch, setUserSearch] = useState('');
+  const [userFilter, setUserFilter] = useState<UserFilter>('all');
+  const [signupDateFilter, setSignupDateFilter] = useState<SignupDateFilter>('all');
   const [requestedArtists, setRequestedArtists] = useState<RequestedArtist[]>([]);
   const [paymentMeta, setPaymentMeta] = useState({ databaseConfigured: false, stripeConfigured: false });
   const [selectedCountryCode, setSelectedCountryCode] = useState('GLOBAL');
@@ -429,7 +455,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
   }, [artistChoices, selectedArtistSlug]);
 
   useEffect(() => {
-    if (activeTab === 'monetization' && isAuthenticated) {
+    if ((activeTab === 'monetization' || activeTab === 'users' || activeTab === 'emails' || activeTab === 'pricing') && isAuthenticated) {
       void handleRefreshMonetization();
     }
   }, [activeTab, isAuthenticated]);
@@ -458,6 +484,69 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
       .filter((payment) => payment.status !== 'refunded' && !payment.refundedAt)
       .reduce((sum, payment) => sum + payment.amountCents, 0),
     [adminPayments]
+  );
+  const selectedEmailTemplate = EMAIL_TEMPLATES.find((template) => template.key === selectedEmailTemplateKey) || EMAIL_TEMPLATES[0];
+  const selectedEmailEvents = useMemo(
+    () => adminEmailEvents.filter((email) => selectedEmailTemplate.match(email.category)),
+    [adminEmailEvents, selectedEmailTemplate]
+  );
+  const filteredAdminUsers = useMemo(() => {
+    const now = Date.now();
+    const query = userSearch.trim().toLowerCase();
+    const since =
+      signupDateFilter === 'today'
+        ? now - 24 * 60 * 60 * 1000
+        : signupDateFilter === '7d'
+        ? now - 7 * 24 * 60 * 60 * 1000
+        : signupDateFilter === '30d'
+        ? now - 30 * 24 * 60 * 60 * 1000
+        : 0;
+    return adminUsers.filter((user) => {
+      const accessUntil = user.accessUntil ? Date.parse(user.accessUntil) : 0;
+      const lastSeen = user.lastSeenAt ? Date.parse(user.lastSeenAt) : 0;
+      const createdAt = Date.parse(user.createdAt);
+      const hasActiveAccess = accessUntil > now;
+      const hadEndedAccess = Boolean(accessUntil && accessUntil <= now);
+      const isActiveNow = Boolean(lastSeen && now - lastSeen <= 10 * 60 * 1000);
+      const matchesFilter =
+        userFilter === 'all' ||
+        (userFilter === 'active-now' && isActiveNow) ||
+        (userFilter === 'inactive' && !isActiveNow) ||
+        (userFilter === 'paid-active' && hasActiveAccess) ||
+        (userFilter === 'paid-ended' && hadEndedAccess) ||
+        (userFilter === 'free' && !hasActiveAccess && !hadEndedAccess) ||
+        (userFilter === 'unverified' && !user.emailVerified);
+      const matchesDate = !since || createdAt >= since;
+      const matchesQuery = !query || `${user.email} ${user.name}`.toLowerCase().includes(query);
+      return matchesFilter && matchesDate && matchesQuery;
+    });
+  }, [adminUsers, signupDateFilter, userFilter, userSearch]);
+  const pricingVariants = useMemo(() => {
+    type PricingReportRow = { amountCents: number; purchases: number; revenueCents: number };
+    const pricing = config?.pricing;
+    const startedAt = pricing?.experimentStartedAt ? Date.parse(pricing.experimentStartedAt) : 0;
+    const configured = pricing?.experimentVariants?.length
+      ? pricing.experimentVariants.map((variant) => variant.amountCents)
+      : [pricing?.defaultAmountCents || 399];
+    const byAmount = new Map<number, PricingReportRow>(configured.map((amountCents) => [amountCents, { amountCents, purchases: 0, revenueCents: 0 }]));
+    adminPayments
+      .filter((payment) => ['paid', 'succeeded'].includes(payment.status) && !payment.refundedAt)
+      .filter((payment) => !startedAt || Date.parse(payment.createdAt) >= startedAt)
+      .forEach((payment) => {
+        const current = byAmount.get(payment.amountCents) || { amountCents: payment.amountCents, purchases: 0, revenueCents: 0 };
+        current.purchases += 1;
+        current.revenueCents += payment.amountCents;
+        byAmount.set(payment.amountCents, current);
+      });
+    return Array.from(byAmount.values()).sort((left, right) => left.amountCents - right.amountCents);
+  }, [adminPayments, config?.pricing]);
+  const winningPriceVariant = useMemo(
+    () => pricingVariants.reduce((winner, variant) => (
+      !winner || variant.purchases > winner.purchases || (variant.purchases === winner.purchases && variant.revenueCents > winner.revenueCents)
+        ? variant
+        : winner
+    ), null as null | { amountCents: number; purchases: number; revenueCents: number }),
+    [pricingVariants]
   );
 
   const loadProtectedData = async () => {
@@ -603,6 +692,50 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
       showToast('Monetization refreshed');
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : 'Failed to load monetization data');
+    }
+  };
+
+  const handleExportUsers = () => {
+    const rows = filteredAdminUsers.map((user) => ({
+      email: user.email,
+      name: user.name || '',
+      verified: user.emailVerified ? 'yes' : 'no',
+      accessUntil: user.accessUntil || '',
+      createdAt: user.createdAt,
+      lastSeenAt: user.lastSeenAt || ''
+    }));
+    const csv = [
+      ['email', 'name', 'verified', 'accessUntil', 'createdAt', 'lastSeenAt'].join(','),
+      ...rows.map((row) => Object.values(row).map((value) => `"${String(value).replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `song-guess-users-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleSavePricing = async (updates: Partial<AdminConfigState['pricing']>, message = 'Pricing saved') => {
+    if (!config) return;
+    setSaving(true);
+    setAuthError(null);
+    try {
+      const nextConfig = await saveAdminConfig({
+        ...config,
+        pricing: {
+          ...config.pricing,
+          ...updates
+        }
+      });
+      setConfig(nextConfig);
+      onConfigChanged?.(nextConfig);
+      showToast(message);
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Could not save pricing');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -2086,6 +2219,217 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
             </div>
           )}
 
+          {activeTab === 'users' && (
+            <div className="grid gap-4 text-left xl:grid-cols-[280px_minmax(0,1fr)]">
+              <aside className="space-y-3 rounded-2xl border border-white/10 bg-[#0b100d] p-4">
+                <h3 className="flex items-center gap-2 text-sm font-black text-white">
+                  <Users className="h-4 w-4 text-[#00e676]" />
+                  Users
+                </h3>
+                <input
+                  value={userSearch}
+                  onChange={(event) => setUserSearch(event.target.value)}
+                  placeholder="Search users..."
+                  className="h-10 w-full rounded-xl border border-white/10 bg-black/25 px-3 text-xs text-white outline-none focus:border-[#00e676]"
+                />
+                <select value={userFilter} onChange={(event) => setUserFilter(event.target.value as UserFilter)} className="h-10 w-full rounded-xl border border-white/10 bg-black/25 px-3 text-xs text-white outline-none focus:border-[#00e676]">
+                  <option value="all">All users</option>
+                  <option value="active-now">Actively playing now</option>
+                  <option value="inactive">Inactive</option>
+                  <option value="paid-active">Paid active</option>
+                  <option value="paid-ended">Ended access</option>
+                  <option value="free">Free accounts</option>
+                  <option value="unverified">Unverified</option>
+                </select>
+                <select value={signupDateFilter} onChange={(event) => setSignupDateFilter(event.target.value as SignupDateFilter)} className="h-10 w-full rounded-xl border border-white/10 bg-black/25 px-3 text-xs text-white outline-none focus:border-[#00e676]">
+                  <option value="all">Any signup date</option>
+                  <option value="today">Signed up today</option>
+                  <option value="7d">Last 7 days</option>
+                  <option value="30d">Last 30 days</option>
+                </select>
+                <button type="button" onClick={handleExportUsers} className="flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#00e676] text-xs font-black text-black hover:bg-[#1fe682]">
+                  <Download className="h-4 w-4" />
+                  Export shown users
+                </button>
+                {adminSegments && (
+                  <div className="grid gap-2 pt-2">
+                    {[
+                      ['Purchasers', adminSegments.purchasers],
+                      ['Active unlimited', adminSegments.activeUnlimited],
+                      ['Free accounts', adminSegments.freeAccounts],
+                      ['Returning', adminSegments.returningPlayers],
+                      ['Unverified', adminSegments.unverified]
+                    ].map(([label, value]) => (
+                      <div key={String(label)} className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs">
+                        <span className="font-bold text-white/55">{label}</span>
+                        <span className="font-mono font-black text-[#00e676]">{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </aside>
+              <section className="rounded-2xl border border-white/10 bg-[#0b100d] p-4">
+                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="text-sm font-black text-white">User list</h3>
+                    <p className="mt-1 text-[11px] text-white/45">{filteredAdminUsers.length} shown from {adminUserTotal} total accounts.</p>
+                  </div>
+                  <button type="button" onClick={handleRefreshMonetization} className="h-9 rounded-lg border border-[#00e676]/25 bg-[#00e676]/10 px-3 text-[11px] font-black text-[#00e676] hover:bg-[#00e676]/20">
+                    Refresh
+                  </button>
+                </div>
+                {filteredAdminUsers.length === 0 ? (
+                  <p className="rounded-xl bg-white/5 p-4 text-xs text-white/45">No users match this filter.</p>
+                ) : (
+                  <div className="max-h-[62vh] overflow-y-auto space-y-2">
+                    {filteredAdminUsers.map((user) => {
+                      const activeNow = Boolean(user.lastSeenAt && Date.now() - Date.parse(user.lastSeenAt) <= 10 * 60 * 1000);
+                      const accessUntil = user.accessUntil ? Date.parse(user.accessUntil) : 0;
+                      const paidLabel = accessUntil > Date.now() ? 'paid active' : accessUntil ? 'ended access' : 'free';
+                      return (
+                        <div key={user.id} className="rounded-xl border border-white/10 bg-[#121915] p-3 text-xs">
+                          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                            <div className="min-w-0">
+                              <p className="truncate font-black text-white">{user.email}</p>
+                              <p className="text-white/45">{user.name || 'Player'} • {user.emailVerified ? 'verified' : 'unverified'} • {paidLabel}</p>
+                              <p className="mt-1 text-[10px] text-white/35">Signup {formatIsoDate(user.createdAt)} • Last seen {formatIsoDate(user.lastSeenAt)}</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className={`rounded-full px-2 py-1 text-[10px] font-black ${activeNow ? 'bg-[#00e676]/10 text-[#00e676]' : 'bg-white/5 text-white/45'}`}>
+                                {activeNow ? 'active now' : 'inactive'}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => void handleOpenUserProfile(user.id)}
+                                disabled={loadingUserProfileId === user.id}
+                                className="rounded-lg border border-[#00e676]/25 bg-[#00e676]/10 px-2.5 py-1.5 text-[11px] font-black text-[#00e676] hover:bg-[#00e676]/20 disabled:cursor-wait disabled:opacity-50"
+                              >
+                                {loadingUserProfileId === user.id ? 'Loading' : 'View profile'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+              {selectedAdminUserProfile && (
+                <div className="fixed inset-0 z-[260] flex items-center justify-center bg-black/85 p-3 backdrop-blur-md">
+                  <div className="max-h-[92vh] w-full max-w-6xl overflow-y-auto rounded-2xl border border-[#00e676]/25 bg-[#0d1a13] p-4 shadow-2xl">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <h3 className="text-lg font-black text-white">{selectedAdminUserProfile.user.name || 'Player profile'}</h3>
+                        <p className="text-xs text-white/55">{selectedAdminUserProfile.user.email}</p>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {selectedAdminUserProfile.segments.map((segment) => (
+                            <span key={segment} className="rounded-full bg-[#00e676]/10 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-[#00e676]">{segment}</span>
+                          ))}
+                          {selectedAdminUserProfile.segments.length === 0 && <span className="rounded-full bg-white/5 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-white/40">No segment yet</span>}
+                        </div>
+                      </div>
+                      <button type="button" onClick={() => setSelectedAdminUserProfile(null)} className="rounded-lg bg-white/5 px-3 py-1.5 text-xs font-bold text-white/60 hover:text-white">Close profile</button>
+                    </div>
+                    <div className="mt-4 grid gap-3 xl:grid-cols-4">
+                      {[
+                        ['Activity journey', selectedAdminUserProfile.journey.map((event) => `${event.eventType} · ${event.status} · ${formatIsoDate(event.createdAt)}${event.detail ? `\n${event.detail}` : ''}`)],
+                        ['Email sequence', selectedAdminUserProfile.emails.map((email) => `${email.subject} · ${email.category} · ${email.status} · ${formatIsoDate(email.sentAt || email.createdAt)}`)],
+                        ['Queued requests', selectedAdminUserProfile.queuedRequests.map((request) => `${request.artistName} · ${request.status} · ${formatIsoDate(request.createdAt)}`)],
+                        ['Payments', selectedAdminUserProfile.payments.map((payment) => `${formatMoneyFromCents(payment.amountCents)} ${payment.currency.toUpperCase()} · ${payment.status} · ${formatIsoDate(payment.createdAt)}`)]
+                      ].map(([label, rows]) => (
+                        <div key={String(label)} className="rounded-xl border border-white/10 bg-black/20 p-3">
+                          <h4 className="text-xs font-black uppercase tracking-wide text-white/45">{label}</h4>
+                          <div className="mt-2 max-h-72 overflow-y-auto space-y-2">
+                            {(rows as string[]).length === 0 ? (
+                              <p className="rounded-lg bg-white/[0.04] p-3 text-xs text-white/40">No data yet.</p>
+                            ) : (rows as string[]).map((row, index) => (
+                              <pre key={`${label}-${index}`} className="whitespace-pre-wrap rounded-lg bg-white/[0.04] p-2 text-[11px] leading-5 text-white/65">{row}</pre>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'pricing' && config && (
+            <div className="space-y-4 text-left">
+              <div className="grid gap-3 md:grid-cols-4">
+                <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-4">
+                  <p className="text-[11px] font-black uppercase tracking-wide text-white/35">Default price</p>
+                  <p className="mt-1 text-2xl font-black text-white">{formatMoneyFromCents(config.pricing.defaultAmountCents)}</p>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-4">
+                  <p className="text-[11px] font-black uppercase tracking-wide text-white/35">Active checkout</p>
+                  <p className="mt-1 text-2xl font-black text-[#00e676]">{formatMoneyFromCents(config.pricing.activeAmountCents)}</p>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-4">
+                  <p className="text-[11px] font-black uppercase tracking-wide text-white/35">Experiment</p>
+                  <p className="mt-1 text-sm font-black text-white">{config.pricing.experimentEnabled ? 'Running' : 'Stopped'}</p>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-4">
+                  <p className="text-[11px] font-black uppercase tracking-wide text-white/35">Winner so far</p>
+                  <p className="mt-1 text-2xl font-black text-white">{winningPriceVariant ? formatMoneyFromCents(winningPriceVariant.amountCents) : '-'}</p>
+                </div>
+              </div>
+              <div className="rounded-2xl border border-[#00e676]/20 bg-[#0d1a13] p-4">
+                <h3 className="text-sm font-black text-white">Price experiment control</h3>
+                <p className="mt-1 text-xs leading-5 text-white/55">
+                  Configure a range like $2.99 to $3.99 with a $0.49 breakpoint. Results count only purchases after the experiment starts.
+                </p>
+                <div className="mt-4 grid gap-3 md:grid-cols-4">
+                  <label className="text-xs font-black uppercase tracking-wide text-white/35">
+                    Default price
+                    <input type="number" step="0.01" value={(config.pricing.defaultAmountCents / 100).toFixed(2)} onChange={(event) => updateConfig((current) => ({ ...current, pricing: { ...current.pricing, defaultAmountCents: Math.round(Number(event.target.value || 0) * 100), activeAmountCents: current.pricing.experimentEnabled ? current.pricing.activeAmountCents : Math.round(Number(event.target.value || 0) * 100), originalAmountCents: Math.round(Number(event.target.value || 0) * 100) } }))} className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-[#00e676]" />
+                  </label>
+                  <label className="text-xs font-black uppercase tracking-wide text-white/35">
+                    Min test price
+                    <input type="number" step="0.01" value={((config.pricing.experimentMinAmountCents || 299) / 100).toFixed(2)} onChange={(event) => updateConfig((current) => ({ ...current, pricing: { ...current.pricing, experimentMinAmountCents: Math.round(Number(event.target.value || 0) * 100) } }))} className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-[#00e676]" />
+                  </label>
+                  <label className="text-xs font-black uppercase tracking-wide text-white/35">
+                    Max test price
+                    <input type="number" step="0.01" value={((config.pricing.experimentMaxAmountCents || config.pricing.defaultAmountCents) / 100).toFixed(2)} onChange={(event) => updateConfig((current) => ({ ...current, pricing: { ...current.pricing, experimentMaxAmountCents: Math.round(Number(event.target.value || 0) * 100) } }))} className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-[#00e676]" />
+                  </label>
+                  <label className="text-xs font-black uppercase tracking-wide text-white/35">
+                    Breakpoint
+                    <input type="number" step="0.01" value={((config.pricing.experimentStepCents || 50) / 100).toFixed(2)} onChange={(event) => updateConfig((current) => ({ ...current, pricing: { ...current.pricing, experimentStepCents: Math.round(Number(event.target.value || 0) * 100) } }))} className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-[#00e676]" />
+                  </label>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button type="button" onClick={() => void handleSavePricing({}, 'Default pricing saved')} disabled={saving} className="h-10 rounded-xl border border-[#00e676]/35 bg-[#00e676]/10 px-4 text-xs font-black text-[#00e676] disabled:opacity-50">
+                    Save default
+                  </button>
+                  <button type="button" onClick={() => void handleSavePricing({ experimentEnabled: true, experimentStartedAt: new Date().toISOString() }, 'Price experiment started')} disabled={saving} className="h-10 rounded-xl bg-[#00e676] px-4 text-xs font-black text-black disabled:opacity-50">
+                    Start experiment now
+                  </button>
+                  <button type="button" onClick={() => void handleSavePricing({ experimentEnabled: false, activeAmountCents: config.pricing.defaultAmountCents }, 'Price experiment stopped')} disabled={saving} className="h-10 rounded-xl border border-red-400/35 bg-red-400/10 px-4 text-xs font-black text-red-100 disabled:opacity-50">
+                    Stop and use default
+                  </button>
+                  {winningPriceVariant && (
+                    <button type="button" onClick={() => void handleSavePricing({ experimentEnabled: false, defaultAmountCents: winningPriceVariant.amountCents, activeAmountCents: winningPriceVariant.amountCents, originalAmountCents: winningPriceVariant.amountCents }, 'Winning price set as default')} disabled={saving} className="h-10 rounded-xl border border-yellow-300/35 bg-yellow-300/10 px-4 text-xs font-black text-yellow-100 disabled:opacity-50">
+                      Set winner as default
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-4">
+                <h3 className="text-sm font-black text-white">Experiment sales since start</h3>
+                <p className="mt-1 text-xs text-white/45">Started: {formatIsoDate(config.pricing.experimentStartedAt)}</p>
+                <div className="mt-3 grid gap-2 md:grid-cols-3">
+                  {pricingVariants.map((variant) => (
+                    <div key={variant.amountCents} className={`rounded-xl border p-3 ${winningPriceVariant?.amountCents === variant.amountCents ? 'border-[#00e676]/45 bg-[#00e676]/10' : 'border-white/10 bg-[#121915]'}`}>
+                      <p className="text-lg font-black text-white">{formatMoneyFromCents(variant.amountCents)}</p>
+                      <p className="mt-1 text-xs text-white/55">{variant.purchases} purchases • {formatMoneyFromCents(variant.revenueCents)} revenue</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
           {activeTab === 'monetization' && (
             <div className="space-y-4 text-left">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
@@ -2315,62 +2659,6 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-4">
-                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                  <div>
-                    <h3 className="text-sm font-black text-white mb-1">Email delivery log</h3>
-                    <p className="text-[11px] text-white/45">Latest transactional emails with delivery attempts, failures, previews, and retry actions.</p>
-                  </div>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <button
-                      type="button"
-                      onClick={() => void handleEmailBackfill('verification')}
-                      disabled={Boolean(emailBackfillAction)}
-                      className="h-9 rounded-lg border border-[#00e676]/25 bg-[#00e676]/10 px-3 text-[11px] font-black text-[#00e676] hover:bg-[#00e676]/20 disabled:cursor-wait disabled:opacity-50"
-                    >
-                      {emailBackfillAction === 'verification' ? 'Sending...' : 'Resend verification'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void handleEmailBackfill('abandoned')}
-                      disabled={Boolean(emailBackfillAction)}
-                      className="h-9 rounded-lg border border-yellow-300/25 bg-yellow-300/10 px-3 text-[11px] font-black text-yellow-100 hover:bg-yellow-300/20 disabled:cursor-wait disabled:opacity-50"
-                    >
-                      {emailBackfillAction === 'abandoned' ? 'Sending...' : 'Resume checkout emails'}
-                    </button>
-                  </div>
-                </div>
-                <p className="mb-3 mt-2 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-[11px] leading-5 text-white/45">
-                  Recovery actions are rate-safe: verification sends one fresh link per unverified account, and abandoned checkout recovery sends only one reminder per old checkout that has no successful abandoned-checkout email.
-                </p>
-                {adminEmailEvents.length === 0 ? (
-                  <p className="rounded-xl bg-white/5 p-4 text-xs text-white/45">No email attempts have been logged yet.</p>
-                ) : (
-                  <div className="max-h-96 overflow-y-auto space-y-2">
-                    {adminEmailEvents.slice(0, 80).map((email) => (
-                      <div key={email.id} className="rounded-xl border border-white/10 bg-[#121915] p-3 text-xs">
-                        <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                          <div className="min-w-0">
-                            <p className="truncate font-black text-white">{email.subject}</p>
-                            <p className="text-white/45">{email.email} • {email.category} • {formatIsoDate(email.sentAt || email.createdAt)}</p>
-                            {email.error && <p className="mt-1 text-red-200">{email.error}</p>}
-                            {email.textBody && <details className="mt-2 text-white/55"><summary className="cursor-pointer font-bold text-[#00e676]">Preview</summary><pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-black/25 p-2">{email.textBody}</pre></details>}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => void handleRetryEmail(email.id)}
-                            disabled={retryingEmailId === email.id}
-                            className="h-8 rounded-lg border border-[#00e676]/25 bg-[#00e676]/10 px-3 text-[11px] font-black text-[#00e676] hover:bg-[#00e676]/20 disabled:cursor-wait disabled:opacity-50"
-                          >
-                            {retryingEmailId === email.id ? 'Retrying' : 'Retry'}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
               {selectedAdminUserProfile && (
                 <div className="fixed inset-0 z-[260] flex items-center justify-center bg-black/85 p-3 backdrop-blur-md">
                   <div className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-2xl border border-[#00e676]/25 bg-[#0d1a13] p-4 shadow-2xl">
@@ -2462,13 +2750,22 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                   <Mail className="h-4 w-4 text-[#00e676]" />
                   Emails
                 </h3>
-                {['email_verification', 'welcome', 'artist_ready', 'abandoned_checkout', 'feedback_request'].map((category) => {
-                  const count = adminEmailEvents.filter((email) => email.category.includes(category)).length;
+                {EMAIL_TEMPLATES.map((template) => {
+                  const count = adminEmailEvents.filter((email) => template.match(email.category)).length;
                   return (
-                    <div key={category} className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs">
-                      <span className="font-bold text-white/60">{category.replace(/_/g, ' ')}</span>
+                    <button
+                      key={template.key}
+                      type="button"
+                      onClick={() => setSelectedEmailTemplateKey(template.key)}
+                      className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-xs ${
+                        selectedEmailTemplateKey === template.key
+                          ? 'border-[#00e676]/45 bg-[#00e676]/10 text-[#00e676]'
+                          : 'border-white/10 bg-white/[0.04] text-white/60 hover:border-[#00e676]/25'
+                      }`}
+                    >
+                      <span className="font-bold">{template.label}</span>
                       <span className="font-mono font-black text-[#00e676]">{count}</span>
-                    </div>
+                    </button>
                   );
                 })}
                 <div className="grid gap-2 pt-2">
@@ -2492,14 +2789,14 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
               </aside>
               <section className="rounded-2xl border border-white/10 bg-[#0b100d] p-4">
                 <div className="mb-3">
-                  <h3 className="text-sm font-black text-white">Delivery log</h3>
-                  <p className="mt-1 text-[11px] text-white/45">Current and previous emails by date, user, status, provider, and preview.</p>
+                  <h3 className="text-sm font-black text-white">{selectedEmailTemplate.label}</h3>
+                  <p className="mt-1 text-[11px] text-white/45">Showing only this email template by date, user, status, provider, and preview.</p>
                 </div>
-                {adminEmailEvents.length === 0 ? (
-                  <p className="rounded-xl bg-white/5 p-4 text-xs text-white/45">No email attempts have been logged yet.</p>
+                {selectedEmailEvents.length === 0 ? (
+                  <p className="rounded-xl bg-white/5 p-4 text-xs text-white/45">No logged sends for this email yet.</p>
                 ) : (
                   <div className="max-h-[62vh] space-y-2 overflow-y-auto">
-                    {adminEmailEvents.map((email) => (
+                    {selectedEmailEvents.map((email) => (
                       <div key={email.id} className="rounded-xl border border-white/10 bg-[#121915] p-3 text-xs">
                         <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                           <div className="min-w-0">
@@ -2514,22 +2811,56 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                             </div>
                             <p className="mt-1 text-white/45">{email.email} • {email.category} • {formatIsoDate(email.sentAt || email.createdAt)}</p>
                             {email.error && <p className="mt-1 text-red-200">{email.error}</p>}
-                            {email.textBody && <details className="mt-2 text-white/55"><summary className="cursor-pointer font-bold text-[#00e676]">Preview</summary><pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-black/25 p-2">{email.textBody}</pre></details>}
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => void handleRetryEmail(email.id)}
-                            disabled={retryingEmailId === email.id}
-                            className="h-8 rounded-lg border border-[#00e676]/25 bg-[#00e676]/10 px-3 text-[11px] font-black text-[#00e676] hover:bg-[#00e676]/20 disabled:cursor-wait disabled:opacity-50"
-                          >
-                            {retryingEmailId === email.id ? 'Retrying' : 'Retry'}
-                          </button>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setPreviewEmailEvent(email)}
+                              className="h-8 rounded-lg border border-white/10 bg-white/5 px-3 text-[11px] font-black text-white/70 hover:bg-white/10"
+                            >
+                              Preview
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleRetryEmail(email.id)}
+                              disabled={retryingEmailId === email.id}
+                              className="h-8 rounded-lg border border-[#00e676]/25 bg-[#00e676]/10 px-3 text-[11px] font-black text-[#00e676] hover:bg-[#00e676]/20 disabled:cursor-wait disabled:opacity-50"
+                            >
+                              {retryingEmailId === email.id ? 'Retrying' : 'Retry'}
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ))}
                   </div>
                 )}
               </section>
+              {previewEmailEvent && (
+                <div className="fixed inset-0 z-[270] flex items-center justify-center bg-black/85 p-3 backdrop-blur-md">
+                  <div className="max-h-[92vh] w-full max-w-4xl overflow-hidden rounded-2xl border border-[#00e676]/25 bg-[#0d1a13] shadow-2xl">
+                    <div className="flex items-start justify-between gap-3 border-b border-white/10 p-4">
+                      <div className="min-w-0">
+                        <h3 className="truncate text-lg font-black text-white">{previewEmailEvent.subject}</h3>
+                        <p className="mt-1 text-xs text-white/45">{previewEmailEvent.email} • {previewEmailEvent.category}</p>
+                      </div>
+                      <button type="button" onClick={() => setPreviewEmailEvent(null)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-white/65 hover:text-white">
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div className="max-h-[74vh] overflow-y-auto bg-white p-4 text-black">
+                      {previewEmailEvent.htmlBody ? (
+                        <iframe
+                          title="Email preview"
+                          srcDoc={previewEmailEvent.htmlBody}
+                          className="h-[680px] w-full rounded-lg border border-slate-200 bg-white"
+                        />
+                      ) : (
+                        <pre className="whitespace-pre-wrap rounded-lg bg-slate-100 p-4 text-sm leading-6">{previewEmailEvent.textBody || 'No body stored for this email.'}</pre>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

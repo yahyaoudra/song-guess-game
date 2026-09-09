@@ -20,6 +20,8 @@ interface PaywallModalProps {
   isAuthenticated: boolean;
   stripeConfigured: boolean;
   databaseConfigured: boolean;
+  activePriceCents?: number;
+  originalPriceCents?: number;
 }
 
 export const PaywallModal: React.FC<PaywallModalProps> = ({
@@ -28,7 +30,9 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
   onCheckout,
   isAuthenticated,
   stripeConfigured,
-  databaseConfigured
+  databaseConfigured,
+  activePriceCents = 399,
+  originalPriceCents = 399
 }) => {
   const carouselArtists = useMemo(() => {
     const wanted = ['Taylor Swift', 'Drake', 'Justin Bieber', 'Ariana Grande', 'Bruno Mars', 'Pitbull'];
@@ -50,6 +54,9 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
     : !stripeConfigured
     ? 'Add Stripe keys'
     : 'Unlock unlimited';
+  const activePrice = `$${(activePriceCents / 100).toFixed(2)}`;
+  const originalPrice = `$${(originalPriceCents / 100).toFixed(2)}`;
+  const isDiscounted = originalPriceCents > activePriceCents;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-black/82 p-3 backdrop-blur-md sm:p-4">
@@ -73,7 +80,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
               Play unlimited Song Guess
             </h2>
             <p className="mt-3 max-w-lg text-xs leading-relaxed text-white/58 sm:mt-4 sm:text-sm">
-              <strong className="font-black text-white">One $3.99 payment for one week unlimited access.</strong> No subscription, no daily wall, and no ads while your pass is active.
+              <strong className="font-black text-white">One {activePrice} payment for one week unlimited access.</strong> No subscription, no daily wall, and no ads while your pass is active.
             </p>
 
             <div className="mt-4 grid gap-2 sm:mt-6 sm:grid-cols-2">
@@ -95,7 +102,8 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
 
             <div className="mt-5 flex flex-col gap-3 sm:mt-7">
               <div className="inline-flex w-fit items-center gap-2 rounded-full border border-[#00e676]/35 bg-[#00e676]/10 px-3 py-1.5 text-xs font-black text-[#00e676]">
-                $3.99 <span className="text-white">7-day pass</span>
+                {isDiscounted && <span className="text-white/45 line-through">{originalPrice}</span>}
+                <span>{activePrice}</span> <span className="text-white">7-day pass</span>
               </div>
               <button
                 onClick={isAuthenticated && stripeConfigured && databaseConfigured ? onCheckout : onLogin}

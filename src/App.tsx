@@ -158,6 +158,8 @@ function clearPersistedActiveGameState(): void {
 export default function App() {
   const [restoredActiveGame] = useState<PersistedActiveGameState | null>(() => getPersistedActiveGameState());
   const [publicConfig, setPublicConfig] = useState(getInitialPublicRuntimeConfig());
+  const activePriceCents = publicConfig.pricing?.activeAmountCents || 399;
+  const originalPriceCents = publicConfig.pricing?.originalAmountCents || publicConfig.pricing?.defaultAmountCents || 399;
   const [settings, setSettings] = useState<UserSettings>(() => {
     const stored = getStoredSettings();
     return restoredActiveGame ? { ...stored, selectedCountry: restoredActiveGame.selectedCountry } : stored;
@@ -524,11 +526,13 @@ export default function App() {
         const checkoutStatus = urlParams.get('checkout');
         if (checkoutStatus === 'success') {
           const checkoutSessionId = urlParams.get('session_id') || '';
-          trackPurchaseOnce(checkoutSessionId);
+          const checkoutAmountCents = Number(urlParams.get('amount_cents') || activePriceCents);
+          trackPurchaseOnce(checkoutSessionId, Number.isFinite(checkoutAmountCents) ? checkoutAmountCents : activePriceCents);
           setAccessNotice('Unlimited access is active. Enjoy unlimited play and no ads.');
           void refreshAccessState();
           urlParams.delete('checkout');
           urlParams.delete('session_id');
+          urlParams.delete('amount_cents');
           const nextQuery = urlParams.toString();
           window.history.replaceState({}, document.title, `${pathname}${nextQuery ? `?${nextQuery}` : ''}${hash}`);
         } else if (checkoutStatus === 'cancelled') {
@@ -1063,11 +1067,11 @@ export default function App() {
     try {
       trackEventOnce('begin_checkout', checkoutAttemptIdRef.current, {
         currency: 'USD',
-        value: 3.99,
+        value: Number((activePriceCents / 100).toFixed(2)),
         items: [{
           item_id: 'song_guess_unlimited_7_day_pass',
           item_name: 'Song Guess Unlimited - 7 Day Pass',
-          price: 3.99,
+          price: Number((activePriceCents / 100).toFixed(2)),
           quantity: 1
         }]
       });
@@ -1083,7 +1087,7 @@ export default function App() {
         setIsAuthOpen(true);
       }
     }
-  }, [authSession.authenticated]);
+  }, [activePriceCents, authSession.authenticated]);
 
   const requireAlbumAccess = useCallback(() => {
     setShowAlbumAccessTooltip(true);
@@ -1661,6 +1665,7 @@ export default function App() {
         featuredArtistSlugs: config.featuredArtistSlugs,
         customCountries: config.customCountries,
         customPacks: config.customPacks,
+        pricing: config.pricing,
         adSlots: config.adSlots,
         robotsTxt: config.robotsTxt
       };
@@ -2469,6 +2474,8 @@ export default function App() {
           isAuthenticated={authSession.authenticated}
           stripeConfigured={authSession.stripeConfigured}
           databaseConfigured={authSession.databaseConfigured}
+          activePriceCents={activePriceCents}
+          originalPriceCents={originalPriceCents}
         />
       )}
 
@@ -3221,6 +3228,8 @@ export default function App() {
           isAuthenticated={authSession.authenticated}
           stripeConfigured={authSession.stripeConfigured}
           databaseConfigured={authSession.databaseConfigured}
+          activePriceCents={activePriceCents}
+          originalPriceCents={originalPriceCents}
         />
       )}
 

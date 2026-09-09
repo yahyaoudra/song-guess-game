@@ -154,6 +154,13 @@ export function createDefaultPublicRuntimeConfig(): PublicRuntimeConfig {
       googleAdsenseClientId: '',
       searchConsoleVerification: ''
     },
+    pricing: {
+      defaultAmountCents: 399,
+      activeAmountCents: 399,
+      originalAmountCents: 399,
+      experimentEnabled: false,
+      experimentVariants: []
+    },
     pageConfigs,
     routeConfigs: {},
     featuredArtistSlugs: [],

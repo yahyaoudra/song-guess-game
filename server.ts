@@ -2351,6 +2351,60 @@ function sanitizeDeletedRouteRedirects(raw: unknown): Record<string, string> {
   return redirects;
 }
 
+function clampPriceCents(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(99, Math.min(9999, Math.round(parsed)));
+}
+
+function clampPriceStepCents(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(1, Math.min(1000, Math.round(parsed)));
+}
+
+function buildPriceVariants(minCents: number, maxCents: number, stepCents: number): number[] {
+  const low = Math.min(minCents, maxCents);
+  const high = Math.max(minCents, maxCents);
+  const step = Math.max(1, stepCents);
+  const variants: number[] = [];
+  for (let amount = low; amount <= high; amount += step) {
+    variants.push(amount);
+    if (variants.length >= 24) break;
+  }
+  if (!variants.includes(high)) variants.push(high);
+  return Array.from(new Set(variants)).sort((left, right) => left - right);
+}
+
+function sanitizePricing(raw: unknown): AdminConfigState['pricing'] {
+  const source = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+  const defaultAmountCents = clampPriceCents(source.defaultAmountCents, WEEKLY_UNLOCK_AMOUNT_CENTS);
+  const experimentMinAmountCents = clampPriceCents(source.experimentMinAmountCents, 299);
+  const experimentMaxAmountCents = clampPriceCents(source.experimentMaxAmountCents, defaultAmountCents);
+  const experimentStepCents = clampPriceStepCents(source.experimentStepCents, 50);
+  const experimentEnabled = source.experimentEnabled === true;
+  const variants = buildPriceVariants(experimentMinAmountCents, experimentMaxAmountCents, experimentStepCents);
+  const activeAmountCents = experimentEnabled
+    ? variants[Math.floor(Date.now() / (60 * 60 * 1000)) % variants.length] || defaultAmountCents
+    : clampPriceCents(source.activeAmountCents, defaultAmountCents);
+
+  return {
+    defaultAmountCents,
+    activeAmountCents,
+    originalAmountCents: defaultAmountCents,
+    experimentEnabled,
+    experimentStartedAt: safeText(source.experimentStartedAt, 40),
+    experimentMinAmountCents,
+    experimentMaxAmountCents,
+    experimentStepCents,
+    experimentVariants: variants.map((amountCents) => ({
+      amountCents,
+      purchases: 0,
+      revenueCents: 0
+    }))
+  };
+}
+
 function sanitizeAdminConfig(raw: unknown, req?: Request): AdminConfigState {
   const source = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
   const appUrl = getEffectiveAppUrl(req, { appUrl: safeText(source.appUrl, 2048) || getEnvPublicAppUrl(req) });
@@ -2359,6 +2413,7 @@ function sanitizeAdminConfig(raw: unknown, req?: Request): AdminConfigState {
     version: CONFIG_VERSION,
     appUrl,
     integrations: sanitizeIntegrations(source.integrations),
+    pricing: sanitizePricing(source.pricing),
     pageConfigs: sanitizePageConfigs(source.pageConfigs, appUrl),
     routeConfigs: sanitizeRouteConfigs(source.routeConfigs, appUrl),
     featuredArtistSlugs: sanitizeFeaturedArtistSlugs(source.featuredArtistSlugs),
@@ -3126,6 +3181,7 @@ function buildPublicConfig(
     host: getEffectiveHost(appUrl),
     recaptchaSiteKey: getRecaptchaSiteKey(),
     integrations: sanitizeIntegrations(config.integrations),
+    pricing: sanitizePricing(config.pricing),
     pageConfigs: sanitizePageConfigs(config.pageConfigs, appUrl),
     routeConfigs: sanitizeRouteConfigs(config.routeConfigs, appUrl),
     featuredArtistSlugs: sanitizeFeaturedArtistSlugs(config.featuredArtistSlugs),
@@ -6131,6 +6187,9 @@ async function startServer() {
         res.status(403).json({ error: 'Please verify your email before unlocking unlimited play.' });
         return;
       }
+      const adminConfig = await getAdminConfig(req);
+      const pricing = sanitizePricing(adminConfig.pricing);
+      const checkoutAmountCents = pricing.activeAmountCents || WEEKLY_UNLOCK_AMOUNT_CENTS;
       const appUrl = getEffectiveAppUrl(req);
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
@@ -6140,7 +6199,7 @@ async function startServer() {
             quantity: 1,
             price_data: {
               currency: 'usd',
-              unit_amount: WEEKLY_UNLOCK_AMOUNT_CENTS,
+              unit_amount: checkoutAmountCents,
               product_data: {
                 name: 'Song Guess Unlimited - 7 Day Pass',
                 description: 'Unlimited Song Guess games for one week. Ads hidden while access is active.'
@@ -6148,11 +6207,21 @@ async function startServer() {
             }
           }
         ],
-        success_url: `${appUrl}/play?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+        success_url: `${appUrl}/play?checkout=success&session_id={CHECKOUT_SESSION_ID}&amount_cents=${checkoutAmountCents}`,
         cancel_url: `${appUrl}/play?checkout=cancelled`,
-        metadata: { userId: user.id },
+        metadata: {
+          userId: user.id,
+          amountCents: String(checkoutAmountCents),
+          pricingExperiment: pricing.experimentEnabled ? 'active' : 'default',
+          pricingExperimentStartedAt: pricing.experimentStartedAt || ''
+        },
         payment_intent_data: {
-          metadata: { userId: user.id }
+          metadata: {
+            userId: user.id,
+            amountCents: String(checkoutAmountCents),
+            pricingExperiment: pricing.experimentEnabled ? 'active' : 'default',
+            pricingExperimentStartedAt: pricing.experimentStartedAt || ''
+          }
         }
       });
       await logUserJourneyEvent({
@@ -6161,7 +6230,7 @@ async function startServer() {
         eventType: 'checkout_started',
         status: 'pending',
         detail: 'Stripe Checkout session created',
-        metadata: { stripeSessionId: session.id }
+        metadata: { stripeSessionId: session.id, amountCents: checkoutAmountCents }
       });
       await recordAbandonedCheckoutStart(user, session).catch((error) => {
         console.warn('Abandoned checkout tracker failed:', error instanceof Error ? error.message : error);
@@ -6862,7 +6931,7 @@ async function startServer() {
       const hasPaid = payments.some((payment: any) => ['paid', 'succeeded'].includes(String(payment.status)));
       const segments = [
         hasPaid ? 'Purchaser' : 'Free account',
-        user.accessUntil ? 'Active unlimited' : '',
+        user.accessUntil && Date.parse(String(user.accessUntil)) > Date.now() ? 'Active unlimited' : '',
         Number(leaderboard[0]?.points || 0) >= 4000 ? 'Top player' : '',
         user.lastSeenAt && Date.parse(String(user.lastSeenAt)) > Date.parse(String(user.createdAt)) + 24 * 60 * 60 * 1000 ? 'Returning player' : '',
         queuedRequests.some((request: any) => request.status === 'queued') ? 'Queued requester' : '',
