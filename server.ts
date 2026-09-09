@@ -254,8 +254,6 @@ async function ensureDatabaseSchema(): Promise<void> {
       email_verification_token_hash text,
       email_verification_expires_at timestamptz,
       google_sub text UNIQUE,
-      mailersend_registered_at timestamptz,
-      mailersend_registration_source text,
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now(),
       last_seen_at timestamptz
@@ -419,8 +417,6 @@ async function ensureDatabaseSchema(): Promise<void> {
   await queryDb('ALTER TABLE sg_users ADD COLUMN IF NOT EXISTS pending_email text');
   await queryDb('ALTER TABLE sg_users ADD COLUMN IF NOT EXISTS pending_email_verification_token_hash text');
   await queryDb('ALTER TABLE sg_users ADD COLUMN IF NOT EXISTS pending_email_verification_expires_at timestamptz');
-  await queryDb('ALTER TABLE sg_users ADD COLUMN IF NOT EXISTS mailersend_registered_at timestamptz');
-  await queryDb('ALTER TABLE sg_users ADD COLUMN IF NOT EXISTS mailersend_registration_source text');
   await queryDb('ALTER TABLE sg_payments ADD COLUMN IF NOT EXISTS receipt_url text');
   await queryDb('ALTER TABLE sg_abandoned_checkouts ADD COLUMN IF NOT EXISTS name text NOT NULL DEFAULT \'\'');
   await queryDb('ALTER TABLE sg_abandoned_checkouts ADD COLUMN IF NOT EXISTS last_reminder_sent_at timestamptz');
@@ -465,7 +461,7 @@ function getStripeFailureMessage(rawCode?: string, rawMessage?: string): string 
 
 type EmailProviderConfig =
   | { provider: 'ses'; region: string; fromEmail: string; fromName: string }
-  | { provider: 'resend' | 'brevo' | 'mailersend'; apiKey: string; fromEmail: string; fromName: string };
+  | { provider: 'resend' | 'brevo'; apiKey: string; fromEmail: string; fromName: string };
 
 function getEmailProviderConfigs(): EmailProviderConfig[] {
   const providers: EmailProviderConfig[] = [];
@@ -502,17 +498,6 @@ function getEmailProviderConfigs(): EmailProviderConfig[] {
     });
   }
 
-  const mailerSendApiKey = process.env.MAILERSEND_API_KEY?.trim() || '';
-  const mailerSendFromEmail = process.env.MAILERSEND_FROM_EMAIL?.trim() || '';
-  if (mailerSendApiKey && mailerSendFromEmail) {
-    providers.push({
-      provider: 'mailersend',
-      apiKey: mailerSendApiKey,
-      fromEmail: mailerSendFromEmail,
-      fromName: process.env.MAILERSEND_FROM_NAME?.trim() || 'Song Guess Game'
-    });
-  }
-
   return providers;
 }
 
@@ -523,25 +508,6 @@ function formatEmailAddress(name: string, email: string): string {
 
 function isEmailProviderConfigured(): boolean {
   return getEmailProviderConfigs().length > 0;
-}
-
-function isMailerSendConfigured(): boolean {
-  return Boolean(
-    process.env.MAILERSEND_API_KEY?.trim() &&
-    process.env.MAILERSEND_FROM_EMAIL?.trim()
-  );
-}
-
-async function markMailerSendRegistered(userId: string, source: 'password' | 'google'): Promise<void> {
-  if (!isDatabaseConfigured()) return;
-  await queryDb(
-    `UPDATE sg_users
-     SET mailersend_registered_at = COALESCE(mailersend_registered_at, now()),
-         mailersend_registration_source = COALESCE(mailersend_registration_source, $2),
-         updated_at = now()
-     WHERE id = $1`,
-    [userId, source]
-  );
 }
 
 async function logEmailEvent(event: {
@@ -734,9 +700,7 @@ async function sendTransactionalEmail(toEmail: string, toName: string, subject: 
       const response = await fetch(
         emailProvider.provider === 'resend'
           ? RESEND_EMAIL_API_URL
-          : emailProvider.provider === 'brevo'
-          ? BREVO_EMAIL_API_URL
-          : 'https://api.mailersend.com/v1/email',
+          : BREVO_EMAIL_API_URL,
         {
           method: 'POST',
           headers: {
@@ -755,19 +719,11 @@ async function sendTransactionalEmail(toEmail: string, toName: string, subject: 
                   text,
                   html
                 }
-              : emailProvider.provider === 'brevo'
-              ? {
+              : {
                   sender: { email: emailProvider.fromEmail, name: emailProvider.fromName },
                   to: [{ email: toEmail, name: toName || toEmail }],
                   subject,
                   htmlContent: html
-                }
-              : {
-                  from: { email: emailProvider.fromEmail, name: emailProvider.fromName },
-                  to: [{ email: toEmail, name: toName || toEmail }],
-                  subject,
-                  text,
-                  html
                 }
           )
         }
@@ -775,7 +731,7 @@ async function sendTransactionalEmail(toEmail: string, toName: string, subject: 
 
       if (!response.ok) {
         const body = await response.text().catch(() => '');
-        const providerLabel = emailProvider.provider === 'resend' ? 'Resend' : emailProvider.provider === 'brevo' ? 'Brevo' : 'MailerSend';
+        const providerLabel = emailProvider.provider === 'resend' ? 'Resend' : 'Brevo';
         const message = `${providerLabel} returned ${response.status}: ${body.slice(0, 300)}`;
         lastError = new Error(message);
         await logEmailEvent({ email: toEmail, name: toName, subject, category, status: 'failed', error: message, textBody: text, htmlBody: html });
@@ -5438,9 +5394,6 @@ async function startServer() {
          VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $5 THEN NULL ELSE now() + interval '24 hours' END)`,
         [userId, email, passwordHash, name, skipEmailVerification, skipEmailVerification ? null : verifyHash]
       );
-      await markMailerSendRegistered(userId, 'password').catch((error) => {
-        console.warn('Email provider registration marker failed:', error instanceof Error ? error.message : error);
-      });
       await logUserJourneyEvent({
         userId,
         email,
@@ -5808,9 +5761,6 @@ async function startServer() {
         ]
       );
 
-      await markMailerSendRegistered(rows[0].id, 'google').catch((error) => {
-        console.warn('Email provider registration marker failed:', error instanceof Error ? error.message : error);
-      });
       if (rows[0].created) {
         await logUserJourneyEvent({
           userId: rows[0].id,
@@ -6203,8 +6153,6 @@ async function startServer() {
       const totalRows = await queryDb<{ total: string }>('SELECT count(*)::text AS total FROM sg_users');
       const users = await queryDb<AdminUserRecord>(
         `SELECT u.id, u.email, u.name, u.email_verified AS "emailVerified",
-                u.mailersend_registered_at AS "mailerSendRegisteredAt",
-                u.mailersend_registration_source AS "mailerSendRegistrationSource",
                 e.access_until AS "accessUntil", u.created_at AS "createdAt", u.last_seen_at AS "lastSeenAt"
          FROM sg_users u
          LEFT JOIN sg_entitlements e ON e.user_id = u.id
@@ -6329,7 +6277,7 @@ async function startServer() {
 
   app.get('/api/admin/email-events', requireAdmin, async (_req, res) => {
     if (!isDatabaseConfigured()) {
-      res.json({ emails: [], mailerSendConfigured: isEmailProviderConfigured(), databaseConfigured: false });
+      res.json({ emails: [], emailProviderConfigured: isEmailProviderConfigured(), databaseConfigured: false });
       return;
     }
     try {
@@ -6342,7 +6290,7 @@ async function startServer() {
          ORDER BY created_at DESC
          LIMIT 500`
       );
-      res.json({ emails, mailerSendConfigured: isEmailProviderConfigured(), databaseConfigured: true });
+      res.json({ emails, emailProviderConfigured: isEmailProviderConfigured(), databaseConfigured: true });
     } catch {
       res.status(503).json({ error: 'Could not load email events' });
     }
@@ -6527,8 +6475,6 @@ async function startServer() {
     try {
       const users = await queryDb<AdminUserRecord>(
         `SELECT u.id, u.email, u.name, u.email_verified AS "emailVerified",
-                u.mailersend_registered_at AS "mailerSendRegisteredAt",
-                u.mailersend_registration_source AS "mailerSendRegistrationSource",
                 e.access_until AS "accessUntil", u.created_at AS "createdAt", u.last_seen_at AS "lastSeenAt"
          FROM sg_users u
          LEFT JOIN sg_entitlements e ON e.user_id = u.id

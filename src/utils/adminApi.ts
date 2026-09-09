@@ -181,7 +181,7 @@ export async function fetchAdminFeatureAnalytics(): Promise<AdminFeatureAnalytic
 }
 
 export async function fetchAdminEmailEvents(): Promise<AdminEmailEvent[]> {
-  const body = await requestJson<{ emails: AdminEmailEvent[]; mailerSendConfigured: boolean }>('/api/admin/email-events');
+  const body = await requestJson<{ emails: AdminEmailEvent[]; emailProviderConfigured: boolean }>('/api/admin/email-events');
   return body.emails;
 }
 

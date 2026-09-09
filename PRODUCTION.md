@@ -221,7 +221,7 @@ The app serves:
 
 ## AWS SES Email
 
-AWS SES is the primary transactional email sender. Resend, Brevo, and MailerSend are only fallback providers if they are configured and SES fails.
+AWS SES is the primary transactional email sender. Resend and Brevo are fallback providers if they are configured and SES fails.
 
 1. In AWS SES, choose one region and stay on it, for example `us-east-1`.
 2. Verify `songguessgame.online` as an SES identity.
