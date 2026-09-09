@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   BarChart3,
+  CalendarDays,
   Check,
   CreditCard,
   Eye,
@@ -11,6 +12,7 @@ import {
   Link2,
   Lock,
   LogOut,
+  Mail,
   Music2,
   Plus,
   RefreshCw,
@@ -20,7 +22,8 @@ import {
   Star,
   Tags,
   Trash2,
-  Users
+  Users,
+  X
 } from 'lucide-react';
 import { AdminAdSlot, AdminConfigState, AdminCustomCountry, AdminCustomPack, AdminCustomPackType, AdminEmailEvent, AdminFeatureAnalytics, AdminPageConfig, AdminUserProfile, AdminUserSegments, AdPlacementLocation, AdminUserRecord, PaymentRecord, RequestedArtist, SpotifyPlaylistSuggestion } from '../adminTypes';
 import { COUNTRIES } from '../data/countries';
@@ -55,7 +58,7 @@ import { baseArtistSlug, getArtistChallenges, getGenreChallenges, orderArtistsBy
 import { createDefaultRouteConfig } from '../utils/runtimeConfig';
 import { getSafeImageUrl } from '../utils/safeUrl';
 
-type AdminTab = 'overview' | 'seo' | 'ads' | 'integrations' | 'packs' | 'genrePacks' | 'countryPacks' | 'monetization' | 'activity' | 'robots' | 'security';
+type AdminTab = 'overview' | 'seo' | 'ads' | 'integrations' | 'packs' | 'genrePacks' | 'countryPacks' | 'decadePacks' | 'themePacks' | 'emails' | 'monetization' | 'activity' | 'robots' | 'security';
 type SeoTargetType = 'home' | 'country' | 'genre' | 'artist';
 type ArtistPackSort = 'name-asc' | 'name-desc' | 'songs-desc' | 'songs-asc' | 'updated-desc' | 'updated-asc' | 'played-desc';
 type ArtistPackStatusFilter = 'all' | 'ready' | 'queued' | 'pending' | 'needs-update';
@@ -75,6 +78,9 @@ const TABS: Array<{ id: AdminTab; label: string; icon: React.ElementType }> = [
   { id: 'packs', label: 'Artist Packs', icon: Music2 },
   { id: 'genrePacks', label: 'Genre Packs', icon: Tags },
   { id: 'countryPacks', label: 'Country Packs', icon: Globe },
+  { id: 'decadePacks', label: 'Decades', icon: CalendarDays },
+  { id: 'themePacks', label: 'Themes', icon: Star },
+  { id: 'emails', label: 'Emails', icon: Mail },
   { id: 'monetization', label: 'Monetization', icon: CreditCard },
   { id: 'activity', label: 'Activity', icon: Activity },
   { id: 'robots', label: 'Robots', icon: FileText },
@@ -109,6 +115,14 @@ function formatIsoDate(value?: string): string {
   const timestamp = Date.parse(value);
   if (!Number.isFinite(timestamp)) return 'Unknown';
   return formatDate(timestamp);
+}
+
+function getEmailProviderLabel(event: AdminEmailEvent): string {
+  if (event.providerMessageId) return event.providerMessageId.split(':')[0].toUpperCase();
+  if (event.error?.toLowerCase().includes('ses')) return 'SES';
+  if (event.error?.toLowerCase().includes('resend')) return 'RESEND';
+  if (event.error?.toLowerCase().includes('brevo')) return 'BREVO';
+  return event.status === 'sent' ? 'EMAIL' : 'NOT SENT';
 }
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
@@ -175,6 +189,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
   const [playlistSuggestions, setPlaylistSuggestions] = useState<SpotifyPlaylistSuggestion[]>([]);
   const [searchingPlaylists, setSearchingPlaylists] = useState(false);
   const [savingPlaylistId, setSavingPlaylistId] = useState('');
+  const [isPlaylistEditorOpen, setIsPlaylistEditorOpen] = useState(false);
   const [editingPackId, setEditingPackId] = useState('');
   const [packEditDraft, setPackEditDraft] = useState({
     title: '',
@@ -182,6 +197,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
     genreName: '',
     countryCode: 'US'
   });
+  const [isCountryEditorOpen, setIsCountryEditorOpen] = useState(false);
   const [editingCountryCode, setEditingCountryCode] = useState('');
   const [countryDraft, setCountryDraft] = useState({
     code: '',
@@ -324,17 +340,58 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
 
   const customPacks = config?.customPacks || [];
   const customCountries = config?.customCountries || [];
+  const activePackManagerType: AdminCustomPackType | null = useMemo(() => {
+    if (activeTab === 'countryPacks') return 'country';
+    if (activeTab === 'genrePacks') return 'genre';
+    if (activeTab === 'decadePacks') return 'decade';
+    if (activeTab === 'themePacks') return 'theme';
+    return null;
+  }, [activeTab]);
+  const activePackManagerLabel = activePackManagerType
+    ? activePackManagerType === 'country'
+      ? 'Country'
+      : activePackManagerType === 'genre'
+      ? 'Genre'
+      : activePackManagerType === 'decade'
+      ? 'Decade'
+      : 'Theme'
+    : '';
   const visibleCustomPacks = useMemo(() => {
-    if (activeTab === 'genrePacks') return customPacks.filter((pack) => pack.packType === 'genre');
-    if (activeTab === 'countryPacks') return customPacks.filter((pack) => pack.packType === 'country');
+    if (activePackManagerType) return customPacks.filter((pack) => pack.packType === activePackManagerType);
     return customPacks;
-  }, [activeTab, customPacks]);
+  }, [activePackManagerType, customPacks]);
   const genrePackSummaries = useMemo(() => {
     return genreChallenges.map((genre) => ({
       ...genre,
       customCount: customPacks.filter((pack) => pack.packType === 'genre' && pack.genreSlug === genre.slug).length
     }));
   }, [customPacks, genreChallenges]);
+  const decadePackSummaries = useMemo(() => {
+    const decadeSlugs = new Set(['70s', '80s', '90s', '2000s', '2010s', '2020s']);
+    return genreChallenges
+      .filter((genre) => decadeSlugs.has(genre.slug))
+      .map((genre) => ({
+        ...genre,
+        customCount: customPacks.filter((pack) => pack.packType === 'decade' && pack.genreSlug === genre.slug).length
+      }));
+  }, [customPacks, genreChallenges]);
+  const themePackSummaries = useMemo(() => {
+    const bySlug = new Map<string, { slug: string; name: string; description: string; customCount: number; songsCount: number }>();
+    customPacks
+      .filter((pack) => pack.packType === 'theme')
+      .forEach((pack) => {
+        const slug = pack.genreSlug || pack.id;
+        const current = bySlug.get(slug);
+        bySlug.set(slug, {
+          slug,
+          name: pack.genreName || pack.category || pack.title,
+          description: pack.description || 'Manual theme playlist pack',
+          customCount: (current?.customCount || 0) + 1,
+          songsCount: (current?.songsCount || 0) + (pack.songs?.length || pack.songsCount || pack.songIds.length)
+        });
+      });
+    return Array.from(bySlug.values()).sort((left, right) => left.name.localeCompare(right.name));
+  }, [customPacks]);
   const countryPackSummaries = useMemo(() => {
     const byCode = new Map([...COUNTRIES, ...customCountries].map((country) => [country.code, country]));
     return Array.from(byCode.values()).map((country) => ({
@@ -350,6 +407,8 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
   useEffect(() => {
     if (activeTab === 'genrePacks') setPlaylistPackType('genre');
     if (activeTab === 'countryPacks') setPlaylistPackType('country');
+    if (activeTab === 'decadePacks') setPlaylistPackType('decade');
+    if (activeTab === 'themePacks') setPlaylistPackType('theme');
   }, [activeTab]);
 
   useEffect(() => {
@@ -641,21 +700,22 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
   const handleAddPlaylistPack = async (playlist: SpotifyPlaylistSuggestion | null = null) => {
     const playlistIdOrUrl = playlist?.id || playlistQuery.trim();
     if (!playlistIdOrUrl) return;
-    const effectivePackType: AdminCustomPackType =
-      activeTab === 'countryPacks' ? 'country' : activeTab === 'genrePacks' ? 'genre' : playlistPackType;
+    const effectivePackType: AdminCustomPackType = activePackManagerType || playlistPackType;
     setSavingPlaylistId(playlist?.id || playlistIdOrUrl);
     setAuthError(null);
     try {
+      const groupName = playlistGenreName.trim() || playlist?.name || playlistTitle.trim();
       const result = await addAdminSpotifyPlaylistPack({
         playlistIdOrUrl,
         packType: effectivePackType,
         title: playlistTitle.trim() || playlist?.name,
         countryCode: effectivePackType === 'country' ? playlistCountryCode : undefined,
-        genreName: effectivePackType === 'genre' ? playlistGenreName.trim() || playlist?.name : undefined
+        genreName: effectivePackType === 'genre' || effectivePackType === 'decade' || effectivePackType === 'theme' ? groupName : undefined
       });
       setConfig(result.config);
       onConfigChanged?.(result.config);
       showToast(`${result.pack.title} added`);
+      setIsPlaylistEditorOpen(false);
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : 'Could not add playlist pack');
     } finally {
@@ -704,6 +764,8 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
 
   const beginPackEdit = (pack: AdminCustomPack) => {
     setEditingPackId(pack.id);
+    setPlaylistSuggestions([]);
+    setIsPlaylistEditorOpen(true);
     setPackEditDraft({
       title: pack.title,
       description: pack.description || '',
@@ -723,14 +785,15 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
           if (pack.id !== packId) return pack;
           const title = packEditDraft.title.trim() || pack.title;
           const genreName = packEditDraft.genreName.trim() || pack.genreName || pack.category;
+          const hasGroupName = pack.packType === 'genre' || pack.packType === 'decade' || pack.packType === 'theme';
           return {
             ...pack,
             title,
             description: packEditDraft.description.trim() || pack.description,
-            category: pack.packType === 'genre' ? genreName : pack.category,
+            category: hasGroupName ? genreName : pack.category,
             countryCode: pack.packType === 'country' ? packEditDraft.countryCode : pack.countryCode,
-            genreName: pack.packType === 'genre' ? genreName : pack.genreName,
-            genreSlug: pack.packType === 'genre' ? genreName.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') : pack.genreSlug,
+            genreName: hasGroupName ? genreName : pack.genreName,
+            genreSlug: hasGroupName ? genreName.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') : pack.genreSlug,
             updatedAt: new Date().toISOString()
           };
         })
@@ -738,6 +801,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
       setConfig(nextConfig);
       onConfigChanged?.(nextConfig);
       setEditingPackId('');
+      setIsPlaylistEditorOpen(false);
       showToast('Pack updated');
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : 'Could not update pack');
@@ -748,6 +812,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
 
   const beginCountryEdit = (country: AdminCustomCountry) => {
     setEditingCountryCode(country.code);
+    setIsCountryEditorOpen(true);
     setPlaylistCountryCode(country.code);
     setCountryDraft({
       code: country.code,
@@ -770,6 +835,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
       setConfig(result.config);
       onConfigChanged?.(result.config);
       setEditingCountryCode('');
+      setIsCountryEditorOpen(false);
       setCountryDraft({ code: '', name: '', nativeName: '', flag: '', region: 'Other', popularGenres: '', description: '' });
       showToast(`${result.country.name} saved`);
     } catch (error) {
@@ -1554,17 +1620,34 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
             </div>
           )}
 
-          {(activeTab === 'packs' || activeTab === 'genrePacks' || activeTab === 'countryPacks') && (
+          {(activeTab === 'packs' || activePackManagerType) && (
             <div className="space-y-4 text-left">
-              {(activeTab === 'genrePacks' || activeTab === 'countryPacks') && (
+              {activePackManagerType && (
                 <div className="space-y-4 rounded-2xl border border-[#00e676]/20 bg-[#0d1a13] p-4">
-                  <div>
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
                     <h3 className="text-sm font-black text-white">
-                      {activeTab === 'genrePacks' ? 'Genre playlist manager' : 'Country playlist manager'}
+                      {activePackManagerLabel} playlist manager
                     </h3>
                     <p className="mt-1 text-xs leading-5 text-white/55">
-                      Search Spotify by playlist name, URL, or ID. Added playlists are saved to the public pack selector, archive pages, online room setup, and sitemap through the same production config.
+                      Manage saved Spotify playlists for this category. Added playlists are saved to the public pack selector, archive pages, online room setup, and sitemap through the same production config.
                     </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPlaylistPackType(activePackManagerType);
+                        setPlaylistSuggestions([]);
+                        setPlaylistQuery('');
+                        setPlaylistTitle('');
+                        if (activePackManagerType !== 'country') setPlaylistGenreName('');
+                        setIsPlaylistEditorOpen(true);
+                      }}
+                      className="inline-flex h-10 items-center justify-center rounded-xl bg-[#00e676] px-4 text-xs font-black text-black hover:bg-[#28f28e]"
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add playlist
+                    </button>
                   </div>
                   {activeTab === 'genrePacks' && (
                     <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
@@ -1607,91 +1690,38 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                       ))}
                     </div>
                   )}
-                  <div className="flex flex-col gap-3 md:flex-row md:items-end">
-                    <label className="flex-1 text-xs font-black uppercase tracking-wide text-white/35">
-                      Spotify playlist name, URL, or ID
-                      <input
-                        value={playlistQuery}
-                        onChange={(event) => setPlaylistQuery(event.target.value)}
-                        placeholder="RapCaviar, playlist URL, or Spotify ID"
-                        className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-[#00e676]"
-                      />
-                    </label>
-                    <label className="text-xs font-black uppercase tracking-wide text-white/35">
-                      Pack type
-                      <select
-                        value={playlistPackType}
-                        disabled
-                        className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm normal-case tracking-normal text-white outline-none opacity-70 md:w-44"
-                      >
-                        <option value="genre">Genre</option>
-                        <option value="country">Country</option>
-                        <option value="playlist">Playlist</option>
-                      </select>
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => void handleSearchPlaylists()}
-                      disabled={searchingPlaylists || !playlistQuery.trim()}
-                      className="h-11 rounded-xl bg-[#00e676] px-5 text-sm font-black text-black disabled:cursor-not-allowed disabled:opacity-45"
-                    >
-                      {searchingPlaylists ? 'Searching' : 'Search Spotify'}
-                    </button>
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <input
-                      value={playlistTitle}
-                      onChange={(event) => setPlaylistTitle(event.target.value)}
-                      placeholder="Optional display title"
-                      className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm text-white outline-none focus:border-[#00e676]"
-                    />
-                    <input
-                      value={playlistGenreName}
-                      onChange={(event) => setPlaylistGenreName(event.target.value)}
-                      placeholder="Genre name for genre packs"
-                      disabled={activeTab !== 'genrePacks'}
-                      className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm text-white outline-none focus:border-[#00e676] disabled:opacity-40"
-                    />
-                    <select
-                      value={playlistCountryCode}
-                      onChange={(event) => setPlaylistCountryCode(event.target.value)}
-                      disabled={activeTab !== 'countryPacks'}
-                      className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm text-white outline-none focus:border-[#00e676] disabled:opacity-40"
-                    >
-                      {[...COUNTRIES, ...customCountries].map((country) => (
-                        <option key={country.code} value={country.code}>{country.flag} {country.name}</option>
+                  {activeTab === 'decadePacks' && (
+                    <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                      {decadePackSummaries.map((decade) => (
+                        <div key={decade.slug} className="rounded-xl border border-white/10 bg-[#0b100d] p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="truncate text-sm font-black text-white">{decade.name}</p>
+                            <span className="shrink-0 rounded-full bg-[#00e676]/10 px-2 py-1 font-mono text-[10px] font-black text-[#00e676]">
+                              {decade.songsCount} songs
+                            </span>
+                          </div>
+                          <p className="mt-1 line-clamp-2 text-xs leading-5 text-white/45">{decade.description}</p>
+                          <p className="mt-2 text-[11px] font-bold text-white/35">{decade.customCount} custom Spotify playlists</p>
+                        </div>
                       ))}
-                    </select>
-                  </div>
-                  {playlistSuggestions.length > 0 && (
-                    <div className="grid gap-3 xl:grid-cols-2">
-                      {playlistSuggestions.map((playlist) => (
-                        <div key={playlist.id} className="grid grid-cols-[56px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border border-white/10 bg-[#0b100d] p-3">
-                          <img src={getSafeImageUrl(playlist.imageUrl) || ''} alt="" className="h-14 w-14 rounded-lg object-cover" referrerPolicy="no-referrer" />
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-black text-white">{playlist.name}</p>
-                            <p className="truncate text-xs text-white/45">{playlist.ownerName || 'Spotify'} • {playlist.tracksTotal} songs</p>
+                    </div>
+                  )}
+                  {activeTab === 'themePacks' && (
+                    <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                      {themePackSummaries.length === 0 ? (
+                        <p className="rounded-xl border border-white/10 bg-[#0b100d] p-3 text-xs text-white/45">
+                          No theme groups yet. Add one manually from Spotify.
+                        </p>
+                      ) : themePackSummaries.map((theme) => (
+                        <div key={theme.slug} className="rounded-xl border border-white/10 bg-[#0b100d] p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="truncate text-sm font-black text-white">{theme.name}</p>
+                            <span className="shrink-0 rounded-full bg-[#00e676]/10 px-2 py-1 font-mono text-[10px] font-black text-[#00e676]">
+                              {theme.songsCount} songs
+                            </span>
                           </div>
-                          <div className="flex gap-2">
-                            {playlist.spotifyUrl && (
-                              <a
-                                href={playlist.spotifyUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="rounded-lg border border-[#1DB954]/35 px-3 py-2 text-xs font-black text-[#1DB954] hover:bg-[#1DB954]/10"
-                              >
-                                Spotify
-                              </a>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => void handleAddPlaylistPack(playlist)}
-                              disabled={Boolean(savingPlaylistId)}
-                              className="rounded-lg bg-[#00e676] px-3 py-2 text-xs font-black text-black disabled:opacity-45"
-                            >
-                              {savingPlaylistId === playlist.id ? 'Adding' : 'Add'}
-                            </button>
-                          </div>
+                          <p className="mt-1 line-clamp-2 text-xs leading-5 text-white/45">{theme.description}</p>
+                          <p className="mt-2 text-[11px] font-bold text-white/35">{theme.customCount} custom Spotify playlists</p>
                         </div>
                       ))}
                     </div>
@@ -1703,9 +1733,24 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                           <img src={getSafeImageUrl(pack.coverImage) || ''} alt="" className="h-14 w-14 rounded-lg object-cover" referrerPolicy="no-referrer" />
                           <div className="min-w-0">
                             <p className="truncate text-sm font-black text-white">{pack.title}</p>
-                            <p className="truncate text-xs text-white/45">{pack.packType} • {pack.songs?.length || pack.songsCount || pack.songIds.length} songs</p>
+                            <p className="truncate text-xs text-white/45">
+                              {pack.packType === 'country'
+                                ? [...COUNTRIES, ...customCountries].find((country) => country.code === pack.countryCode)?.name || pack.countryCode
+                                : pack.genreName || pack.category}
+                              {' '}• {pack.songs?.length || pack.songsCount || pack.songIds.length} songs
+                            </p>
                           </div>
                           <div className="flex gap-2">
+                            {pack.spotifyPlaylistUrl && (
+                              <a
+                                href={pack.spotifyPlaylistUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="rounded-lg border border-[#1DB954]/35 px-3 py-2 text-xs font-black text-[#1DB954] hover:bg-[#1DB954]/10"
+                              >
+                                Spotify
+                              </a>
+                            )}
                             <button
                               type="button"
                               onClick={() => beginPackEdit(pack)}
@@ -1732,57 +1777,6 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                             </button>
                           </div>
                         </div>
-                        {editingPackId === pack.id && (
-                          <div className="mt-3 grid gap-2 border-t border-white/10 pt-3 md:grid-cols-2">
-                            <input
-                              value={packEditDraft.title}
-                              onChange={(event) => setPackEditDraft((draft) => ({ ...draft, title: event.target.value }))}
-                              placeholder="Pack title"
-                              className="h-10 rounded-lg border border-white/10 bg-black/20 px-3 text-sm text-white outline-none focus:border-[#00e676]"
-                            />
-                            {pack.packType === 'genre' ? (
-                              <input
-                                value={packEditDraft.genreName}
-                                onChange={(event) => setPackEditDraft((draft) => ({ ...draft, genreName: event.target.value }))}
-                                placeholder="Genre name"
-                                className="h-10 rounded-lg border border-white/10 bg-black/20 px-3 text-sm text-white outline-none focus:border-[#00e676]"
-                              />
-                            ) : (
-                              <select
-                                value={packEditDraft.countryCode}
-                                onChange={(event) => setPackEditDraft((draft) => ({ ...draft, countryCode: event.target.value }))}
-                                className="h-10 rounded-lg border border-white/10 bg-black/20 px-3 text-sm text-white outline-none focus:border-[#00e676]"
-                              >
-                                {[...COUNTRIES, ...customCountries].map((country) => (
-                                  <option key={country.code} value={country.code}>{country.flag} {country.name}</option>
-                                ))}
-                              </select>
-                            )}
-                            <textarea
-                              value={packEditDraft.description}
-                              onChange={(event) => setPackEditDraft((draft) => ({ ...draft, description: event.target.value }))}
-                              placeholder="Pack description"
-                              className="min-h-20 rounded-lg border border-white/10 bg-black/20 p-3 text-sm text-white outline-none focus:border-[#00e676] md:col-span-2"
-                            />
-                            <div className="flex gap-2 md:col-span-2">
-                              <button
-                                type="button"
-                                onClick={() => void handleSavePackEdit(pack.id)}
-                                disabled={savingPlaylistId === pack.id}
-                                className="h-9 rounded-lg bg-[#00e676] px-4 text-xs font-black text-black disabled:opacity-45"
-                              >
-                                {savingPlaylistId === pack.id ? 'Saving' : 'Save changes'}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setEditingPackId('')}
-                                className="h-9 rounded-lg border border-white/10 px-4 text-xs font-black text-white/60 hover:text-white"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          </div>
-                        )}
                       </div>
                     ))}
                     {visibleCustomPacks.length === 0 && (
@@ -1796,30 +1790,37 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
 
               {activeTab === 'countryPacks' && (
                 <div className="space-y-4 rounded-2xl border border-[#00e676]/20 bg-[#0d1a13] p-4">
-                  <div>
-                    <h3 className="text-sm font-black text-white">{editingCountryCode ? `Editing ${editingCountryCode}` : 'Country manager'}</h3>
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
+                    <h3 className="text-sm font-black text-white">Country manager</h3>
                     <p className="mt-1 text-xs leading-5 text-white/55">
-                      Add a new country page, then attach Spotify playlists to it above. Country pages are included in public navigation, archive pages, and sitemap after saving.
+                      Add or edit country pages, then attach Spotify playlists from the country playlist manager. Country pages are included in public navigation, archive pages, and sitemap after saving.
                     </p>
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <input value={countryDraft.code} onChange={(event) => setCountryDraft((draft) => ({ ...draft, code: event.target.value }))} placeholder="Country code, e.g. DE" className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm text-white outline-none focus:border-[#00e676]" />
-                    <input value={countryDraft.name} onChange={(event) => setCountryDraft((draft) => ({ ...draft, name: event.target.value }))} placeholder="Country name" className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm text-white outline-none focus:border-[#00e676]" />
-                    <input value={countryDraft.flag} onChange={(event) => setCountryDraft((draft) => ({ ...draft, flag: event.target.value }))} placeholder="Flag emoji" className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm text-white outline-none focus:border-[#00e676]" />
-                    <input value={countryDraft.nativeName} onChange={(event) => setCountryDraft((draft) => ({ ...draft, nativeName: event.target.value }))} placeholder="Native name" className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm text-white outline-none focus:border-[#00e676]" />
-                    <input value={countryDraft.popularGenres} onChange={(event) => setCountryDraft((draft) => ({ ...draft, popularGenres: event.target.value }))} placeholder="Popular genres, comma separated" className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm text-white outline-none focus:border-[#00e676]" />
-                    <button type="button" onClick={() => void handleAddCountry()} className="h-11 rounded-xl bg-[#00e676] px-4 text-sm font-black text-black">
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingCountryCode('');
+                        setCountryDraft({ code: '', name: '', nativeName: '', flag: '', region: 'Other', popularGenres: '', description: '' });
+                        setIsCountryEditorOpen(true);
+                      }}
+                      className="inline-flex h-10 items-center justify-center rounded-xl bg-[#00e676] px-4 text-xs font-black text-black hover:bg-[#28f28e]"
+                    >
                       <Plus className="mr-2 inline h-4 w-4" />
-                      {editingCountryCode ? 'Save country' : 'Add country'}
+                      Add country
                     </button>
                   </div>
-                  <textarea value={countryDraft.description} onChange={(event) => setCountryDraft((draft) => ({ ...draft, description: event.target.value }))} placeholder="Country archive description" className="min-h-[82px] w-full rounded-xl border border-white/10 bg-[#0b100d] p-3 text-sm text-white outline-none focus:border-[#00e676]" />
                   {customCountries.length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {customCountries.map((country) => (
-                        <span key={country.code} className="rounded-full border border-white/10 bg-[#0b100d] px-3 py-1.5 text-xs font-bold text-white/65">
+                        <button
+                          key={country.code}
+                          type="button"
+                          onClick={() => beginCountryEdit(country)}
+                          className="rounded-full border border-white/10 bg-[#0b100d] px-3 py-1.5 text-xs font-bold text-white/65 hover:border-[#00e676]/45 hover:text-[#00e676]"
+                        >
                           {country.flag} {country.name}
-                        </span>
+                        </button>
                       ))}
                     </div>
                   )}
@@ -2399,6 +2400,84 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
             </div>
           )}
 
+          {activeTab === 'emails' && (
+            <div className="grid gap-4 text-left xl:grid-cols-[260px_minmax(0,1fr)]">
+              <aside className="space-y-3 rounded-2xl border border-white/10 bg-[#0b100d] p-4">
+                <h3 className="flex items-center gap-2 text-sm font-black text-white">
+                  <Mail className="h-4 w-4 text-[#00e676]" />
+                  Emails
+                </h3>
+                {['email_verification', 'welcome', 'artist_ready', 'abandoned_checkout', 'feedback_request'].map((category) => {
+                  const count = adminEmailEvents.filter((email) => email.category.includes(category)).length;
+                  return (
+                    <div key={category} className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs">
+                      <span className="font-bold text-white/60">{category.replace(/_/g, ' ')}</span>
+                      <span className="font-mono font-black text-[#00e676]">{count}</span>
+                    </div>
+                  );
+                })}
+                <div className="grid gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleEmailBackfill('verification')}
+                    disabled={Boolean(emailBackfillAction)}
+                    className="h-9 rounded-lg border border-[#00e676]/25 bg-[#00e676]/10 px-3 text-[11px] font-black text-[#00e676] hover:bg-[#00e676]/20 disabled:cursor-wait disabled:opacity-50"
+                  >
+                    {emailBackfillAction === 'verification' ? 'Sending...' : 'Resend verification'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleEmailBackfill('abandoned')}
+                    disabled={Boolean(emailBackfillAction)}
+                    className="h-9 rounded-lg border border-yellow-300/25 bg-yellow-300/10 px-3 text-[11px] font-black text-yellow-100 hover:bg-yellow-300/20 disabled:cursor-wait disabled:opacity-50"
+                  >
+                    {emailBackfillAction === 'abandoned' ? 'Sending...' : 'Resume checkout emails'}
+                  </button>
+                </div>
+              </aside>
+              <section className="rounded-2xl border border-white/10 bg-[#0b100d] p-4">
+                <div className="mb-3">
+                  <h3 className="text-sm font-black text-white">Delivery log</h3>
+                  <p className="mt-1 text-[11px] text-white/45">Current and previous emails by date, user, status, provider, and preview.</p>
+                </div>
+                {adminEmailEvents.length === 0 ? (
+                  <p className="rounded-xl bg-white/5 p-4 text-xs text-white/45">No email attempts have been logged yet.</p>
+                ) : (
+                  <div className="max-h-[62vh] space-y-2 overflow-y-auto">
+                    {adminEmailEvents.map((email) => (
+                      <div key={email.id} className="rounded-xl border border-white/10 bg-[#121915] p-3 text-xs">
+                        <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="truncate font-black text-white">{email.subject}</p>
+                              <span className={`rounded-full px-2 py-0.5 font-mono text-[10px] font-black ${email.status === 'sent' ? 'bg-[#00e676]/10 text-[#00e676]' : 'bg-red-400/10 text-red-200'}`}>
+                                {email.status}
+                              </span>
+                              <span className="rounded-full bg-white/5 px-2 py-0.5 font-mono text-[10px] font-black text-white/45">
+                                {getEmailProviderLabel(email)}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-white/45">{email.email} • {email.category} • {formatIsoDate(email.sentAt || email.createdAt)}</p>
+                            {email.error && <p className="mt-1 text-red-200">{email.error}</p>}
+                            {email.textBody && <details className="mt-2 text-white/55"><summary className="cursor-pointer font-bold text-[#00e676]">Preview</summary><pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-black/25 p-2">{email.textBody}</pre></details>}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void handleRetryEmail(email.id)}
+                            disabled={retryingEmailId === email.id}
+                            className="h-8 rounded-lg border border-[#00e676]/25 bg-[#00e676]/10 px-3 text-[11px] font-black text-[#00e676] hover:bg-[#00e676]/20 disabled:cursor-wait disabled:opacity-50"
+                          >
+                            {retryingEmailId === email.id ? 'Retrying' : 'Retry'}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
+
           {activeTab === 'activity' && (
             <div className="space-y-3 text-left">
               <div className="flex items-center justify-between gap-3">
@@ -2519,6 +2598,223 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
             </div>
           )}
         </div>
+
+        {isPlaylistEditorOpen && activePackManagerType && (
+          <div className="fixed inset-0 z-[270] flex items-center justify-center bg-black/85 p-3 backdrop-blur-md">
+            <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl border border-[#00e676]/25 bg-[#0d1a13] p-4 shadow-2xl">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-black text-white">{editingPackId ? 'Edit playlist pack' : `Add ${activePackManagerLabel.toLowerCase()} playlist`}</h3>
+                  <p className="mt-1 text-xs leading-5 text-white/50">Search Spotify by name or paste a playlist URL/ID. The saved pack updates selectors, archive pages, online room setup, and sitemap.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPlaylistEditorOpen(false);
+                    setEditingPackId('');
+                  }}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-white/65 hover:text-white"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {editingPackId ? (
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="text-xs font-black uppercase tracking-wide text-white/35">
+                    Pack title
+                    <input
+                      value={packEditDraft.title}
+                      onChange={(event) => setPackEditDraft((draft) => ({ ...draft, title: event.target.value }))}
+                      className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-[#00e676]"
+                    />
+                  </label>
+                  {customPacks.find((pack) => pack.id === editingPackId)?.packType === 'country' ? (
+                    <label className="text-xs font-black uppercase tracking-wide text-white/35">
+                      Country
+                      <select
+                        value={packEditDraft.countryCode}
+                        onChange={(event) => setPackEditDraft((draft) => ({ ...draft, countryCode: event.target.value }))}
+                        className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-[#00e676]"
+                      >
+                        {[...COUNTRIES, ...customCountries].map((country) => (
+                          <option key={country.code} value={country.code}>{country.flag} {country.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
+                    <label className="text-xs font-black uppercase tracking-wide text-white/35">
+                      {activePackManagerLabel} name
+                      <input
+                        value={packEditDraft.genreName}
+                        onChange={(event) => setPackEditDraft((draft) => ({ ...draft, genreName: event.target.value }))}
+                        className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-[#00e676]"
+                      />
+                    </label>
+                  )}
+                  <label className="md:col-span-2 text-xs font-black uppercase tracking-wide text-white/35">
+                    Description
+                    <textarea
+                      value={packEditDraft.description}
+                      onChange={(event) => setPackEditDraft((draft) => ({ ...draft, description: event.target.value }))}
+                      className="mt-2 min-h-24 w-full rounded-xl border border-white/10 bg-[#0b100d] p-3 text-sm normal-case tracking-normal text-white outline-none focus:border-[#00e676]"
+                    />
+                  </label>
+                  <div className="flex gap-2 md:col-span-2">
+                    <button
+                      type="button"
+                      onClick={() => void handleSavePackEdit(editingPackId)}
+                      disabled={savingPlaylistId === editingPackId}
+                      className="h-10 rounded-xl bg-[#00e676] px-5 text-xs font-black text-black disabled:opacity-45"
+                    >
+                      {savingPlaylistId === editingPackId ? 'Saving' : 'Save changes'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingPackId('');
+                        setIsPlaylistEditorOpen(false);
+                      }}
+                      className="h-10 rounded-xl border border-white/10 px-5 text-xs font-black text-white/60 hover:text-white"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+                    <label className="text-xs font-black uppercase tracking-wide text-white/35">
+                      Spotify playlist name, URL, or ID
+                      <input
+                        value={playlistQuery}
+                        onChange={(event) => setPlaylistQuery(event.target.value)}
+                        placeholder="RapCaviar, playlist URL, or Spotify ID"
+                        className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-[#00e676]"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => void handleSearchPlaylists()}
+                      disabled={searchingPlaylists || !playlistQuery.trim()}
+                      className="mt-5 h-11 rounded-xl bg-[#00e676] px-5 text-sm font-black text-black disabled:cursor-not-allowed disabled:opacity-45"
+                    >
+                      {searchingPlaylists ? 'Searching' : 'Search Spotify'}
+                    </button>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <input
+                      value={playlistTitle}
+                      onChange={(event) => setPlaylistTitle(event.target.value)}
+                      placeholder="Optional display title"
+                      className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm text-white outline-none focus:border-[#00e676]"
+                    />
+                    {activePackManagerType === 'country' ? (
+                      <select
+                        value={playlistCountryCode}
+                        onChange={(event) => setPlaylistCountryCode(event.target.value)}
+                        className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm text-white outline-none focus:border-[#00e676]"
+                      >
+                        {[...COUNTRIES, ...customCountries].map((country) => (
+                          <option key={country.code} value={country.code}>{country.flag} {country.name}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        value={playlistGenreName}
+                        onChange={(event) => setPlaylistGenreName(event.target.value)}
+                        placeholder={`${activePackManagerLabel} name`}
+                        className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm text-white outline-none focus:border-[#00e676]"
+                      />
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void handleAddPlaylistPack()}
+                      disabled={Boolean(savingPlaylistId) || !playlistQuery.trim()}
+                      className="h-11 rounded-xl border border-[#00e676]/45 px-4 text-sm font-black text-[#00e676] hover:bg-[#00e676]/10 disabled:opacity-45"
+                    >
+                      Add from URL or ID
+                    </button>
+                  </div>
+                  {playlistSuggestions.length > 0 && (
+                    <div className="grid gap-3 xl:grid-cols-2">
+                      {playlistSuggestions.map((playlist) => (
+                        <div key={playlist.id} className="grid grid-cols-[56px_minmax(0,1fr)] gap-3 rounded-xl border border-white/10 bg-[#0b100d] p-3 sm:grid-cols-[56px_minmax(0,1fr)_auto] sm:items-center">
+                          <img src={getSafeImageUrl(playlist.imageUrl) || ''} alt="" className="h-14 w-14 rounded-lg object-cover" referrerPolicy="no-referrer" />
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-black text-white">{playlist.name}</p>
+                            <p className="truncate text-xs text-white/45">{playlist.ownerName || 'Spotify'} • {playlist.tracksTotal} songs</p>
+                          </div>
+                          <div className="col-span-2 flex gap-2 sm:col-span-1">
+                            {playlist.spotifyUrl && (
+                              <a href={playlist.spotifyUrl} target="_blank" rel="noreferrer" className="flex h-9 items-center rounded-lg border border-[#1DB954]/35 px-3 text-xs font-black text-[#1DB954] hover:bg-[#1DB954]/10">
+                                Spotify
+                              </a>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => void handleAddPlaylistPack(playlist)}
+                              disabled={Boolean(savingPlaylistId)}
+                              className="h-9 rounded-lg bg-[#00e676] px-3 text-xs font-black text-black disabled:opacity-45"
+                            >
+                              {savingPlaylistId === playlist.id ? 'Adding' : 'Add'}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {isCountryEditorOpen && (
+          <div className="fixed inset-0 z-[270] flex items-center justify-center bg-black/85 p-3 backdrop-blur-md">
+            <div className="w-full max-w-3xl rounded-2xl border border-[#00e676]/25 bg-[#0d1a13] p-4 shadow-2xl">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-black text-white">{editingCountryCode ? `Edit ${editingCountryCode}` : 'Add country'}</h3>
+                  <p className="mt-1 text-xs text-white/50">Country pages can hold their own Spotify playlist list and appear on public archive pages.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCountryEditorOpen(false);
+                    setEditingCountryCode('');
+                  }}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-white/65 hover:text-white"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                <input value={countryDraft.code} onChange={(event) => setCountryDraft((draft) => ({ ...draft, code: event.target.value }))} placeholder="Country code, e.g. DE" className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm text-white outline-none focus:border-[#00e676]" />
+                <input value={countryDraft.name} onChange={(event) => setCountryDraft((draft) => ({ ...draft, name: event.target.value }))} placeholder="Country name" className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm text-white outline-none focus:border-[#00e676]" />
+                <input value={countryDraft.flag} onChange={(event) => setCountryDraft((draft) => ({ ...draft, flag: event.target.value }))} placeholder="Flag emoji" className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm text-white outline-none focus:border-[#00e676]" />
+                <input value={countryDraft.nativeName} onChange={(event) => setCountryDraft((draft) => ({ ...draft, nativeName: event.target.value }))} placeholder="Native name" className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm text-white outline-none focus:border-[#00e676]" />
+                <input value={countryDraft.popularGenres} onChange={(event) => setCountryDraft((draft) => ({ ...draft, popularGenres: event.target.value }))} placeholder="Popular genres, comma separated" className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm text-white outline-none focus:border-[#00e676] md:col-span-2" />
+                <textarea value={countryDraft.description} onChange={(event) => setCountryDraft((draft) => ({ ...draft, description: event.target.value }))} placeholder="Country archive description" className="min-h-[92px] rounded-xl border border-white/10 bg-[#0b100d] p-3 text-sm text-white outline-none focus:border-[#00e676] md:col-span-3" />
+              </div>
+              <div className="mt-4 flex gap-2">
+                <button type="button" onClick={() => void handleAddCountry()} className="h-10 rounded-xl bg-[#00e676] px-5 text-xs font-black text-black">
+                  {editingCountryCode ? 'Save country' : 'Add country'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCountryEditorOpen(false);
+                    setEditingCountryCode('');
+                  }}
+                  className="h-10 rounded-xl border border-white/10 px-5 text-xs font-black text-white/60 hover:text-white"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="p-3.5 border-t border-white/10 bg-[#0b100d] flex items-center justify-between text-xs text-white/45">
           <span>Config v{config.version} • {config.appUrl}</span>

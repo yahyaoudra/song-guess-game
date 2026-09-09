@@ -1,6 +1,7 @@
 import {
   ActivityLogEntry,
   AdminConfigState,
+  AdminCustomPackType,
   AdminEmailEvent,
   AdminFeatureAnalytics,
   AdminSessionResponse,
@@ -102,7 +103,7 @@ export async function addAdminCustomCountry(country: {
 
 export async function addAdminSpotifyPlaylistPack(input: {
   playlistIdOrUrl: string;
-  packType: 'country' | 'genre' | 'playlist';
+  packType: AdminCustomPackType;
   title?: string;
   countryCode?: string;
   genreName?: string;

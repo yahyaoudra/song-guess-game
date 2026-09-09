@@ -85,6 +85,12 @@ export const GENRE_DEFINITIONS: Array<Omit<GenreChallenge, 'songIds' | 'songsCou
     keywords: ['country']
   },
   {
+    slug: '70s',
+    name: '70s',
+    description: 'Seventies classics, disco, rock, soul, and foundational radio hits.',
+    keywords: ['70s'],
+  },
+  {
     slug: '80s',
     name: '80s',
     description: 'Eighties pop, rock, dance, and nostalgia-heavy classics.',

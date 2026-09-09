@@ -313,7 +313,7 @@ export interface SpotifyArtistSuggestion {
   genres: string[];
 }
 
-export type AdminCustomPackType = 'country' | 'genre' | 'playlist';
+export type AdminCustomPackType = 'country' | 'genre' | 'decade' | 'theme' | 'playlist';
 
 export interface AdminCustomCountry extends Country {
   custom?: true;

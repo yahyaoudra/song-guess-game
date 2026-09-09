@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { gsap } from 'gsap';
-import { ArrowRight, Check, Globe2, Headphones, Mic2, Play, Sparkles, Tags, Trophy, Users } from 'lucide-react';
+import { ArrowRight, CalendarDays, Check, Globe2, Headphones, Mic2, Play, Sparkles, Tags, Trophy, Users } from 'lucide-react';
 import { PublicRuntimeConfig, RequestedArtist } from '../adminTypes';
 import { COUNTRIES } from '../data/countries';
 import { TOP_US_FEATURED_ARTIST_SLUGS, baseArtistSlug, getArtistChallenges, getGenreChallenges, orderArtistsByFeaturedPriority } from '../utils/challengeCatalog';
-import { createDefaultRouteConfig, getArtistPath, getCountryPath, getGenrePath } from '../utils/runtimeConfig';
+import { createDefaultRouteConfig, getArtistPath, getCountryPath, getDecadePath, getGenrePath } from '../utils/runtimeConfig';
 
 interface HomePageProps {
   publicConfig: PublicRuntimeConfig;
@@ -15,7 +15,7 @@ interface HomePageProps {
 const comparisonRows = [
   ['Unlimited Heardle', 'Daily-only or limited modes', 'Available*'],
   ['Artist challenges', 'Small fixed song pools', 'Spotify-built packs by exact artist'],
-  ['Genre and era games', 'Few broad playlists', 'K-Pop, Bollywood, rap, country, 80s, 90s, 2000s, and more'],
+  ['Genre, decade, and theme games', 'Few broad playlists', 'K-Pop, Bollywood, rap, country, decades, and manually curated themes'],
   ['Multiplayer options', 'Mostly solo play', 'Friend-code rooms plus same-device party mode'],
   ['Works anywhere', 'Often desktop-first', 'Responsive play on phone, tablet, and desktop'],
   ['Shareable score cards', 'Text-only results', 'Downloadable visual performance cards']
@@ -74,7 +74,9 @@ export const HomePage: React.FC<HomePageProps> = ({ publicConfig, requestedArtis
   const topArtists = artists.slice(0, 12);
   const carouselArtists = [...artists.slice(0, 12), ...artists.slice(0, 12)];
   const featuredCountries = COUNTRIES.slice(0, 12);
-  const featuredGenres = getGenreChallenges().slice(0, 12);
+  const decadeSlugs = new Set(['70s', '80s', '90s', '2000s', '2010s', '2020s']);
+  const featuredGenres = getGenreChallenges().filter((genre) => !decadeSlugs.has(genre.slug)).slice(0, 12);
+  const featuredDecades = getGenreChallenges().filter((genre) => decadeSlugs.has(genre.slug));
 
   useEffect(() => {
     if (!heroRef.current) return;
@@ -146,7 +148,7 @@ export const HomePage: React.FC<HomePageProps> = ({ publicConfig, requestedArtis
             {homeSeo.customHeading || 'Guess the Song Game'}
           </h1>
           <p data-home-reveal className="mt-5 max-w-2xl text-lg leading-8 text-white/65">
-            Guess songs from tiny snippets, play by artist, genre, country, or era, and challenge friends with visual score cards. Try to guess the song in 0.1 seconds when the hook hits.
+            Guess songs from tiny snippets, play by artist, genre, country, decade, or playlist, and challenge friends with visual score cards. Start with a one-second song quiz and try to guess the song in 0.1 seconds when the hook hits.
           </p>
           <div data-home-reveal className="mt-8 flex flex-col gap-3 sm:flex-row">
             <button
@@ -234,7 +236,7 @@ export const HomePage: React.FC<HomePageProps> = ({ publicConfig, requestedArtis
         <div className="grid gap-3 md:grid-cols-3">
           {[
             ['Artists Heardle', 'Taylor Swift, Drake, the Weeknd, Billie Eilish, Ariana Grande, Sabrina Carpenter', Mic2],
-            ['Genre and era runs', 'K-Pop, Bollywood, rap, country, 80s, 90s, 2000s', Tags],
+            ['Genre and decade runs', 'K-Pop, Bollywood, rap, country, 70s, 80s, 90s, 2000s', Tags],
             ['Multiplayer ready', 'Friend codes and same-device party play', Users]
           ].map(([title, body, Icon]) => (
             <div key={String(title)} className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
@@ -269,7 +271,31 @@ export const HomePage: React.FC<HomePageProps> = ({ publicConfig, requestedArtis
         </div>
       </section>
 
-      <section className="grid gap-8 lg:grid-cols-2">
+      <section className="rounded-lg border border-[#00e676]/20 bg-[#0d1711] p-5 sm:p-7">
+        <div className="grid gap-6 lg:grid-cols-[0.85fr_1.15fr] lg:items-center">
+          <div>
+            <p className="text-xs font-black uppercase tracking-wide text-[#00e676]">Fast music quiz</p>
+            <h2 className="mt-2 text-3xl font-black sm:text-4xl">Guess the song in 1 second</h2>
+            <p className="mt-3 text-sm leading-7 text-white/60">
+              Song Guess Game is built for the way people search for Heardle, guess the song, song guessing game, song quiz, music trivia, and music quiz challenges. Pick a pack, hear a short clip, type the song title, and share the result when you win.
+            </p>
+          </div>
+          <div className="rounded-lg border border-white/10 bg-[#07100b] p-5">
+            <div className="flex items-center justify-between text-xs font-black text-white/55">
+              <span>ROUND 1 / 5</span>
+              <span className="text-[#00e676]">1s clip</span>
+            </div>
+            <div className="mt-5 grid gap-3 sm:grid-cols-[1fr_auto]">
+              <div className="h-12 rounded-lg border border-[#00e676]/30 bg-white/[0.04]" />
+              <button onClick={() => onNavigate('/play')} className="h-12 rounded-lg bg-[#00e676] px-5 text-sm font-black text-black">
+                Play Now
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-8 lg:grid-cols-3">
         <BrowseBlock title="Countries" cta="See countries" onClick={() => onNavigate('/play/country')}>
           {featuredCountries.map((country) => (
             <a key={country.code} href={getCountryPath(country.code, publicConfig)} onClick={(event) => { event.preventDefault(); onNavigate(getCountryPath(country.code, publicConfig)); }} className="flex items-center gap-3 rounded-lg border border-white/10 bg-white/[0.04] p-3 hover:border-[#00e676]/45">
@@ -283,6 +309,17 @@ export const HomePage: React.FC<HomePageProps> = ({ publicConfig, requestedArtis
             <a key={genre.slug} href={getGenrePath(genre.slug)} onClick={(event) => { event.preventDefault(); onNavigate(getGenrePath(genre.slug)); }} className="rounded-lg border border-white/10 bg-white/[0.04] p-3 hover:border-[#00e676]/45">
               <div className="truncate text-sm font-black">{genre.name}</div>
               <div className="mt-1 text-xs text-white/45">{genre.songsCount} songs</div>
+            </a>
+          ))}
+        </BrowseBlock>
+        <BrowseBlock title="Decades" cta="See decades" onClick={() => onNavigate('/play/decade')}>
+          {featuredDecades.map((decade) => (
+            <a key={decade.slug} href={getDecadePath(decade.slug)} onClick={(event) => { event.preventDefault(); onNavigate(getDecadePath(decade.slug)); }} className="rounded-lg border border-white/10 bg-white/[0.04] p-3 hover:border-[#00e676]/45">
+              <div className="flex items-center gap-2">
+                <CalendarDays className="h-4 w-4 text-[#00e676]" />
+                <div className="truncate text-sm font-black">{decade.name}</div>
+              </div>
+              <div className="mt-1 text-xs text-white/45">{decade.songsCount} songs</div>
             </a>
           ))}
         </BrowseBlock>

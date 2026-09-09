@@ -51,20 +51,23 @@ import {
   getCountryCodeFromPath,
   getCountryPath,
   getArtistPath,
+  getDecadePath,
   getGenrePath,
+  getThemePath,
   getRouteConfig,
   getInitialPublicRuntimeConfig,
   getLegalPath,
   getLegalSectionFromPath,
   getArtistSeoDisplayName
 } from './utils/runtimeConfig';
+import { getRuntimeCustomPacks } from './utils/customCatalog';
 import {
   getArtistChallenge,
   getGenreChallenge,
   getSongsByArtistSlug,
   getSongsByGenreSlug
 } from './utils/challengeCatalog';
-import { AdminConfigState, AdminPageConfig, ArtistRequestResponse, AuthSessionResponse, RequestedArtist } from './adminTypes';
+import { AdminConfigState, AdminCustomPack, AdminPageConfig, ArtistRequestResponse, AuthSessionResponse, PublicRuntimeConfig, RequestedArtist } from './adminTypes';
 import { ApiRequestError, claimFreePlay, createCheckout, fetchRequestedArtists, getAccessStatus, getAuthSession, requestArtist } from './utils/authApi';
 
 const HAS_SEEN_ONBOARDING_KEY = 'songspot_has_seen_onboarding_v2';
@@ -72,12 +75,27 @@ const FREE_PLAY_DATE_KEY = 'song_guess_free_play_date_v1';
 const FREE_PLAY_SESSION_KEY = 'song_guess_free_play_session_v1';
 const ACTIVE_GAME_STATE_KEY = 'song_guess_active_game_v1';
 const SPOTIFY_ARTIST_SUFFIX_PATTERN = /-[a-z0-9]{8}$/;
+const DECADE_SLUGS_APP = new Set(['70s', '80s', '90s', '2000s', '2010s', '2020s']);
 
 function baseArtistSlug(slug: string): string {
   return slug.replace(SPOTIFY_ARTIST_SUFFIX_PATTERN, '');
 }
 
-type ActiveView = 'home' | 'game' | 'legal' | 'artists' | 'genres' | 'countries' | 'contact' | 'feedback';
+function getCollectionPackType(collection: QuizCollection | null): AdminCustomPack['packType'] | '' {
+  return ((collection as AdminCustomPack | null)?.packType || '') as AdminCustomPack['packType'] | '';
+}
+
+function findCustomPackByRoute(publicConfig: PublicRuntimeConfig, packType: AdminCustomPack['packType'], slug: string): AdminCustomPack | null {
+  const normalized = slug.toLowerCase();
+  return (
+    getRuntimeCustomPacks(publicConfig).find((pack) => (
+      pack.packType === packType &&
+      (pack.genreSlug?.toLowerCase() === normalized || pack.id.toLowerCase() === normalized)
+    )) || null
+  );
+}
+
+type ActiveView = 'home' | 'game' | 'legal' | 'artists' | 'genres' | 'decades' | 'themes' | 'countries' | 'contact' | 'feedback';
 type ActiveChallenge =
   | { type: 'artist'; slug: string; title: string; songIds?: string[]; songs?: Song[]; albumPacks?: RequestedArtist['albumPacks'] }
   | { type: 'genre'; slug: string; title: string }
@@ -691,6 +709,25 @@ export default function App() {
         if (segments[0] === 'play' && segments[1] === 'genre' && segments[2]) {
           clearCountrySelectionForChallenge();
           const genre = getGenreChallenge(segments[2]);
+          const customPack = genre ? null : findCustomPackByRoute(publicConfig, 'genre', segments[2]);
+          if (customPack) {
+            audioEngine.stop();
+            setActiveChallenge(null);
+            setActiveArtistAlbumPackId('all');
+            setActiveCollection(customPack);
+            setGameMode('collection');
+            setRoundIndex(0);
+            setCurrentStepIndex(0);
+            setIsRevealed(false);
+            setRoundHistory([]);
+            setGameStartTime(Date.now());
+            setIsCompleteModalOpen(false);
+            setSavedResult(null);
+            setWrongFeedback(null);
+            setGameSessionKey(Date.now());
+            setActiveView('game');
+            return;
+          }
           if (!genre) {
             audioEngine.stop();
             setActiveChallenge(null);
@@ -715,6 +752,103 @@ export default function App() {
             setWrongFeedback(null);
             setGameSessionKey(Date.now());
           }
+          setActiveView('game');
+          return;
+        }
+
+        if (segments[0] === 'play' && segments[1] === 'decade' && !segments[2]) {
+          audioEngine.stop();
+          clearCountrySelectionForChallenge();
+          setActiveChallenge(null);
+          setActiveArtistAlbumPackId('all');
+          setActiveView('decades');
+          return;
+        }
+
+        if (segments[0] === 'play' && segments[1] === 'decade' && segments[2]) {
+          clearCountrySelectionForChallenge();
+          const decade = getGenreChallenge(segments[2]);
+          const customPack = findCustomPackByRoute(publicConfig, 'decade', segments[2]);
+          if (customPack) {
+            audioEngine.stop();
+            setActiveChallenge(null);
+            setActiveArtistAlbumPackId('all');
+            setActiveCollection(customPack);
+            setGameMode('collection');
+            setRoundIndex(0);
+            setCurrentStepIndex(0);
+            setIsRevealed(false);
+            setRoundHistory([]);
+            setGameStartTime(Date.now());
+            setIsCompleteModalOpen(false);
+            setSavedResult(null);
+            setWrongFeedback(null);
+            setGameSessionKey(Date.now());
+            setActiveView('game');
+            return;
+          }
+          if (!decade || !DECADE_SLUGS_APP.has(decade.slug)) {
+            audioEngine.stop();
+            setActiveChallenge(null);
+            setActiveArtistAlbumPackId('all');
+            setActiveView('decades');
+            window.history.replaceState({}, document.title, '/play/decade');
+            return;
+          }
+          if (activeChallenge?.type !== 'genre' || activeChallenge.slug !== decade.slug) {
+            audioEngine.stop();
+            setActiveArtistAlbumPackId('all');
+            setActiveChallenge({ type: 'genre', slug: decade.slug, title: decade.name });
+            setGameMode('practice');
+            setActiveCollection(null);
+            setRoundIndex(0);
+            setCurrentStepIndex(0);
+            setIsRevealed(false);
+            setRoundHistory([]);
+            setGameStartTime(Date.now());
+            setIsCompleteModalOpen(false);
+            setSavedResult(null);
+            setWrongFeedback(null);
+            setGameSessionKey(Date.now());
+          }
+          setActiveView('game');
+          return;
+        }
+
+        if (segments[0] === 'play' && segments[1] === 'theme' && !segments[2]) {
+          audioEngine.stop();
+          clearCountrySelectionForChallenge();
+          setActiveChallenge(null);
+          setActiveArtistAlbumPackId('all');
+          setActiveView('themes');
+          return;
+        }
+
+        if (segments[0] === 'play' && segments[1] === 'theme' && segments[2]) {
+          clearCountrySelectionForChallenge();
+          const customPack = findCustomPackByRoute(publicConfig, 'theme', segments[2]);
+          if (!customPack) {
+            audioEngine.stop();
+            setActiveChallenge(null);
+            setActiveArtistAlbumPackId('all');
+            setActiveView('themes');
+            window.history.replaceState({}, document.title, '/play/theme');
+            return;
+          }
+          audioEngine.stop();
+          setActiveChallenge(null);
+          setActiveArtistAlbumPackId('all');
+          setActiveCollection(customPack);
+          setGameMode('collection');
+          setRoundIndex(0);
+          setCurrentStepIndex(0);
+          setIsRevealed(false);
+          setRoundHistory([]);
+          setGameStartTime(Date.now());
+          setIsCompleteModalOpen(false);
+          setSavedResult(null);
+          setWrongFeedback(null);
+          setGameSessionKey(Date.now());
           setActiveView('game');
           return;
         }
@@ -1319,6 +1453,10 @@ export default function App() {
       ? getRouteConfig('system:artist-index', publicConfig)
       : activeView === 'genres'
       ? getRouteConfig('system:genre-index', publicConfig)
+      : activeView === 'decades'
+      ? getRouteConfig('system:decade-index', publicConfig)
+      : activeView === 'themes'
+      ? getRouteConfig('system:theme-index', publicConfig)
       : activeView === 'countries'
       ? getRouteConfig('system:country-index', publicConfig)
       : null;
@@ -1363,6 +1501,12 @@ export default function App() {
           socialTitle: `${activeArtistSeoName} Song Guess - Heardle`,
           socialDescription: `Can you recognize ${activeArtistSeoName} songs from tiny snippets?`
         }
+      : activeCollection && getCollectionPackType(activeCollection) === 'genre'
+      ? getRouteConfig(`genre:${(activeCollection as AdminCustomPack).genreSlug || activeCollection.id}`, publicConfig)
+      : activeCollection && getCollectionPackType(activeCollection) === 'decade'
+      ? getRouteConfig(`decade:${(activeCollection as AdminCustomPack).genreSlug || activeCollection.id}`, publicConfig)
+      : activeCollection && getCollectionPackType(activeCollection) === 'theme'
+      ? getRouteConfig(`theme:${(activeCollection as AdminCustomPack).genreSlug || activeCollection.id}`, publicConfig)
       : challengeSeo || directorySeo || playSeo;
   const legalSeo = {
     privacy: {
@@ -1403,12 +1547,24 @@ export default function App() {
       ? archivePagePath('/artist')
       : activeView === 'countries'
       ? archivePagePath('/play/country')
+      : activeView === 'decades'
+      ? archivePagePath('/play/decade')
+      : activeView === 'themes'
+      ? archivePagePath('/play/theme')
       : activeView === 'genres'
       ? archivePagePath('/play/genre')
       : activeChallenge?.type === 'artist'
       ? getArtistPath(activeChallenge.slug)
       : activeChallenge?.type === 'genre'
-      ? getGenrePath(activeChallenge.slug)
+      ? DECADE_SLUGS_APP.has(activeChallenge.slug)
+        ? getDecadePath(activeChallenge.slug)
+        : getGenrePath(activeChallenge.slug)
+      : activeCollection && getCollectionPackType(activeCollection) === 'genre'
+      ? getGenrePath((activeCollection as AdminCustomPack).genreSlug || activeCollection.id)
+      : activeCollection && getCollectionPackType(activeCollection) === 'decade'
+      ? getDecadePath((activeCollection as AdminCustomPack).genreSlug || activeCollection.id)
+      : activeCollection && getCollectionPackType(activeCollection) === 'theme'
+      ? getThemePath((activeCollection as AdminCustomPack).genreSlug || activeCollection.id)
       : getCountryPath(settings.selectedCountry, publicConfig);
   const pageTitle = activeView === 'home' ? homeSeo.pageTitle : activeView === 'contact' ? contactSeo.pageTitle : activeView === 'feedback' ? feedbackSeo.pageTitle : activeView === 'legal' ? legalSeo[legalSection].title : activeSeo.pageTitle;
   const pageDescription = activeView === 'home' ? homeSeo.metaDescription : activeView === 'contact' ? contactSeo.metaDescription : activeView === 'feedback' ? feedbackSeo.metaDescription : activeView === 'legal' ? legalSeo[legalSection].description : activeSeo.metaDescription;
@@ -1503,6 +1659,8 @@ export default function App() {
         pageConfigs: config.pageConfigs,
         routeConfigs: config.routeConfigs,
         featuredArtistSlugs: config.featuredArtistSlugs,
+        customCountries: config.customCountries,
+        customPacks: config.customPacks,
         adSlots: config.adSlots,
         robotsTxt: config.robotsTxt
       };
@@ -1633,7 +1791,21 @@ export default function App() {
     const genreMatch = col.id.match(/^genre-global-(.+)-deep-library$/);
     if (genreMatch?.[1]) {
       setIsCollectionsOpen(false);
-      navigateToPage(getGenrePath(genreMatch[1]));
+      navigateToPage(DECADE_SLUGS_APP.has(genreMatch[1]) ? getDecadePath(genreMatch[1]) : getGenrePath(genreMatch[1]));
+      return;
+    }
+    const packType = getCollectionPackType(col);
+    if (packType === 'genre' || packType === 'decade' || packType === 'theme') {
+      const packSlug = (col as AdminCustomPack).genreSlug || col.id;
+      const nextPath =
+        packType === 'decade'
+          ? getDecadePath(packSlug)
+          : packType === 'theme'
+          ? getThemePath(packSlug)
+          : getGenrePath(packSlug);
+      setIsCollectionsOpen(false);
+      window.history.pushState({}, document.title, nextPath);
+      startNewGame('collection', col, { clearChallenge: true });
       return;
     }
     const latestSettings = getStoredSettings();
@@ -2445,6 +2617,7 @@ export default function App() {
         />
         {renderAppHeader()}
         <CountryBrowserPage
+          publicConfig={publicConfig}
           onOpenCountry={(code) => handleSelectCountry(code)}
         />
         {renderNavigationModals()}
@@ -2463,7 +2636,51 @@ export default function App() {
         />
         {renderAppHeader()}
         <GenreBrowserPage
+          publicConfig={publicConfig}
           onOpenGenre={(slug) => navigateToPage(getGenrePath(slug))}
+          onOpenCollection={handleCollectionSelect}
+        />
+        {renderNavigationModals()}
+      </div>
+    );
+  }
+
+  if (activeView === 'decades') {
+    return (
+      <div className="relative min-h-screen w-full bg-[#080c0a] text-white flex flex-col overflow-x-hidden font-sans selection:bg-[#00e676] selection:text-black">
+        <GoogleIntegrations config={publicConfig} pageTitle={pageTitle} pagePath={pagePath} />
+        <StageLighting
+          difficulty={currentDifficulty}
+          themeOverride={settings.accentColorOverride}
+          isComplete={false}
+        />
+        {renderAppHeader()}
+        <GenreBrowserPage
+          mode="decades"
+          publicConfig={publicConfig}
+          onOpenGenre={(slug) => navigateToPage(getDecadePath(slug))}
+          onOpenCollection={handleCollectionSelect}
+        />
+        {renderNavigationModals()}
+      </div>
+    );
+  }
+
+  if (activeView === 'themes') {
+    return (
+      <div className="relative min-h-screen w-full bg-[#080c0a] text-white flex flex-col overflow-x-hidden font-sans selection:bg-[#00e676] selection:text-black">
+        <GoogleIntegrations config={publicConfig} pageTitle={pageTitle} pagePath={pagePath} />
+        <StageLighting
+          difficulty={currentDifficulty}
+          themeOverride={settings.accentColorOverride}
+          isComplete={false}
+        />
+        {renderAppHeader()}
+        <GenreBrowserPage
+          mode="themes"
+          publicConfig={publicConfig}
+          onOpenGenre={(slug) => navigateToPage(getThemePath(slug))}
+          onOpenCollection={handleCollectionSelect}
         />
         {renderNavigationModals()}
       </div>

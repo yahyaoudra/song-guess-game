@@ -45,6 +45,6 @@ export function getSongsForRuntimeCountry(countryCode: string, config: PublicRun
 
 export function getSongsForRuntimeGenre(slug: string, config: PublicRuntimeConfig = getInitialPublicRuntimeConfig()): Song[] {
   return getRuntimeCustomPacks(config)
-    .filter((pack) => pack.packType === 'genre' && pack.genreSlug === slug)
+    .filter((pack) => (pack.packType === 'genre' || pack.packType === 'decade' || pack.packType === 'theme') && pack.genreSlug === slug)
     .flatMap((pack) => pack.songs || []);
 }

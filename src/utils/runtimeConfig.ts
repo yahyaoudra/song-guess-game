@@ -1,5 +1,5 @@
 import { COUNTRIES } from '../data/countries';
-import { AdminPageConfig, PublicRuntimeConfig } from '../adminTypes';
+import { AdminCustomPack, AdminPageConfig, PublicRuntimeConfig } from '../adminTypes';
 import {
   getArtistChallenge,
   getCountryName,
@@ -22,6 +22,7 @@ declare global {
 
 const DEFAULT_APP_URL = 'https://songguessgame.online';
 const LEGAL_PATHS = new Set(['privacy', 'gdpr', 'california-privacy', 'california', 'terms', 'cookies']);
+const LEGACY_HOME_PAGE_TITLE = 'Song Guess Game - Music Trivia by Artist, Genre & Country';
 
 export function normalizePublicAppUrl(rawUrl?: string): string {
   const raw = (rawUrl || '').trim();
@@ -173,14 +174,14 @@ export function createDefaultRouteConfig(routeKey: string, appUrl = DEFAULT_APP_
     return {
       countryCode: 'GLOBAL',
       slug: '',
-      pageTitle: 'Song Guess Game - Music Trivia by Artist, Genre & Country',
-      metaDescription: 'Play Song Guess Game online. Guess songs from tiny snippets, explore artist discographies, country packs, genres, multiplayer modes, and unlimited play.',
-      keywords: 'song guess game, heardle, music quiz, song trivia, artist heardle, genre heardle, country music quiz',
+      pageTitle: 'Guess the Song in 1 Second - Song Guess Game',
+      metaDescription: 'Play Guess the Song in 1 Second online. Try a fast Heardle-style song guessing game with artists, genres, countries, decades, multiplayer, and music trivia.',
+      keywords: 'guess the song in 1 second, guess the song, heardle, song guessing game, guess song game, song quiz, music trivia, music quiz',
       canonicalUrl: `${cleanAppUrl}/`,
-      customHeading: 'Guess the Song Game',
-      customIntroText: 'Guess songs by artist, genre, country, and era.',
-      socialTitle: 'Song Guess Game - Music Trivia by Artist, Genre & Country',
-      socialDescription: 'A Heardle-style song guessing game with artists, genres, countries, multiplayer, and unlimited play.',
+      customHeading: 'Guess the Song in 1 Second',
+      customIntroText: 'Play a fast song guessing game by artist, genre, country, decade, and playlist.',
+      socialTitle: 'Guess the Song in 1 Second - Song Guess Game',
+      socialDescription: 'A fast Heardle-style song guessing game with artists, genres, countries, decades, multiplayer, and unlimited play.',
       socialImageUrl: '',
       updatedAt: now
     };
@@ -232,6 +233,40 @@ export function createDefaultRouteConfig(routeKey: string, appUrl = DEFAULT_APP_
       customIntroText: 'Pick a genre or era and start a focused music challenge.',
       socialTitle: 'Browse Genre Heardle Challenges',
       socialDescription: 'Choose a genre or era and play Song Guess Game.',
+      socialImageUrl: '',
+      updatedAt: now
+    };
+  }
+
+  if (routeKey === 'system:decade-index') {
+    return {
+      countryCode: 'GLOBAL',
+      slug: 'play/decade',
+      pageTitle: 'Browse Decade Song Guess Games - Song Guess Game',
+      metaDescription: 'Play decade song guessing games by era, including 70s, 80s, 90s, 2000s, 2010s, and 2020s music quizzes.',
+      keywords: 'decade heardle, 70s music quiz, 80s music quiz, 90s music quiz, 2000s song quiz, song guessing game',
+      canonicalUrl: `${cleanAppUrl}/play/decade`,
+      customHeading: 'Browse Decade Song Guess Games',
+      customIntroText: 'Pick an era and guess songs from short audio snippets.',
+      socialTitle: 'Browse Decade Song Guess Games',
+      socialDescription: 'Choose a decade and play Song Guess Game.',
+      socialImageUrl: '',
+      updatedAt: now
+    };
+  }
+
+  if (routeKey === 'system:theme-index') {
+    return {
+      countryCode: 'GLOBAL',
+      slug: 'play/theme',
+      pageTitle: 'Browse Theme Song Guess Games - Song Guess Game',
+      metaDescription: 'Play themed song guessing games such as holiday, movie, party, and special playlist challenges.',
+      keywords: 'theme heardle, christmas song quiz, disney song quiz, themed music quiz, song guessing game',
+      canonicalUrl: `${cleanAppUrl}/play/theme`,
+      customHeading: 'Browse Theme Song Guess Games',
+      customIntroText: 'Pick a theme and play a focused music guessing challenge.',
+      socialTitle: 'Browse Theme Song Guess Games',
+      socialDescription: 'Choose a theme and play Song Guess Game.',
       socialImageUrl: '',
       updatedAt: now
     };
@@ -294,6 +329,45 @@ export function createDefaultRouteConfig(routeKey: string, appUrl = DEFAULT_APP_
     };
   }
 
+  if (routeKey.startsWith('decade:')) {
+    const slug = slugifyChallenge(routeKey.slice('decade:'.length));
+    const decade = getGenreChallenge(slug);
+    const name = decade?.name || slug.replace(/-/g, ' ');
+    return {
+      countryCode: 'GLOBAL',
+      slug,
+      pageTitle: `${name} Song Guess - Heardle`,
+      metaDescription: `Play the ${name} song guessing challenge. Guess ${name} tracks from short audio snippets.`,
+      keywords: `${name} heardle, ${name} music quiz, ${name} song quiz`,
+      canonicalUrl: `${cleanAppUrl}/play/decade/${slug}`,
+      customHeading: `${name} Song Guess - Heardle`,
+      customIntroText: decade?.description || `Play a focused ${name} music challenge.`,
+      socialTitle: `${name} Song Guess - Heardle`,
+      socialDescription: `Can you recognize ${name} songs from tiny snippets?`,
+      socialImageUrl: decade?.coverImage || '',
+      updatedAt: now
+    };
+  }
+
+  if (routeKey.startsWith('theme:')) {
+    const slug = slugifyChallenge(routeKey.slice('theme:'.length));
+    const name = slug.replace(/-/g, ' ');
+    return {
+      countryCode: 'GLOBAL',
+      slug,
+      pageTitle: `${name} Song Guess - Heardle`,
+      metaDescription: `Play the ${name} themed song guessing challenge. Guess songs from short audio snippets.`,
+      keywords: `${name} heardle, ${name} song guess, themed music quiz`,
+      canonicalUrl: `${cleanAppUrl}/play/theme/${slug}`,
+      customHeading: `${name} Song Guess - Heardle`,
+      customIntroText: `Play a focused ${name} music challenge.`,
+      socialTitle: `${name} Song Guess - Heardle`,
+      socialDescription: `Can you recognize ${name} songs from tiny snippets?`,
+      socialImageUrl: '',
+      updatedAt: now
+    };
+  }
+
   return {
     countryCode: 'GLOBAL',
     slug: 'play',
@@ -351,7 +425,7 @@ export function getCountryCodeFromPath(pathname: string, config = getInitialPubl
 
   if (segment === 'play') {
     if (!segments[1]) return 'GLOBAL';
-    if (segments[1] === 'genre') return null;
+    if (segments[1] === 'genre' || segments[1] === 'decade' || segments[1] === 'theme') return null;
     const playSlug = segments[1];
     const playBySlug = Object.values(config.pageConfigs).find(
       (page) => page.slug.toLowerCase() === playSlug
@@ -374,13 +448,66 @@ export function getArtistPath(slug: string): string {
   return `/artist/${slugifyChallenge(slug)}`;
 }
 
+export function getDecadePath(slug: string): string {
+  return `/play/decade/${slugifyChallenge(slug)}`;
+}
+
 export function getGenrePath(slug: string): string {
   return `/play/genre/${slugifyChallenge(slug)}`;
 }
 
+export function getThemePath(slug: string): string {
+  return `/play/theme/${slugifyChallenge(slug)}`;
+}
+
+function getCustomPackRouteConfig(routeKey: string, config: PublicRuntimeConfig): AdminPageConfig | null {
+  const [routeType, rawSlug] = routeKey.split(':');
+  if (!rawSlug || !['genre', 'decade', 'theme'].includes(routeType)) return null;
+
+  const packType = routeType as AdminCustomPack['packType'];
+  const slug = slugifyChallenge(rawSlug);
+  const pack = (config.customPacks || []).find((item) => (
+    item.packType === packType &&
+    slugifyChallenge(item.genreSlug || item.genreName || item.title) === slug
+  ));
+  if (!pack) return null;
+
+  const cleanAppUrl = normalizePublicAppUrl(config.appUrl);
+  const basePath =
+    packType === 'decade'
+      ? '/play/decade'
+      : packType === 'theme'
+      ? '/play/theme'
+      : '/play/genre';
+  const title = (pack.genreName || pack.title).replace(/\s+/g, ' ').trim();
+  const description = (pack.description || '').replace(/\s+/g, ' ').trim();
+  const songCount = pack.songs?.length || pack.songIds?.length || 0;
+  const categoryLabel = packType === 'theme' ? 'themed' : packType;
+
+  return {
+    countryCode: 'GLOBAL',
+    slug,
+    pageTitle: `${title} Song Guess - Heardle`,
+    metaDescription: description || `Play the ${title} ${categoryLabel} song guessing game with ${songCount || 'available'} songs from short audio snippets.`,
+    keywords: `${title} heardle, ${title} song guess, ${title} music quiz`,
+    canonicalUrl: `${cleanAppUrl}${basePath}/${slug}`,
+    customHeading: `${title} Song Guess - Heardle`,
+    customIntroText: description || `Guess ${title} songs from short audio snippets.`,
+    socialTitle: `${title} Song Guess - Heardle`,
+    socialDescription: description || `Can you recognize ${title} songs from tiny snippets?`,
+    socialImageUrl: pack.coverImage || '',
+    updatedAt: pack.updatedAt || new Date().toISOString()
+  };
+}
+
 export function getRouteConfig(routeKey: string, config = getInitialPublicRuntimeConfig()): AdminPageConfig {
+  const savedConfig = config.routeConfigs?.[routeKey];
+  const routeConfig =
+    routeKey === 'system:home' && savedConfig?.pageTitle === LEGACY_HOME_PAGE_TITLE
+      ? createDefaultRouteConfig(routeKey, config.appUrl)
+      : savedConfig || getCustomPackRouteConfig(routeKey, config) || createDefaultRouteConfig(routeKey, config.appUrl);
   return sanitizeArtistRouteConfig(
-    config.routeConfigs?.[routeKey] || createDefaultRouteConfig(routeKey, config.appUrl),
+    routeConfig,
     routeKey
   );
 }
@@ -391,6 +518,12 @@ export function getRouteDisplayName(routeKey: string): string {
   }
   if (routeKey.startsWith('genre:')) {
     return getGenreChallenge(routeKey.slice('genre:'.length))?.name || routeKey.slice('genre:'.length);
+  }
+  if (routeKey.startsWith('decade:')) {
+    return getGenreChallenge(routeKey.slice('decade:'.length))?.name || routeKey.slice('decade:'.length);
+  }
+  if (routeKey.startsWith('theme:')) {
+    return routeKey.slice('theme:'.length).replace(/-/g, ' ');
   }
   if (routeKey.startsWith('country:')) {
     return getCountryName(routeKey.slice('country:'.length));

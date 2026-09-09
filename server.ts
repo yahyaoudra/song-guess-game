@@ -1872,14 +1872,14 @@ function createDefaultRouteConfig(routeKey: string, appUrl: string): AdminPageCo
     return {
       countryCode: 'GLOBAL',
       slug: '',
-      pageTitle: 'Song Guess Game - Music Trivia by Artist, Genre & Country',
-      metaDescription: 'Play Song Guess Game online. Guess songs from tiny snippets, explore artist discographies, country packs, genres, multiplayer modes, and unlimited play.',
-      keywords: 'song guess game, heardle, music quiz, song trivia, artist heardle, genre heardle, country music quiz',
+      pageTitle: 'Guess the Song in 1 Second - Song Guess Game',
+      metaDescription: 'Play Guess the Song in 1 Second online. Try a fast Heardle-style song guessing game with artists, genres, countries, decades, multiplayer, and music trivia.',
+      keywords: 'guess the song in 1 second, guess the song, heardle, song guessing game, guess song game, song quiz, music trivia, music quiz',
       canonicalUrl: `${appUrl}/`,
-      customHeading: 'Guess the Song Game',
-      customIntroText: 'Guess songs by artist, genre, country, and era.',
-      socialTitle: 'Song Guess Game - Music Trivia by Artist, Genre & Country',
-      socialDescription: 'A Heardle-style song guessing game with artists, genres, countries, multiplayer, and unlimited play.',
+      customHeading: 'Guess the Song in 1 Second',
+      customIntroText: 'Play a fast song guessing game by artist, genre, country, decade, and playlist.',
+      socialTitle: 'Guess the Song in 1 Second - Song Guess Game',
+      socialDescription: 'A fast Heardle-style song guessing game with artists, genres, countries, decades, multiplayer, and unlimited play.',
       socialImageUrl: '',
       updatedAt: now
     };
@@ -1931,6 +1931,40 @@ function createDefaultRouteConfig(routeKey: string, appUrl: string): AdminPageCo
       customIntroText: 'Pick a genre or era and start a focused music challenge.',
       socialTitle: 'Browse Genre Heardle Challenges',
       socialDescription: 'Choose a genre or era and play Song Guess Game.',
+      socialImageUrl: '',
+      updatedAt: now
+    };
+  }
+
+  if (routeKey === 'system:decade-index') {
+    return {
+      countryCode: 'GLOBAL',
+      slug: 'play/decade',
+      pageTitle: 'Browse Decade Song Guess Games - Song Guess Game',
+      metaDescription: 'Play decade song guessing games by era, including 70s, 80s, 90s, 2000s, 2010s, and 2020s music quizzes.',
+      keywords: 'decade heardle, 70s music quiz, 80s music quiz, 90s music quiz, 2000s song quiz, song guessing game',
+      canonicalUrl: `${appUrl}/play/decade`,
+      customHeading: 'Browse Decade Song Guess Games',
+      customIntroText: 'Pick an era and guess songs from short audio snippets.',
+      socialTitle: 'Browse Decade Song Guess Games',
+      socialDescription: 'Choose a decade and play Song Guess Game.',
+      socialImageUrl: '',
+      updatedAt: now
+    };
+  }
+
+  if (routeKey === 'system:theme-index') {
+    return {
+      countryCode: 'GLOBAL',
+      slug: 'play/theme',
+      pageTitle: 'Browse Theme Song Guess Games - Song Guess Game',
+      metaDescription: 'Play themed song guessing games such as holiday, movie, party, and special playlist challenges.',
+      keywords: 'theme heardle, christmas song quiz, disney song quiz, themed music quiz, song guessing game',
+      canonicalUrl: `${appUrl}/play/theme`,
+      customHeading: 'Browse Theme Song Guess Games',
+      customIntroText: 'Pick a theme and play a focused music guessing challenge.',
+      socialTitle: 'Browse Theme Song Guess Games',
+      socialDescription: 'Choose a theme and play Song Guess Game.',
       socialImageUrl: '',
       updatedAt: now
     };
@@ -1993,6 +2027,45 @@ function createDefaultRouteConfig(routeKey: string, appUrl: string): AdminPageCo
     };
   }
 
+  if (routeKey.startsWith('decade:')) {
+    const slug = slugifyChallenge(routeKey.slice('decade:'.length));
+    const decade = getGenreChallenge(slug);
+    const name = decade?.name || slug.replace(/-/g, ' ');
+    return {
+      countryCode: 'GLOBAL',
+      slug,
+      pageTitle: `${name} Song Guess - Heardle`,
+      metaDescription: `Play the ${name} song guessing challenge. Guess ${name} tracks from short audio snippets.`,
+      keywords: `${name} heardle, ${name} music quiz, ${name} song quiz`,
+      canonicalUrl: `${appUrl}/play/decade/${slug}`,
+      customHeading: `${name} Song Guess - Heardle`,
+      customIntroText: decade?.description || `Play a focused ${name} music challenge.`,
+      socialTitle: `${name} Song Guess - Heardle`,
+      socialDescription: `Can you recognize ${name} songs from tiny snippets?`,
+      socialImageUrl: decade?.coverImage || '',
+      updatedAt: now
+    };
+  }
+
+  if (routeKey.startsWith('theme:')) {
+    const slug = slugifyChallenge(routeKey.slice('theme:'.length));
+    const name = slug.replace(/-/g, ' ');
+    return {
+      countryCode: 'GLOBAL',
+      slug,
+      pageTitle: `${name} Song Guess - Heardle`,
+      metaDescription: `Play the ${name} themed song guessing challenge. Guess songs from short audio snippets.`,
+      keywords: `${name} heardle, ${name} song guess, themed music quiz`,
+      canonicalUrl: `${appUrl}/play/theme/${slug}`,
+      customHeading: `${name} Song Guess - Heardle`,
+      customIntroText: `Play a focused ${name} music challenge.`,
+      socialTitle: `${name} Song Guess - Heardle`,
+      socialDescription: `Can you recognize ${name} songs from tiny snippets?`,
+      socialImageUrl: '',
+      updatedAt: now
+    };
+  }
+
   return {
     countryCode: 'GLOBAL',
     slug: 'play',
@@ -2012,7 +2085,7 @@ function createDefaultRouteConfig(routeKey: string, appUrl: string): AdminPageCo
 function sanitizeRouteConfigs(raw: unknown, appUrl: string): Record<string, AdminPageConfig> {
   const source = raw && typeof raw === 'object' ? raw as Record<string, Record<string, unknown>> : {};
   const routeConfigs: Record<string, AdminPageConfig> = {};
-  const validRouteKey = /^(system:(home|play|contact|artist-index|genre-index|country-index)|artist:[a-z0-9-]{1,80}|genre:[a-z0-9-]{1,80})$/;
+  const validRouteKey = /^(system:(home|play|contact|artist-index|genre-index|decade-index|theme-index|country-index)|artist:[a-z0-9-]{1,80}|genre:[a-z0-9-]{1,80}|decade:[a-z0-9-]{1,80}|theme:[a-z0-9-]{1,80})$/;
 
   for (const [routeKey, incoming] of Object.entries(source).slice(0, 400)) {
     if (!validRouteKey.test(routeKey)) continue;
@@ -2060,7 +2133,9 @@ function sanitizeFeaturedArtistSlugs(raw: unknown): string[] {
 }
 
 const COUNTRY_REGIONS = new Set(['Africa', 'Americas', 'Europe', 'Asia', 'Middle East', 'Global']);
-const PACK_TYPES = new Set(['country', 'genre', 'playlist']);
+const PACK_TYPES = new Set(['country', 'genre', 'decade', 'theme', 'playlist']);
+const DECADE_SLUGS = new Set(['70s', '80s', '90s', '2000s', '2010s', '2020s']);
+const LEGACY_HOME_PAGE_TITLE = 'Song Guess Game - Music Trivia by Artist, Genre & Country';
 const DIFFICULTIES = new Set(['EASY', 'MEDIUM', 'HARD', 'EXPERT', 'IMPOSSIBLE']);
 
 function sanitizeCustomCountries(raw: unknown): AdminCustomCountry[] {
@@ -2141,7 +2216,7 @@ function sanitizeCustomPacks(raw: unknown): AdminCustomPack[] {
     if (!id || !title || seen.has(id)) continue;
     seen.add(id);
     const countryCode = safeText(source.countryCode, 12).toUpperCase() || 'GLOBAL';
-    const category = safeText(source.category, 80) || (packType === 'genre' ? 'Genre' : packType === 'country' ? 'Country' : 'Spotify Official');
+    const category = safeText(source.category, 80) || (packType === 'genre' ? 'Genre' : packType === 'decade' ? 'Decade' : packType === 'theme' ? 'Theme' : packType === 'country' ? 'Country' : 'Spotify Official');
     const songs = Array.isArray(source.songs)
       ? source.songs.map((song) => sanitizeCustomPackSong(song, countryCode, category)).filter((song): song is Song => Boolean(song)).slice(0, 120)
       : [];
@@ -2756,12 +2831,17 @@ async function buildCustomPackFromSpotifyPlaylist(options: {
 
   if (songs.length === 0) throw new Error('Spotify returned no usable tracks for that playlist.');
 
-  const idPrefix = packType === 'country' ? `custom-country-${countryCode.toLowerCase()}` : packType === 'genre' ? `custom-genre-${genreSlug}` : 'custom-playlist';
+  const idPrefix =
+    packType === 'country'
+      ? `custom-country-${countryCode.toLowerCase()}`
+      : packType === 'genre' || packType === 'decade' || packType === 'theme'
+      ? `custom-${packType}-${genreSlug}`
+      : 'custom-playlist';
   return {
     id: `${idPrefix}-${slugifyChallenge(title)}`,
     title,
     description: safeText(stripHtml(String(playlist.description || '')), 240) || `${title} Spotify playlist pack.`,
-    category: packType === 'genre' ? genreName : packType === 'country' ? 'Country Playlist' : 'Spotify Official',
+    category: packType === 'genre' || packType === 'decade' || packType === 'theme' ? genreName : packType === 'country' ? 'Country Playlist' : 'Spotify Official',
     countryCode,
     coverImage: safeHttpsUrl(playlist.images?.[0]?.url) || songs[0]?.artworkUrl || '',
     difficulty: songs.length >= 30 ? 'MEDIUM' : 'EASY',
@@ -3572,8 +3652,50 @@ function getRouteOverrideKey(req: Request): string | null {
   if (pathSegments[0] === 'play' && pathSegments[1] === 'country' && !pathSegments[2]) return 'system:country-index';
   if (pathSegments[0] === 'play' && pathSegments[1] === 'genre' && !pathSegments[2]) return 'system:genre-index';
   if (pathSegments[0] === 'play' && pathSegments[1] === 'genre' && pathSegments[2]) return `genre:${slugifyChallenge(pathSegments[2])}`;
+  if (pathSegments[0] === 'play' && pathSegments[1] === 'decade' && !pathSegments[2]) return 'system:decade-index';
+  if (pathSegments[0] === 'play' && pathSegments[1] === 'decade' && pathSegments[2]) return `decade:${slugifyChallenge(pathSegments[2])}`;
+  if (pathSegments[0] === 'play' && pathSegments[1] === 'theme' && !pathSegments[2]) return 'system:theme-index';
+  if (pathSegments[0] === 'play' && pathSegments[1] === 'theme' && pathSegments[2]) return `theme:${slugifyChallenge(pathSegments[2])}`;
   if (pathSegments[0] === 'play' && !pathSegments[1]) return 'system:play';
   return null;
+}
+
+function getCustomPackRouteSeo(routeKey: string, publicConfig: PublicRuntimeConfig): AdminPageConfig | null {
+  const [routeType, rawSlug] = routeKey.split(':');
+  if (!rawSlug || !['genre', 'decade', 'theme'].includes(routeType)) return null;
+
+  const slug = slugifyChallenge(rawSlug);
+  const pack = (publicConfig.customPacks || []).find((item) => (
+    item.packType === routeType &&
+    slugifyChallenge(item.genreSlug || item.genreName || item.title) === slug
+  ));
+  if (!pack) return null;
+
+  const basePath =
+    routeType === 'decade'
+      ? '/play/decade'
+      : routeType === 'theme'
+      ? '/play/theme'
+      : '/play/genre';
+  const title = safeText(pack.genreName || pack.title, 120);
+  const description = safeText(pack.description, 220);
+  const songCount = pack.songs?.length || pack.songIds?.length || 0;
+  const categoryLabel = routeType === 'theme' ? 'themed' : routeType;
+
+  return {
+    countryCode: 'GLOBAL',
+    slug,
+    pageTitle: `${title} Song Guess - Heardle`,
+    metaDescription: description || `Play the ${title} ${categoryLabel} song guessing game with ${songCount || 'available'} songs from short audio snippets.`,
+    keywords: safeText(`${title} heardle, ${title} song guess, ${title} music quiz`, 260),
+    canonicalUrl: `${publicConfig.appUrl}${basePath}/${slug}`,
+    customHeading: `${title} Song Guess - Heardle`,
+    customIntroText: description || `Guess ${title} songs from short audio snippets.`,
+    socialTitle: `${title} Song Guess - Heardle`,
+    socialDescription: description || `Can you recognize ${title} songs from tiny snippets?`,
+    socialImageUrl: safePublicImageUrl(pack.coverImage),
+    updatedAt: safeText(pack.updatedAt, 40) || new Date().toISOString()
+  };
 }
 
 function getRouteSeo(req: Request, publicConfig: PublicRuntimeConfig): AdminPageConfig {
@@ -3619,8 +3741,13 @@ function getRouteSeo(req: Request, publicConfig: PublicRuntimeConfig): AdminPage
 
   const routeKey = getRouteOverrideKey(req);
   if (routeKey) {
+    const savedRouteConfig = publicConfig.routeConfigs[routeKey];
+    const routeConfig =
+      routeKey === 'system:home' && savedRouteConfig?.pageTitle === LEGACY_HOME_PAGE_TITLE
+        ? createDefaultRouteConfig(routeKey, publicConfig.appUrl)
+        : savedRouteConfig || getCustomPackRouteSeo(routeKey, publicConfig) || createDefaultRouteConfig(routeKey, publicConfig.appUrl);
     return sanitizeArtistRouteSeo(
-      publicConfig.routeConfigs[routeKey] || createDefaultRouteConfig(routeKey, publicConfig.appUrl),
+      routeConfig,
       routeKey
     );
   }
@@ -3629,10 +3756,18 @@ function getRouteSeo(req: Request, publicConfig: PublicRuntimeConfig): AdminPage
   return publicConfig.pageConfigs[countryCode] || publicConfig.pageConfigs.GLOBAL;
 }
 
-function getArchiveItemCount(pathname: string): number {
+function getArchiveItemCount(pathname: string, publicConfig: PublicRuntimeConfig): number {
   if (pathname === '/artist') return getArtistChallenges().length;
-  if (pathname === '/play/genre') return getGenreChallenges().length;
-  if (pathname === '/play/country') return COUNTRIES.length;
+  if (pathname === '/play/genre') {
+    return getGenreChallenges().filter((genre) => !DECADE_SLUGS.has(genre.slug)).length
+      + (publicConfig.customPacks || []).filter((pack) => pack.packType === 'genre').length;
+  }
+  if (pathname === '/play/decade') {
+    return getGenreChallenges().filter((genre) => DECADE_SLUGS.has(genre.slug)).length
+      + (publicConfig.customPacks || []).filter((pack) => pack.packType === 'decade').length;
+  }
+  if (pathname === '/play/theme') return (publicConfig.customPacks || []).filter((pack) => pack.packType === 'theme').length;
+  if (pathname === '/play/country') return new Map([...COUNTRIES, ...(publicConfig.customCountries || [])].map((country) => [country.code, country])).size;
   return 0;
 }
 
@@ -3651,7 +3786,7 @@ function getArchivePaginationSeo(req: Request, publicConfig: PublicRuntimeConfig
   prevUrl?: string;
   nextUrl?: string;
 } | null {
-  const itemCount = getArchiveItemCount(req.path);
+  const itemCount = getArchiveItemCount(req.path, publicConfig);
   if (!itemCount) return null;
 
   const totalPages = Math.max(1, Math.ceil(itemCount / ARCHIVE_PAGE_SIZE));
@@ -3675,10 +3810,12 @@ function createServerRenderedSeoContent(req: Request, publicConfig: PublicRuntim
     { href: '/play', label: 'Play Song Guess Game' },
     { href: '/artist', label: 'Artist song games' },
     { href: '/play/country', label: 'Play by country' },
-    { href: '/play/genre', label: 'Play by genre' }
+    { href: '/play/genre', label: 'Play by genre' },
+    { href: '/play/decade', label: 'Play by decade' },
+    { href: '/play/theme', label: 'Play by theme' }
   ];
 
-  if (segments[0] === 'play' && segments[1] && segments[1] !== 'country' && segments[1] !== 'genre') {
+  if (segments[0] === 'play' && segments[1] && !['country', 'genre', 'decade', 'theme'].includes(segments[1])) {
     const country = COUNTRIES.find((item) => getCountryCanonicalPath(item.code, publicConfig) === pathname);
     if (country) {
       links.unshift({ href: getCountryCanonicalPath(country.code, publicConfig), label: `${country.name} song guessing game` });
@@ -3690,6 +3827,18 @@ function createServerRenderedSeoContent(req: Request, publicConfig: PublicRuntim
     if (genre) {
       links.unshift({ href: `/play/genre/${genre.slug}`, label: `${genre.name} Heardle song game` });
     }
+  }
+
+  if (segments[0] === 'play' && segments[1] === 'decade' && segments[2]) {
+    const decade = getGenreChallenge(segments[2]);
+    if (decade) {
+      links.unshift({ href: `/play/decade/${decade.slug}`, label: `${decade.name} song guessing game` });
+    }
+  }
+
+  if (segments[0] === 'play' && segments[1] === 'theme' && segments[2]) {
+    const themeName = segments[2].replace(/-/g, ' ');
+    links.unshift({ href: `/play/theme/${segments[2]}`, label: `${themeName} themed song game` });
   }
 
   if (segments[0] === 'artist' && segments[1]) {
@@ -3861,6 +4010,8 @@ function buildSitemapXml(publicConfig: PublicRuntimeConfig, requestedArtists: Re
     '/play/country',
     '/artist',
     '/play/genre',
+    '/play/decade',
+    '/play/theme',
     '/contact',
     '/privacy',
     '/gdpr',
@@ -3871,17 +4022,29 @@ function buildSitemapXml(publicConfig: PublicRuntimeConfig, requestedArtists: Re
 
   const runtimeCountries = new Map([...COUNTRIES, ...(publicConfig.customCountries || [])].map((country) => [country.code, country]));
   runtimeCountries.forEach((country) => paths.add(getCountryCanonicalPath(country.code, publicConfig)));
-  getGenreChallenges().forEach((genre) => paths.add(`/play/genre/${genre.slug}`));
+  getGenreChallenges().forEach((genre) => {
+    paths.add(DECADE_SLUGS.has(genre.slug) ? `/play/decade/${genre.slug}` : `/play/genre/${genre.slug}`);
+  });
   (publicConfig.customPacks || [])
-    .filter((pack) => pack.packType === 'genre' && pack.genreSlug)
-    .forEach((pack) => paths.add(`/play/genre/${slugifyChallenge(pack.genreSlug || pack.genreName || pack.title)}`));
+    .filter((pack) => (pack.packType === 'genre' || pack.packType === 'decade' || pack.packType === 'theme') && pack.genreSlug)
+    .forEach((pack) => {
+      const routeBase =
+        pack.packType === 'decade'
+          ? '/play/decade'
+          : pack.packType === 'theme'
+          ? '/play/theme'
+          : '/play/genre';
+      paths.add(`${routeBase}/${slugifyChallenge(pack.genreSlug || pack.genreName || pack.title)}`);
+    });
   getArtistChallenges().forEach((artist) => {
     if (!requestedArtistCanonicalMap.has(artist.slug)) paths.add(`/artist/${artist.slug}`);
   });
   const readyRequestedArtists = requestedArtists.filter((artist) => artist.status === 'ready' && artist.songsCount > 0);
   readyRequestedArtists.forEach((artist) => paths.add(`/artist/${artist.slug}`));
   addArchivePagePaths(paths, '/artist', getArtistChallenges().filter((artist) => !requestedArtistCanonicalMap.has(artist.slug)).length + readyRequestedArtists.length);
-  addArchivePagePaths(paths, '/play/genre', getGenreChallenges().length);
+  addArchivePagePaths(paths, '/play/genre', getGenreChallenges().filter((genre) => !DECADE_SLUGS.has(genre.slug)).length + (publicConfig.customPacks || []).filter((pack) => pack.packType === 'genre').length);
+  addArchivePagePaths(paths, '/play/decade', getGenreChallenges().filter((genre) => DECADE_SLUGS.has(genre.slug)).length + (publicConfig.customPacks || []).filter((pack) => pack.packType === 'decade').length);
+  addArchivePagePaths(paths, '/play/theme', (publicConfig.customPacks || []).filter((pack) => pack.packType === 'theme').length);
   addArchivePagePaths(paths, '/play/country', runtimeCountries.size);
 
   const urls = Array.from(paths).map((pagePath) => {
@@ -3917,7 +4080,7 @@ function buildRedirectTarget(req: Request, publicConfig: PublicRuntimeConfig, re
   }
 
   const cleanSegments = cleanPath.split('/').filter(Boolean).map((segment) => decodeURIComponent(segment).toLowerCase());
-  if (cleanSegments[0] === 'play' && cleanSegments[1] && cleanSegments[1] !== 'genre') {
+  if (cleanSegments[0] === 'play' && cleanSegments[1] && !['country', 'genre', 'decade', 'theme'].includes(cleanSegments[1])) {
     const playSegment = cleanSegments[1];
     const byPlaySlug = Object.values(publicConfig.pageConfigs).find(
       (page) => page.slug.toLowerCase() === playSegment
@@ -3940,6 +4103,16 @@ function buildRedirectTarget(req: Request, publicConfig: PublicRuntimeConfig, re
   if (cleanSegments[0] === 'play' && cleanSegments[1] === 'genre' && cleanSegments[2]) {
     const canonicalGenrePath = `/play/genre/${slugifyChallenge(cleanSegments[2])}`;
     if (canonicalGenrePath !== cleanPath) cleanPath = canonicalGenrePath;
+  }
+
+  if (cleanSegments[0] === 'play' && cleanSegments[1] === 'decade' && cleanSegments[2]) {
+    const canonicalDecadePath = `/play/decade/${slugifyChallenge(cleanSegments[2])}`;
+    if (canonicalDecadePath !== cleanPath) cleanPath = canonicalDecadePath;
+  }
+
+  if (cleanSegments[0] === 'play' && cleanSegments[1] === 'theme' && cleanSegments[2]) {
+    const canonicalThemePath = `/play/theme/${slugifyChallenge(cleanSegments[2])}`;
+    if (canonicalThemePath !== cleanPath) cleanPath = canonicalThemePath;
   }
 
   const firstSegment = cleanSegments[0] || '';

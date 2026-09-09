@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { MapPin, Play, Search } from 'lucide-react';
-import { COUNTRIES } from '../data/countries';
-import { QUIZ_COLLECTIONS } from '../data/quizCollections';
+import { PublicRuntimeConfig } from '../adminTypes';
+import { getRuntimeCollections, getRuntimeCountries } from '../utils/customCatalog';
 import { getCountryPath } from '../utils/runtimeConfig';
 import {
   ARCHIVE_PAGE_SIZE,
@@ -12,10 +12,12 @@ import {
 } from '../utils/archivePagination';
 
 interface CountryBrowserPageProps {
+  publicConfig: PublicRuntimeConfig;
   onOpenCountry: (countryCode: string) => void;
 }
 
 export const CountryBrowserPage: React.FC<CountryBrowserPageProps> = ({
+  publicConfig,
   onOpenCountry
 }) => {
   const basePath = '/play/country';
@@ -25,22 +27,24 @@ export const CountryBrowserPage: React.FC<CountryBrowserPageProps> = ({
 
   const packCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    QUIZ_COLLECTIONS.forEach((collection) => {
+    const collections = getRuntimeCollections(publicConfig);
+    collections.forEach((collection) => {
       counts.set(collection.countryCode, (counts.get(collection.countryCode) || 0) + 1);
     });
-    counts.set('GLOBAL', QUIZ_COLLECTIONS.length);
+    counts.set('GLOBAL', collections.length);
     return counts;
-  }, []);
+  }, [publicConfig]);
+  const countries = useMemo(() => getRuntimeCountries(publicConfig), [publicConfig]);
 
   const filteredCountries = useMemo(() => {
     const cleanQuery = query.trim().toLowerCase();
-    if (!cleanQuery) return COUNTRIES;
-    return COUNTRIES.filter((country) => (
+    if (!cleanQuery) return countries;
+    return countries.filter((country) => (
       country.name.toLowerCase().includes(cleanQuery) ||
       country.code.toLowerCase().includes(cleanQuery) ||
       country.popularGenres.some((genre) => genre.toLowerCase().includes(cleanQuery))
     ));
-  }, [query]);
+  }, [countries, query]);
 
   const totalPages = Math.max(1, Math.ceil(filteredCountries.length / ARCHIVE_PAGE_SIZE));
   const safePage = Math.min(currentPage, totalPages);

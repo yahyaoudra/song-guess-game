@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { X, Play, Flame, Music, Search, ExternalLink, LayoutGrid, List, MapPin, Mic2, Tags, Disc3 } from 'lucide-react';
+import { X, Play, Flame, Music, Search, ExternalLink, LayoutGrid, List, MapPin, Mic2, Tags, Disc3, CalendarDays, Sparkles } from 'lucide-react';
 import { QuizCollection, Song } from '../types';
 import { DIFFICULTY_COLORS } from '../data/moroccanSongs';
 import { getArtistPath } from '../utils/runtimeConfig';
@@ -20,7 +20,9 @@ interface QuizCollectionModalProps {
   onClose: () => void;
 }
 
-type LibraryTab = 'countries' | 'artists' | 'genres';
+type LibraryTab = 'countries' | 'artists' | 'genres' | 'decades' | 'themes';
+
+const DECADE_SLUGS = new Set(['70s', '80s', '90s', '2000s', '2010s', '2020s']);
 
 const TAB_OPTIONS: Array<{
   id: LibraryTab;
@@ -29,10 +31,18 @@ const TAB_OPTIONS: Array<{
 }> = [
   { id: 'countries', label: 'Countries', icon: MapPin },
   { id: 'artists', label: 'Artists', icon: Mic2 },
-  { id: 'genres', label: 'Genres', icon: Tags }
+  { id: 'genres', label: 'Genres', icon: Tags },
+  { id: 'decades', label: 'Decades', icon: CalendarDays },
+  { id: 'themes', label: 'Themes', icon: Sparkles }
 ];
 
 function getCollectionLibraryTab(collection: QuizCollection): LibraryTab {
+  if ('packType' in collection && collection.packType === 'decade') return 'decades';
+  if ('packType' in collection && collection.packType === 'theme') return 'themes';
+  if (collection.id.startsWith('genre-global-')) {
+    const match = collection.id.match(/^genre-global-(.+)-deep-library$/);
+    if (match?.[1] && DECADE_SLUGS.has(match[1])) return 'decades';
+  }
   if ('packType' in collection && collection.packType === 'genre') return 'genres';
   if ('packType' in collection && collection.packType === 'country') return 'countries';
   if (collection.id.startsWith('artist-')) return 'artists';
@@ -43,7 +53,8 @@ function getCollectionLibraryTab(collection: QuizCollection): LibraryTab {
 function isCanonicalLibraryCollection(collection: QuizCollection): boolean {
   const tab = getCollectionLibraryTab(collection);
   if (tab === 'artists') return collection.id.endsWith('-artist-profile');
-  if (tab === 'genres') return collection.id.startsWith('genre-global-') && collection.id.endsWith('-deep-library');
+  if (tab === 'genres' || tab === 'decades') return collection.id.startsWith('genre-global-') && collection.id.endsWith('-deep-library');
+  if (tab === 'themes') return 'packType' in collection && collection.packType === 'theme';
   return true;
 }
 
@@ -136,7 +147,7 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
         counts[getCollectionLibraryTab(collection)] += 1;
         return counts;
       },
-      { countries: 0, artists: 0, genres: 0 }
+      { countries: 0, artists: 0, genres: 0, decades: 0, themes: 0 }
     );
   }, [libraryCollections]);
 
@@ -375,7 +386,7 @@ export const QuizCollectionModal: React.FC<QuizCollectionModalProps> = ({
         </div>
 
         {/* Library Tabs */}
-        <div className="grid grid-cols-3 gap-1.5 sm:gap-2 py-3 border-b border-white/5 shrink-0">
+        <div className="grid grid-cols-2 gap-1.5 py-3 border-b border-white/5 shrink-0 sm:grid-cols-5 sm:gap-2">
           {TAB_OPTIONS.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;

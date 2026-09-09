@@ -1753,6 +1753,7 @@ function primaryCountryCode(songs: Song[]): string {
 
 function genreMatchesSong(song: Song, keywords: string[], genreSlug?: string): boolean {
   const isUsOrGlobal = song.countryCode === 'US' || song.countryCode === 'GLOBAL';
+  if (genreSlug === '70s') return isUsOrGlobal && typeof song.releaseYear === 'number' && song.releaseYear >= 1970 && song.releaseYear <= 1979;
   if (genreSlug === '80s') return isUsOrGlobal && typeof song.releaseYear === 'number' && song.releaseYear >= 1980 && song.releaseYear <= 1989;
   if (genreSlug === '90s') return isUsOrGlobal && typeof song.releaseYear === 'number' && song.releaseYear >= 1990 && song.releaseYear <= 1999;
   if (genreSlug === '2000s') return isUsOrGlobal && typeof song.releaseYear === 'number' && song.releaseYear >= 2000 && song.releaseYear <= 2009;
