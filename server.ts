@@ -5812,13 +5812,29 @@ async function startServer() {
         res.json(state);
         return;
       }
+      const scopeType = safeText(req.body?.scopeType, 24) || 'global';
+      const scopeSlug = safeText(req.body?.scopeSlug, 100) || 'play';
+      const claimId = safeText(req.body?.claimId, 160);
+      const anonHash = user ? '' : hashToken(getOrSetAnonId(req, res));
+      const claimDailyKey = claimId
+        ? user
+          ? `${todayUtcDate()}:${user.id}:claim:${hashToken(claimId).slice(0, 32)}`
+          : `${todayUtcDate()}:${anonHash}:claim:${hashToken(claimId).slice(0, 32)}`
+        : '';
+      if (claimDailyKey) {
+        const existingClaimRows = await queryDb<Record<string, unknown>>(
+          'SELECT daily_key FROM sg_daily_plays WHERE daily_key = $1 LIMIT 1',
+          [claimDailyKey]
+        );
+        if (existingClaimRows.length > 0) {
+          res.json({ ...state, allowed: true, reason: undefined });
+          return;
+        }
+      }
       if (!state.allowed) {
         res.status(402).json(state);
         return;
       }
-      const scopeType = safeText(req.body?.scopeType, 24) || 'global';
-      const scopeSlug = safeText(req.body?.scopeSlug, 100) || 'play';
-      const anonHash = user ? '' : hashToken(getOrSetAnonId(req, res));
       const existingRows = user
         ? await queryDb<Record<string, unknown>>(
             `SELECT
@@ -5837,9 +5853,9 @@ async function startServer() {
       const existingCount = user
         ? todayUserCount + todayAnonCount
         : Number(existingRows[0]?.play_count || 0);
-      const dailyKey = user
+      const dailyKey = claimDailyKey || (user
         ? `${todayUtcDate()}:${user.id}:${todayUserCount + 1}`
-        : `${todayUtcDate()}:${anonHash}:${existingCount + 1}`;
+        : `${todayUtcDate()}:${anonHash}:${existingCount + 1}`);
       await queryDb(
         `INSERT INTO sg_daily_plays (daily_key, user_id, anon_hash, play_date, scope_type, scope_slug)
          VALUES ($1, $2, NULLIF($3, ''), $4, $5, $6)

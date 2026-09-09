@@ -103,10 +103,10 @@ export async function getAccessStatus(): Promise<DailyAccessState> {
   return requestJson<DailyAccessState>('/api/entitlements/status', { method: 'POST' });
 }
 
-export async function claimFreePlay(scopeType: string, scopeSlug: string): Promise<DailyAccessState> {
+export async function claimFreePlay(scopeType: string, scopeSlug: string, claimId?: string): Promise<DailyAccessState> {
   return requestJson<DailyAccessState>('/api/entitlements/claim-free-play', {
     method: 'POST',
-    body: JSON.stringify({ scopeType, scopeSlug })
+    body: JSON.stringify({ scopeType, scopeSlug, claimId })
   });
 }
 

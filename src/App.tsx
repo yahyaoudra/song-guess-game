@@ -70,6 +70,7 @@ import { ApiRequestError, claimFreePlay, createCheckout, fetchRequestedArtists, 
 const HAS_SEEN_ONBOARDING_KEY = 'songspot_has_seen_onboarding_v2';
 const FREE_PLAY_DATE_KEY = 'song_guess_free_play_date_v1';
 const FREE_PLAY_SESSION_KEY = 'song_guess_free_play_session_v1';
+const ACTIVE_GAME_STATE_KEY = 'song_guess_active_game_v1';
 const SPOTIFY_ARTIST_SUFFIX_PATTERN = /-[a-z0-9]{8}$/;
 
 function baseArtistSlug(slug: string): string {
@@ -85,19 +86,77 @@ type StartGameOptions = {
   clearChallenge?: boolean;
 };
 
+type RoundHistoryItem = {
+  song: Song;
+  isCorrect: boolean;
+  pointsEarned: number;
+  stepIndex: number;
+};
+
+type PersistedActiveGameState = {
+  version: 1;
+  date: string;
+  gameSessionKey: number;
+  gameMode: GameMode;
+  selectedCountry: string;
+  activeCollectionId?: string | null;
+  activeChallenge?: ActiveChallenge;
+  activeArtistAlbumPackId: string;
+  songs: Song[];
+  roundIndex: number;
+  currentStepIndex: number;
+  isRevealed: boolean;
+  roundHistory: RoundHistoryItem[];
+  gameStartTime: number;
+};
+
+function getPersistedActiveGameState(): PersistedActiveGameState | null {
+  try {
+    const raw = localStorage.getItem(ACTIVE_GAME_STATE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedActiveGameState;
+    if (
+      parsed?.version !== 1 ||
+      parsed.date !== getTodayDateString() ||
+      !Array.isArray(parsed.songs) ||
+      parsed.songs.length === 0 ||
+      !Number.isFinite(parsed.gameSessionKey)
+    ) {
+      localStorage.removeItem(ACTIVE_GAME_STATE_KEY);
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function clearPersistedActiveGameState(): void {
+  try {
+    localStorage.removeItem(ACTIVE_GAME_STATE_KEY);
+  } catch {}
+}
+
 export default function App() {
+  const [restoredActiveGame] = useState<PersistedActiveGameState | null>(() => getPersistedActiveGameState());
   const [publicConfig, setPublicConfig] = useState(getInitialPublicRuntimeConfig());
-  const [settings, setSettings] = useState<UserSettings>(getStoredSettings());
+  const [settings, setSettings] = useState<UserSettings>(() => {
+    const stored = getStoredSettings();
+    return restoredActiveGame ? { ...stored, selectedCountry: restoredActiveGame.selectedCountry } : stored;
+  });
   const [streakData, setStreakData] = useState<StreakData>(() => getDailyStreak());
-  const [gameMode, setGameMode] = useState<GameMode>('daily');
-  const [activeCollection, setActiveCollection] = useState<QuizCollection | null>(() =>
-    getDefaultCollectionForCountry(getStoredSettings().selectedCountry)
-  );
+  const [gameMode, setGameMode] = useState<GameMode>(() => restoredActiveGame?.gameMode || 'daily');
+  const [activeCollection, setActiveCollection] = useState<QuizCollection | null>(() => {
+    if (restoredActiveGame?.activeCollectionId) {
+      return QUIZ_COLLECTIONS.find((collection) => collection.id === restoredActiveGame.activeCollectionId) || null;
+    }
+    return getDefaultCollectionForCountry(restoredActiveGame?.selectedCountry || getStoredSettings().selectedCountry);
+  });
 
   // Active view navigation
   const [activeView, setActiveView] = useState<ActiveView>('game');
   const [legalSection, setLegalSection] = useState<LegalSectionKey>('privacy');
-  const [activeChallenge, setActiveChallenge] = useState<ActiveChallenge>(null);
+  const [activeChallenge, setActiveChallenge] = useState<ActiveChallenge>(() => restoredActiveGame?.activeChallenge || null);
   const [isInterstitialOpen, setIsInterstitialOpen] = useState(false);
   const lastInterstitialPathRef = useRef('');
   const claimedFreePlayKeysRef = useRef<Set<string>>(new Set());
@@ -148,22 +207,15 @@ export default function App() {
   const [artistRequestNotice, setArtistRequestNotice] = useState<string | null>(null);
   const [requestedArtists, setRequestedArtists] = useState<RequestedArtist[]>([]);
   const [requestedArtistsLoaded, setRequestedArtistsLoaded] = useState(false);
-  const [activeArtistAlbumPackId, setActiveArtistAlbumPackId] = useState('all');
+  const [activeArtistAlbumPackId, setActiveArtistAlbumPackId] = useState(() => restoredActiveGame?.activeArtistAlbumPackId || 'all');
   const [secretAdminClicks, setSecretAdminClicks] = useState(0);
 
   // Active Game State
-  const [roundIndex, setRoundIndex] = useState(0); // 0 to 4 (5 rounds)
-  const [currentStepIndex, setCurrentStepIndex] = useState(0); // 0 to 5 (0.1s to 7s)
-  const [isRevealed, setIsRevealed] = useState(false);
-  const [roundHistory, setRoundHistory] = useState<
-    {
-      song: Song;
-      isCorrect: boolean;
-      pointsEarned: number;
-      stepIndex: number;
-    }[]
-  >([]);
-  const [gameStartTime, setGameStartTime] = useState<number>(Date.now());
+  const [roundIndex, setRoundIndex] = useState(() => restoredActiveGame?.roundIndex || 0); // 0 to 4 (5 rounds)
+  const [currentStepIndex, setCurrentStepIndex] = useState(() => restoredActiveGame?.currentStepIndex || 0); // 0 to 5 (0.1s to 7s)
+  const [isRevealed, setIsRevealed] = useState(() => Boolean(restoredActiveGame?.isRevealed));
+  const [roundHistory, setRoundHistory] = useState<RoundHistoryItem[]>(() => restoredActiveGame?.roundHistory || []);
+  const [gameStartTime, setGameStartTime] = useState<number>(() => restoredActiveGame?.gameStartTime || Date.now());
   const [multiplayerRoundEndsAt, setMultiplayerRoundEndsAt] = useState<number | null>(null);
   const [multiplayerSecondsLeft, setMultiplayerSecondsLeft] = useState<number | null>(null);
   const [savedResult, setSavedResult] = useState<GameResult | null>(null);
@@ -171,7 +223,8 @@ export default function App() {
   // Feedback banner state for incorrect guesses
   const [wrongFeedback, setWrongFeedback] = useState<string | null>(null);
 
-  const [gameSessionKey, setGameSessionKey] = useState<number>(() => Date.now());
+  const [gameSessionKey, setGameSessionKey] = useState<number>(() => restoredActiveGame?.gameSessionKey || Date.now());
+  const [restoredGameSongs, setRestoredGameSongs] = useState<Song[] | null>(() => restoredActiveGame?.songs || null);
 
   // Generate freshly randomized songs for Daily (5), Collection (shuffled pack), or Practice (10)
   const gameSongs = useMemo(() => {
@@ -180,6 +233,12 @@ export default function App() {
       cacheSongsMetadata(result, 'GLOBAL', activeMultiplayerSession.id);
       preCacheGameAudioSnippets(result);
       return result;
+    }
+
+    if (restoredGameSongs?.length) {
+      cacheSongsMetadata(restoredGameSongs, settings.selectedCountry || 'GLOBAL', activeCollection?.id);
+      preCacheGameAudioSnippets(restoredGameSongs);
+      return restoredGameSongs;
     }
 
     const countryCode = settings.selectedCountry || 'GLOBAL';
@@ -239,10 +298,54 @@ export default function App() {
     preCacheGameAudioSnippets(result);
 
     return result;
-  }, [activeMultiplayerSession, activeChallenge, activeArtistAlbumPackId, gameMode, activeCollection, settings.selectedCountry, gameSessionKey]);
+  }, [activeMultiplayerSession, restoredGameSongs, activeChallenge, activeArtistAlbumPackId, gameMode, activeCollection, settings.selectedCountry, gameSessionKey]);
 
   const totalRounds = gameSongs.length;
   const currentSong = gameSongs[roundIndex] || ALL_SONGS[0];
+
+  useEffect(() => {
+    if (activeMultiplayerSession || savedResult || isCompleteModalOpen || gameSongs.length === 0) {
+      if (savedResult || isCompleteModalOpen) clearPersistedActiveGameState();
+      return;
+    }
+
+    const snapshot: PersistedActiveGameState = {
+      version: 1,
+      date: getTodayDateString(),
+      gameSessionKey,
+      gameMode,
+      selectedCountry: settings.selectedCountry || 'GLOBAL',
+      activeCollectionId: activeCollection?.id || null,
+      activeChallenge,
+      activeArtistAlbumPackId,
+      songs: gameSongs,
+      roundIndex: Math.max(0, Math.min(roundIndex, gameSongs.length - 1)),
+      currentStepIndex,
+      isRevealed,
+      roundHistory,
+      gameStartTime
+    };
+    try {
+      localStorage.setItem(ACTIVE_GAME_STATE_KEY, JSON.stringify(snapshot));
+    } catch {}
+  }, [
+    activeArtistAlbumPackId,
+    activeChallenge,
+    activeCollection?.id,
+    activeMultiplayerSession,
+    currentStepIndex,
+    gameMode,
+    gameSessionKey,
+    gameSongs,
+    gameStartTime,
+    isCompleteModalOpen,
+    isRevealed,
+    roundHistory,
+    roundIndex,
+    savedResult,
+    settings.selectedCountry
+  ]);
+
   const autocompletePrioritySongs = useMemo(() => {
     if (activeMultiplayerSession) return [];
     if (activeChallenge?.type === 'artist') {
@@ -695,6 +798,8 @@ export default function App() {
   const startNewGame = useCallback((mode: GameMode, collection?: QuizCollection | null, options: StartGameOptions = {}) => {
     setActiveMultiplayerSession(null);
     setIsMultiplayerInfoOpen(false);
+    setRestoredGameSongs(null);
+    clearPersistedActiveGameState();
     setGameMode(mode);
     setActiveCollection(collection || null);
     if (options.clearChallenge) {
@@ -766,7 +871,7 @@ export default function App() {
       const claimKey = `${gameSessionKey}:${roundIndex}:${scope.type}:${scope.slug}`;
       if (claimedFreePlayKeysRef.current.has(claimKey)) return true;
 
-      const state = await claimFreePlay(scope.type, scope.slug);
+      const state = await claimFreePlay(scope.type, scope.slug, claimKey);
       if (!state.allowed && !state.unlimited) {
         if (activeMultiplayerSession) {
           const message = `${currentMultiplayerPlayer?.name || 'A player'} reached the free Daily 5 limit. The room is paused until the creator has unlimited access or the group continues without that player.`;
@@ -904,6 +1009,8 @@ export default function App() {
 
   const activateArtistAlbumPack = useCallback((albumPackId: string) => {
     setActiveArtistAlbumPackId(albumPackId);
+    setRestoredGameSongs(null);
+    clearPersistedActiveGameState();
     setRoundIndex(0);
     setCurrentStepIndex(0);
     setIsRevealed(false);
@@ -1433,6 +1540,8 @@ export default function App() {
     setActiveView('game');
     setActiveChallenge(null);
     setActiveArtistAlbumPackId('all');
+    setRestoredGameSongs(null);
+    clearPersistedActiveGameState();
     setSavedResult(null);
     audioEngine.stop();
     window.history.pushState({}, document.title, getCountryPath(code, publicConfig));
