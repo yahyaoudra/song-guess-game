@@ -1522,6 +1522,10 @@ function sendSpotifyError(res: ExpressResponse, error: unknown, fallback: string
       res.status(502).json({ error: 'Spotify credentials are not allowed to access this catalog endpoint. Check the Spotify app credentials.' });
       return;
     }
+    if (error.status === 404) {
+      res.status(404).json({ error: 'Spotify could not find that playlist. Use a public Spotify playlist URL or playlist ID, not an album, artist, private playlist, or shortened spotify.link URL.' });
+      return;
+    }
   }
 
   res.status(isSpotifyConfigured() ? 502 : 503).json({
@@ -2737,7 +2741,7 @@ async function searchSpotifyArtistSuggestions(query: string): Promise<SpotifyArt
 }
 
 function extractSpotifyPlaylistId(input: string): string {
-  const clean = safeText(input, 220).trim();
+  const clean = safeText(input, 600).trim();
   if (!clean) return '';
   const urlPathMatch = clean.match(/(?:^|\/)playlist\/([A-Za-z0-9]{12,100})(?:[/?#]|$)/i);
   if (urlPathMatch) return urlPathMatch[1];
@@ -2772,16 +2776,16 @@ async function searchSpotifyPlaylistSuggestions(queryOrId: string): Promise<Spot
   if (!isSpotifyConfigured()) {
     throw new Error('Spotify Web API is not configured. Add SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET.');
   }
-  const cleanQuery = safeText(queryOrId, 160);
+  const cleanQuery = safeText(queryOrId, 600);
   if (cleanQuery.length < 2) return [];
   const playlistId = extractSpotifyPlaylistId(cleanQuery);
   if (playlistId) {
-    const playlist = await fetchSpotifyJson<SpotifyPlaylistApiItem>(`/playlists/${encodeURIComponent(playlistId)}?${new URLSearchParams({ market: 'US', fields: 'id,name,description,images,external_urls,owner.display_name,tracks.total' }).toString()}`);
+    const playlist = await fetchSpotifyJson<SpotifyPlaylistApiItem | null>(`/playlists/${encodeURIComponent(playlistId)}?${new URLSearchParams({ market: 'US', fields: 'id,name,description,images,external_urls,owner.display_name,tracks.total' }).toString()}`);
     const suggestion = normalizeSpotifyPlaylistSuggestion(playlist);
     return suggestion ? [suggestion] : [];
   }
   const search = await fetchSpotifyJson<{ playlists?: { items?: Array<SpotifyPlaylistApiItem | null> } | null }>(
-    `/search?${new URLSearchParams({ q: cleanQuery, type: 'playlist', limit: '10', market: 'US' }).toString()}`
+    `/search?${new URLSearchParams({ q: safeText(cleanQuery, 160), type: 'playlist', limit: '10', market: 'US' }).toString()}`
   );
   return (search.playlists?.items || [])
     .map(normalizeSpotifyPlaylistSuggestion)
@@ -2819,11 +2823,13 @@ async function buildCustomPackFromSpotifyPlaylist(options: {
   const playlistId = extractSpotifyPlaylistId(options.playlistIdOrUrl);
   if (!playlistId) throw new Error('Enter a Spotify playlist URL or playlist ID.');
 
-  const playlist = await fetchSpotifyJson<SpotifyPlaylistApiItem>(`/playlists/${encodeURIComponent(playlistId)}?${new URLSearchParams({
+  const playlist = await fetchSpotifyJson<SpotifyPlaylistApiItem | null>(`/playlists/${encodeURIComponent(playlistId)}?${new URLSearchParams({
     market: 'US',
     fields: 'id,name,description,images,external_urls,owner.display_name,tracks.total'
   }).toString()}`);
-  if (!playlist.id) throw new Error('Spotify playlist was not found.');
+  if (!playlist?.id) {
+    throw new Error('Spotify could not find that playlist. Use a public Spotify playlist URL or playlist ID.');
+  }
 
   const packType = PACK_TYPES.has(options.packType) ? options.packType : 'playlist';
   const title = safeText(options.title, 140) || safeText(playlist.name, 140) || 'Spotify Playlist';
