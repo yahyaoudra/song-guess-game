@@ -15,6 +15,7 @@ import {
 } from '../utils/challengeCatalog';
 import { recordFeatureEvent } from '../utils/adminApi';
 import { getPackSearchRank } from '../utils/searchRanking';
+import { shuffleItems, shuffleSongsAcrossAlbums } from '../utils/songRandomization';
 
 interface MultiplayerModalProps {
   onClose: () => void;
@@ -78,15 +79,6 @@ const DEFAULT_TURNS = 3;
 
 function createPlayerId(): string {
   return `player-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-}
-
-function shuffle<T>(items: T[]): T[] {
-  const copy = [...items];
-  for (let index = copy.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(Math.random() * (index + 1));
-    [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
-  }
-  return copy;
 }
 
 function getWsUrl(): string {
@@ -370,7 +362,10 @@ export const MultiplayerModal: React.FC<MultiplayerModalProps> = ({
   const buildRounds = (sessionPlayers: MultiplayerPlayer[]): MultiplayerRound[] => {
     const cleanPlayers = sessionPlayers.slice(0, MAX_PLAYERS);
     const pool = getSongPool();
-    const selectedSongs = shuffle(pool.length > 0 ? pool : ALL_SONGS).slice(0, Math.max(safeTurns * cleanPlayers.length, 1));
+    const randomizedPool = selectedChallenge?.type === 'artist'
+      ? shuffleSongsAcrossAlbums(pool.length > 0 ? pool : ALL_SONGS)
+      : shuffleItems(pool.length > 0 ? pool : ALL_SONGS);
+    const selectedSongs = randomizedPool.slice(0, Math.max(safeTurns * cleanPlayers.length, 1));
     return Array.from({ length: safeTurns }).flatMap((_, turn) =>
       cleanPlayers.map((player, playerIndex) => ({
         playerId: player.id,

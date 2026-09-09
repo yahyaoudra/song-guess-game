@@ -43,6 +43,7 @@ import { audioEngine } from './utils/audioPlayer';
 import { cacheSongsMetadata, preCacheGameAudioSnippets } from './utils/offlineCache';
 import { recordActivity, recordFeatureEvent } from './utils/adminApi';
 import { setAnalyticsUser, trackEvent, trackEventOnce, trackPurchaseOnce, trackReturningUser } from './utils/analytics';
+import { shuffleItems, shuffleSongsAcrossAlbums } from './utils/songRandomization';
 import { getArchivePageHref, parseArchivePage } from './utils/archivePagination';
 import { getPublicHost, getShareUrl } from './utils/domain';
 import {
@@ -172,16 +173,6 @@ export default function App() {
 
   const [gameSessionKey, setGameSessionKey] = useState<number>(() => Date.now());
 
-  // Fisher-Yates array shuffler helper
-  const shuffleArray = useCallback(<T,>(items: readonly T[] | T[]): T[] => {
-    const arr = [...items];
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    return arr;
-  }, []);
-
   // Generate freshly randomized songs for Daily (5), Collection (shuffled pack), or Practice (10)
   const gameSongs = useMemo(() => {
     if (activeMultiplayerSession) {
@@ -192,7 +183,7 @@ export default function App() {
     }
 
     const countryCode = settings.selectedCountry || 'GLOBAL';
-    const challengePool =
+    const challengePool: Song[] =
       activeChallenge?.type === 'artist'
         ? activeChallenge.songs?.length
           ? activeChallenge.songs
@@ -205,22 +196,26 @@ export default function App() {
     const activeArtistAlbumPack = activeChallenge?.type === 'artist' && activeArtistAlbumPackId !== 'all'
       ? activeChallenge.albumPacks?.find((pack) => pack.id === activeArtistAlbumPackId)
       : undefined;
-    const filteredChallengePool = activeArtistAlbumPack
+    const filteredChallengePool: Song[] = activeArtistAlbumPack
       ? challengePool.filter((song) => activeArtistAlbumPack.songIds.includes(song.id))
       : challengePool;
-    const countrySongPool = activeChallenge ? filteredChallengePool : getSongsForCountry(countryCode);
+    const countrySongPool: Song[] = activeChallenge ? filteredChallengePool : getSongsForCountry(countryCode);
 
     let result: Song[] = [];
 
     if (activeChallenge) {
       const roundLimit = gameMode === 'daily' ? 5 : 10;
-      result = shuffleArray(countrySongPool).slice(0, roundLimit);
+      const randomizedPool =
+        activeChallenge.type === 'artist' && activeArtistAlbumPackId === 'all'
+          ? shuffleSongsAcrossAlbums(countrySongPool)
+          : shuffleItems(countrySongPool);
+      result = randomizedPool.slice(0, roundLimit);
     } else if (gameMode === 'collection' && activeCollection) {
       const selected = activeCollection.songs?.length
         ? activeCollection.songs
         : ALL_SONGS.filter((s) => activeCollection.songIds.includes(s.id));
       if (selected.length > 0) {
-        result = shuffleArray(selected);
+        result = shuffleItems(selected);
       } else {
         const categoryMatches = ALL_SONGS.filter(
           (s) =>
@@ -228,15 +223,15 @@ export default function App() {
             activeCollection.title.toLowerCase().includes(s.artist.toLowerCase())
         );
         if (categoryMatches.length > 0) {
-          result = shuffleArray(categoryMatches);
+          result = shuffleItems(categoryMatches);
         } else {
-          result = shuffleArray(countrySongPool).slice(0, 10);
+          result = shuffleItems(countrySongPool).slice(0, 10);
         }
       }
     } else if (gameMode === 'daily') {
-      result = shuffleArray(countrySongPool).slice(0, 5);
+      result = shuffleItems(countrySongPool).slice(0, 5);
     } else {
-      result = shuffleArray(countrySongPool).slice(0, 10);
+      result = shuffleItems(countrySongPool).slice(0, 10);
     }
 
     // Persist to offline cache and pre-warm audio
@@ -244,10 +239,35 @@ export default function App() {
     preCacheGameAudioSnippets(result);
 
     return result;
-  }, [activeMultiplayerSession, activeChallenge, activeArtistAlbumPackId, gameMode, activeCollection, settings.selectedCountry, gameSessionKey, shuffleArray]);
+  }, [activeMultiplayerSession, activeChallenge, activeArtistAlbumPackId, gameMode, activeCollection, settings.selectedCountry, gameSessionKey]);
 
   const totalRounds = gameSongs.length;
   const currentSong = gameSongs[roundIndex] || ALL_SONGS[0];
+  const autocompletePrioritySongs = useMemo(() => {
+    if (activeMultiplayerSession) return [];
+    if (activeChallenge?.type === 'artist') {
+      const baseSongs = activeChallenge.songs?.length
+        ? activeChallenge.songs
+        : activeChallenge.songIds
+        ? ALL_SONGS.filter((song) => activeChallenge.songIds?.includes(song.id))
+        : getSongsByArtistSlug(activeChallenge.slug);
+      const activeAlbumPack = activeArtistAlbumPackId !== 'all'
+        ? activeChallenge.albumPacks?.find((pack) => pack.id === activeArtistAlbumPackId)
+        : undefined;
+      return activeAlbumPack
+        ? baseSongs.filter((song) => activeAlbumPack.songIds.includes(song.id))
+        : baseSongs;
+    }
+    if (activeChallenge?.type === 'genre') {
+      return getSongsByGenreSlug(activeChallenge.slug);
+    }
+    if (activeCollection) {
+      return activeCollection.songs?.length
+        ? activeCollection.songs
+        : ALL_SONGS.filter((song) => activeCollection.songIds.includes(song.id));
+    }
+    return [];
+  }, [activeMultiplayerSession, activeChallenge, activeArtistAlbumPackId, activeCollection]);
   const currentMultiplayerRound = activeMultiplayerSession?.rounds[roundIndex];
   const currentMultiplayerPlayer = activeMultiplayerSession?.players.find((player) => player.id === currentMultiplayerRound?.playerId);
   const nextMultiplayerRound = activeMultiplayerSession?.rounds[roundIndex + 1];
@@ -515,7 +535,19 @@ export default function App() {
             window.history.replaceState({}, document.title, '/artist');
             return;
           }
-          if (nextArtist && (activeChallenge?.type !== 'artist' || activeChallenge.slug !== nextArtist.slug)) {
+          const nextArtistSongCount = nextArtist?.songs?.length || nextArtist?.songIds?.length || 0;
+          const activeArtistSongCount = activeChallenge?.type === 'artist'
+            ? activeChallenge.songs?.length || activeChallenge.songIds?.length || 0
+            : 0;
+          const shouldApplyArtist =
+            Boolean(nextArtist) &&
+            (
+              activeChallenge?.type !== 'artist' ||
+              activeChallenge.slug !== nextArtist?.slug ||
+              (requestedArtist && nextArtistSongCount > activeArtistSongCount) ||
+              (requestedArtist && Boolean(nextArtist?.albumPacks?.length) && !activeChallenge.albumPacks?.length)
+            );
+          if (nextArtist && shouldApplyArtist) {
             audioEngine.stop();
             setActiveChallenge({ type: 'artist', slug: nextArtist.slug, title: nextArtist.name, songIds: nextArtist.songIds, songs: nextArtist.songs, albumPacks: nextArtist.albumPacks });
             setActiveArtistAlbumPackId('all');
@@ -841,6 +873,34 @@ export default function App() {
     setShowAlbumAccessTooltip(false);
     setIsPaywallOpen(true);
   }, []);
+
+  const handlePlayAgain = useCallback(async () => {
+    const session = isAuthLoading ? await refreshAccessState() : authSession;
+    if (session.entitlement.active) {
+      startNewGame('practice');
+      return;
+    }
+
+    try {
+      const state = await getAccessStatus();
+      if (state.allowed || state.unlimited) {
+        startNewGame('practice');
+        return;
+      }
+      setAccessNotice(state.reason || 'Your free Daily 5 is used for today. Sign up to continue or unlock unlimited.');
+    } catch {
+      setAccessNotice('Could not verify free plays. Please sign in to continue.');
+    }
+
+    setIsCompleteModalOpen(false);
+    if (session.authenticated) {
+      setIsPaywallOpen(true);
+    } else {
+      setPendingUnlockAfterAuth(false);
+      setAuthInitialMode('register');
+      setIsAuthOpen(true);
+    }
+  }, [authSession, isAuthLoading, refreshAccessState, startNewGame]);
 
   const activateArtistAlbumPack = useCallback((albumPackId: string) => {
     setActiveArtistAlbumPackId(albumPackId);
@@ -2471,7 +2531,7 @@ export default function App() {
               titleDisplayMode={settings.titleDisplayPreference || 'both'}
               isLastStep={currentStepIndex >= SNIPPET_TIERS.length - 1}
               nextStepLabel={currentStepIndex < SNIPPET_TIERS.length - 1 ? SNIPPET_TIERS[currentStepIndex + 1]?.label : undefined}
-              prioritySongs={gameSongs}
+              prioritySongs={autocompletePrioritySongs}
               disabled={isMultiplayerGuestTurn}
             />
 
@@ -2850,7 +2910,7 @@ export default function App() {
               nickname: settings.nickname
             }
           }
-          onPlayAgain={() => startNewGame('practice')}
+          onPlayAgain={handlePlayAgain}
           onOpenLeaderboard={() => {
             setIsCompleteModalOpen(false);
             setIsLeaderboardOpen(true);
