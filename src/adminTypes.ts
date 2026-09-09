@@ -54,6 +54,7 @@ export interface AdminConfigState {
   featuredArtistSlugs: string[];
   customCountries: AdminCustomCountry[];
   customPacks: AdminCustomPack[];
+  deletedRouteRedirects: Record<string, string>;
   adSlots: AdminAdSlot[];
   robotsTxt: string;
   updatedAt: string;
@@ -69,6 +70,7 @@ export interface PublicRuntimeConfig {
   featuredArtistSlugs: string[];
   customCountries: AdminCustomCountry[];
   customPacks: AdminCustomPack[];
+  deletedRouteRedirects?: Record<string, string>;
   adSlots: AdminAdSlot[];
   robotsTxt?: string;
   generatedAt: string;

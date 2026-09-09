@@ -83,7 +83,7 @@ export async function saveAdminConfig(config: AdminConfigState): Promise<AdminCo
 export async function searchAdminSpotifyPlaylists(query: string): Promise<SpotifyPlaylistSuggestion[]> {
   const params = new URLSearchParams({ q: query });
   const body = await requestJson<{ playlists: SpotifyPlaylistSuggestion[] }>(`/api/admin/spotify/playlists?${params.toString()}`);
-  return body.playlists;
+  return (body.playlists || []).filter((playlist) => Boolean(playlist?.id && playlist.name));
 }
 
 export async function addAdminCustomCountry(country: {
@@ -101,6 +101,13 @@ export async function addAdminCustomCountry(country: {
   });
 }
 
+export async function deleteAdminCustomCountry(countryCode: string, redirectTo = '/'): Promise<{ config: AdminConfigState }> {
+  return requestJson<{ ok: true; config: AdminConfigState }>(`/api/admin/custom-countries/${encodeURIComponent(countryCode)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ redirectTo })
+  });
+}
+
 export async function addAdminSpotifyPlaylistPack(input: {
   playlistIdOrUrl: string;
   packType: AdminCustomPackType;
@@ -115,9 +122,10 @@ export async function addAdminSpotifyPlaylistPack(input: {
   });
 }
 
-export async function deleteAdminCustomPack(packId: string): Promise<{ config: AdminConfigState }> {
+export async function deleteAdminCustomPack(packId: string, redirectTo = '/'): Promise<{ config: AdminConfigState }> {
   return requestJson<{ ok: true; config: AdminConfigState }>(`/api/admin/custom-packs/${encodeURIComponent(packId)}`, {
-    method: 'DELETE'
+    method: 'DELETE',
+    body: JSON.stringify({ redirectTo })
   });
 }
 

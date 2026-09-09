@@ -159,6 +159,7 @@ export function createDefaultPublicRuntimeConfig(): PublicRuntimeConfig {
     featuredArtistSlugs: [],
     customCountries: [],
     customPacks: [],
+    deletedRouteRedirects: {},
     adSlots: [],
     robotsTxt: '',
     generatedAt: new Date().toISOString(),

@@ -42,6 +42,7 @@ import {
   logoutAdmin,
   addAdminCustomCountry,
   addAdminSpotifyPlaylistPack,
+  deleteAdminCustomCountry,
   deleteAdminCustomPack,
   refundAdminPayment,
   resendAbandonedCheckoutEmails,
@@ -101,6 +102,16 @@ const LOCATION_LABELS: Record<AdPlacementLocation, string> = {
 function buildCanonical(appUrl: string, page: AdminPageConfig): string {
   const cleanBase = appUrl.replace(/\/+$/, '');
   return `${cleanBase}${page.countryCode === 'GLOBAL' ? '/play' : `/play/${page.slug}`}`;
+}
+
+function getCustomPackAdminPath(pack: Pick<AdminCustomPack, 'packType' | 'genreSlug' | 'genreName' | 'title'>): string {
+  if (!['genre', 'decade', 'theme'].includes(pack.packType)) return '';
+  const basePath = pack.packType === 'decade' ? '/play/decade' : pack.packType === 'theme' ? '/play/theme' : '/play/genre';
+  const slug = (pack.genreSlug || pack.genreName || pack.title)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug ? `${basePath}/${slug}` : '';
 }
 
 function formatDate(timestamp: number): string {
@@ -748,13 +759,24 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
   };
 
   const handleDeletePlaylistPack = async (packId: string) => {
+    const pack = customPacks.find((item) => item.id === packId);
+    const oldPath = pack ? getCustomPackAdminPath(pack) : '';
+    const confirmed = window.confirm(
+      oldPath
+        ? `Delete this pack?\n\nOld URL ${oldPath} will redirect after deletion.`
+        : 'Delete this pack?'
+    );
+    if (!confirmed) return;
+    const redirectTo = oldPath
+      ? window.prompt('Redirect the deleted URL to this path or full site URL. Leave blank for the home page.', '/') || '/'
+      : '/';
     setSavingPlaylistId(packId);
     setAuthError(null);
     try {
-      const result = await deleteAdminCustomPack(packId);
+      const result = await deleteAdminCustomPack(packId, redirectTo);
       setConfig(result.config);
       onConfigChanged?.(result.config);
-      showToast('Pack removed');
+      showToast(oldPath ? `Pack removed. ${oldPath} redirects to ${redirectTo || '/'}` : 'Pack removed');
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : 'Could not remove pack');
     } finally {
@@ -840,6 +862,22 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
       showToast(`${result.country.name} saved`);
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : 'Could not add country');
+    }
+  };
+
+  const handleDeleteCountry = async (country: AdminCustomCountry) => {
+    const oldPath = `/play/${country.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')}`;
+    const confirmed = window.confirm(`Delete ${country.name}?\n\nThis also removes its custom country playlist packs. Old URL ${oldPath} will redirect after deletion.`);
+    if (!confirmed) return;
+    const redirectTo = window.prompt('Redirect the deleted country URL to this path or full site URL. Leave blank for the home page.', '/') || '/';
+    setAuthError(null);
+    try {
+      const result = await deleteAdminCustomCountry(country.code, redirectTo);
+      setConfig(result.config);
+      onConfigChanged?.(result.config);
+      showToast(`${country.name} deleted. ${oldPath} redirects to ${redirectTo || '/'}`);
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Could not delete country');
     }
   };
 
@@ -1781,7 +1819,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                     ))}
                     {visibleCustomPacks.length === 0 && (
                       <p className="rounded-xl border border-white/10 bg-[#0b100d] p-4 text-xs text-white/45">
-                        No {activeTab === 'genrePacks' ? 'genre' : 'country'} playlist packs added yet.
+                        No {activePackManagerLabel.toLowerCase()} playlist packs added yet.
                       </p>
                     )}
                   </div>
@@ -1813,16 +1851,33 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                   {customCountries.length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {customCountries.map((country) => (
-                        <button
+                        <div
                           key={country.code}
-                          type="button"
-                          onClick={() => beginCountryEdit(country)}
-                          className="rounded-full border border-white/10 bg-[#0b100d] px-3 py-1.5 text-xs font-bold text-white/65 hover:border-[#00e676]/45 hover:text-[#00e676]"
+                          className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-[#0b100d] px-2 py-1 text-xs font-bold text-white/65"
                         >
-                          {country.flag} {country.name}
-                        </button>
+                          <span className="px-1">{country.flag} {country.name}</span>
+                          <button
+                            type="button"
+                            onClick={() => beginCountryEdit(country)}
+                            className="rounded-full px-2 py-1 text-white/55 hover:bg-[#00e676]/10 hover:text-[#00e676]"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteCountry(country)}
+                            className="rounded-full px-2 py-1 text-red-200/70 hover:bg-red-500/10 hover:text-red-100"
+                          >
+                            Remove
+                          </button>
+                        </div>
                       ))}
                     </div>
+                  )}
+                  {config.deletedRouteRedirects && Object.keys(config.deletedRouteRedirects).length > 0 && (
+                    <p className="rounded-xl border border-yellow-400/20 bg-yellow-400/10 p-3 text-xs font-bold text-yellow-100/80">
+                      {Object.keys(config.deletedRouteRedirects).length} deleted public URL redirect{Object.keys(config.deletedRouteRedirects).length === 1 ? '' : 's'} active.
+                    </p>
                   )}
                 </div>
               )}

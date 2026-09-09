@@ -2307,6 +2307,46 @@ function sanitizeAdSlots(raw: unknown): AdminAdSlot[] {
   return sanitized;
 }
 
+function normalizeRedirectPath(value: unknown): string {
+  const raw = safeText(value, 2048);
+  if (!raw) return '/';
+
+  try {
+    const parsed = new URL(raw);
+    return normalizeRedirectPath(`${parsed.pathname}${parsed.search}`);
+  } catch {}
+
+  const withSlash = raw.startsWith('/') ? raw : `/${raw}`;
+  const [pathPart, queryPart = ''] = withSlash.split('?');
+  const cleanPath = `/${pathPart.split('/').filter(Boolean).map((segment) => slugifyRouteSegment(segment) || segment).join('/')}`;
+  if (
+    cleanPath === '/api' ||
+    cleanPath.startsWith('/api/') ||
+    cleanPath === '/assets' ||
+    cleanPath.startsWith('/assets/') ||
+    cleanPath === '/uploads' ||
+    cleanPath.startsWith('/uploads/')
+  ) {
+    return '/';
+  }
+  const cleanQuery = queryPart ? `?${safeText(queryPart, 400).replace(/[<>"']/g, '')}` : '';
+  return `${cleanPath}${cleanQuery}` || '/';
+}
+
+function sanitizeDeletedRouteRedirects(raw: unknown): Record<string, string> {
+  const source = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+  const redirects: Record<string, string> = {};
+
+  for (const [from, to] of Object.entries(source).slice(0, 500)) {
+    const cleanFrom = normalizeRedirectPath(from).split('?')[0];
+    const cleanTo = normalizeRedirectPath(to);
+    if (cleanFrom === '/' || cleanFrom === cleanTo.split('?')[0]) continue;
+    redirects[cleanFrom] = cleanTo || '/';
+  }
+
+  return redirects;
+}
+
 function sanitizeAdminConfig(raw: unknown, req?: Request): AdminConfigState {
   const source = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
   const appUrl = getEffectiveAppUrl(req, { appUrl: safeText(source.appUrl, 2048) || getEnvPublicAppUrl(req) });
@@ -2320,6 +2360,7 @@ function sanitizeAdminConfig(raw: unknown, req?: Request): AdminConfigState {
     featuredArtistSlugs: sanitizeFeaturedArtistSlugs(source.featuredArtistSlugs),
     customCountries: sanitizeCustomCountries(source.customCountries),
     customPacks: sanitizeCustomPacks(source.customPacks),
+    deletedRouteRedirects: sanitizeDeletedRouteRedirects(source.deletedRouteRedirects),
     adSlots: sanitizeAdSlots(source.adSlots),
     robotsTxt: safeMultilineText(source.robotsTxt, 8000),
     updatedAt: safeText(source.updatedAt, 40) || new Date().toISOString()
@@ -2698,6 +2739,8 @@ async function searchSpotifyArtistSuggestions(query: string): Promise<SpotifyArt
 function extractSpotifyPlaylistId(input: string): string {
   const clean = safeText(input, 220).trim();
   if (!clean) return '';
+  const urlPathMatch = clean.match(/(?:^|\/)playlist\/([A-Za-z0-9]{12,100})(?:[/?#]|$)/i);
+  if (urlPathMatch) return urlPathMatch[1];
   const uriMatch = clean.match(/^spotify:playlist:([A-Za-z0-9]+)$/i);
   if (uriMatch) return uriMatch[1];
   try {
@@ -2737,7 +2780,7 @@ async function searchSpotifyPlaylistSuggestions(queryOrId: string): Promise<Spot
     const suggestion = normalizeSpotifyPlaylistSuggestion(playlist);
     return suggestion ? [suggestion] : [];
   }
-  const search = await fetchSpotifyJson<{ playlists?: { items?: SpotifyPlaylistApiItem[] } }>(
+  const search = await fetchSpotifyJson<{ playlists?: { items?: Array<SpotifyPlaylistApiItem | null> } | null }>(
     `/search?${new URLSearchParams({ q: cleanQuery, type: 'playlist', limit: '10', market: 'US' }).toString()}`
   );
   return (search.playlists?.items || [])
@@ -3082,6 +3125,7 @@ function buildPublicConfig(
     featuredArtistSlugs: sanitizeFeaturedArtistSlugs(config.featuredArtistSlugs),
     customCountries: sanitizeCustomCountries(config.customCountries),
     customPacks: sanitizeCustomPacks(config.customPacks),
+    deletedRouteRedirects: sanitizeDeletedRouteRedirects(config.deletedRouteRedirects),
     adSlots: sanitizeAdSlots(config.adSlots),
     robotsTxt: safeMultilineText(config.robotsTxt, 8000),
     generatedAt: new Date().toISOString(),
@@ -3983,6 +4027,18 @@ function getCountryCanonicalPath(countryCode: string, publicConfig: PublicRuntim
   return `/play/${slug}`;
 }
 
+function getCustomPackCanonicalPath(pack: Pick<AdminCustomPack, 'packType' | 'genreSlug' | 'genreName' | 'title'>): string {
+  if (!['genre', 'decade', 'theme'].includes(pack.packType)) return '';
+  const basePath =
+    pack.packType === 'decade'
+      ? '/play/decade'
+      : pack.packType === 'theme'
+      ? '/play/theme'
+      : '/play/genre';
+  const slug = slugifyChallenge(pack.genreSlug || pack.genreName || pack.title);
+  return slug ? `${basePath}/${slug}` : '';
+}
+
 function addArchivePagePaths(paths: Set<string>, basePath: string, itemCount: number): void {
   const totalPages = Math.max(1, Math.ceil(itemCount / ARCHIVE_PAGE_SIZE));
   for (let page = 2; page <= totalPages; page += 1) {
@@ -4077,6 +4133,11 @@ function buildRedirectTarget(req: Request, publicConfig: PublicRuntimeConfig, re
 
   if (cleanPath.length > 1 && cleanPath.endsWith('/')) {
     cleanPath = cleanPath.replace(/\/+$/, '');
+  }
+
+  const deletedRedirectTarget = publicConfig.deletedRouteRedirects?.[cleanPath];
+  if (deletedRedirectTarget) {
+    return deletedRedirectTarget;
   }
 
   const cleanSegments = cleanPath.split('/').filter(Boolean).map((segment) => decodeURIComponent(segment).toLowerCase());
@@ -6252,8 +6313,12 @@ async function startServer() {
         res.status(400).json({ error: 'Enter a unique country code and country name.' });
         return;
       }
+      const countryPath = `/play/${slugifyRouteSegment(country.name)}`;
+      const nextDeletedRouteRedirects = { ...config.deletedRouteRedirects };
+      delete nextDeletedRouteRedirects[countryPath];
       const nextConfig = await saveAdminConfig({
         ...config,
+        deletedRouteRedirects: nextDeletedRouteRedirects,
         customCountries: [
           country,
           ...config.customCountries.filter((item) => item.code !== country.code)
@@ -6281,6 +6346,34 @@ async function startServer() {
     }
   });
 
+  app.delete('/api/admin/custom-countries/:code', requireAdmin, requireAdminCsrf, async (req, res) => {
+    try {
+      const config = await getAdminConfig(req);
+      const code = safeText(req.params.code, 8).toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const country = config.customCountries.find((item) => item.code === code);
+      if (!country) {
+        res.status(404).json({ error: 'Custom country was not found.' });
+        return;
+      }
+      const oldPage = config.pageConfigs[code];
+      const deletedPath = oldPage?.slug ? `/play/${slugifyRouteSegment(oldPage.slug)}` : `/play/${slugifyRouteSegment(country.name)}`;
+      const redirectTo = normalizeRedirectPath(req.body?.redirectTo || '/');
+      const deletedRouteRedirects = { ...config.deletedRouteRedirects, [deletedPath]: redirectTo };
+      const nextPageConfigs = { ...config.pageConfigs };
+      delete nextPageConfigs[code];
+      const nextConfig = await saveAdminConfig({
+        ...config,
+        pageConfigs: nextPageConfigs,
+        deletedRouteRedirects,
+        customCountries: config.customCountries.filter((item) => item.code !== code),
+        customPacks: config.customPacks.filter((pack) => pack.countryCode !== code)
+      }, req);
+      res.json({ ok: true, deletedPath, redirectTo, config: nextConfig });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Could not delete country' });
+    }
+  });
+
   app.post('/api/admin/custom-packs/spotify-playlist', requireAdmin, requireAdminCsrf, async (req, res) => {
     try {
       const config = await getAdminConfig(req);
@@ -6292,8 +6385,12 @@ async function startServer() {
         genreName: safeText(req.body?.genreName, 100),
         genreSlug: safeText(req.body?.genreSlug, 100)
       });
+      const reclaimedPath = getCustomPackCanonicalPath(pack);
+      const nextDeletedRouteRedirects = { ...config.deletedRouteRedirects };
+      if (reclaimedPath) delete nextDeletedRouteRedirects[reclaimedPath];
       const nextConfig = await saveAdminConfig({
         ...config,
+        deletedRouteRedirects: nextDeletedRouteRedirects,
         customPacks: [
           pack,
           ...config.customPacks.filter((item) => item.id !== pack.id)
@@ -6309,11 +6406,17 @@ async function startServer() {
     try {
       const config = await getAdminConfig(req);
       const id = slugifyChallenge(safeText(req.params.id, 120));
+      const pack = config.customPacks.find((item) => item.id === id);
+      const deletedPath = pack ? getCustomPackCanonicalPath(pack) : '';
+      const redirectTo = normalizeRedirectPath(req.body?.redirectTo || '/');
+      const deletedRouteRedirects = { ...config.deletedRouteRedirects };
+      if (deletedPath) deletedRouteRedirects[deletedPath] = redirectTo;
       const nextConfig = await saveAdminConfig({
         ...config,
+        deletedRouteRedirects,
         customPacks: config.customPacks.filter((pack) => pack.id !== id)
       }, req);
-      res.json({ ok: true, config: nextConfig });
+      res.json({ ok: true, deletedPath, redirectTo, config: nextConfig });
     } catch (error) {
       res.status(500).json({ error: error instanceof Error ? error.message : 'Could not delete pack' });
     }
