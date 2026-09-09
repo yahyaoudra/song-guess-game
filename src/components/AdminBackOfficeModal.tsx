@@ -18,6 +18,7 @@ import {
   Search,
   Shield,
   Star,
+  Tags,
   Trash2,
   Users
 } from 'lucide-react';
@@ -54,7 +55,7 @@ import { baseArtistSlug, getArtistChallenges, getGenreChallenges, orderArtistsBy
 import { createDefaultRouteConfig } from '../utils/runtimeConfig';
 import { getSafeImageUrl } from '../utils/safeUrl';
 
-type AdminTab = 'overview' | 'seo' | 'ads' | 'integrations' | 'packs' | 'monetization' | 'activity' | 'robots' | 'security';
+type AdminTab = 'overview' | 'seo' | 'ads' | 'integrations' | 'packs' | 'genrePacks' | 'countryPacks' | 'monetization' | 'activity' | 'robots' | 'security';
 type SeoTargetType = 'home' | 'country' | 'genre' | 'artist';
 type ArtistPackSort = 'name-asc' | 'name-desc' | 'songs-desc' | 'songs-asc' | 'updated-desc' | 'updated-asc' | 'played-desc';
 type ArtistPackStatusFilter = 'all' | 'ready' | 'queued' | 'pending' | 'needs-update';
@@ -72,6 +73,8 @@ const TABS: Array<{ id: AdminTab; label: string; icon: React.ElementType }> = [
   { id: 'ads', label: 'Ads', icon: Layout },
   { id: 'integrations', label: 'Google', icon: Search },
   { id: 'packs', label: 'Artist Packs', icon: Music2 },
+  { id: 'genrePacks', label: 'Genre Packs', icon: Tags },
+  { id: 'countryPacks', label: 'Country Packs', icon: Globe },
   { id: 'monetization', label: 'Monetization', icon: CreditCard },
   { id: 'activity', label: 'Activity', icon: Activity },
   { id: 'robots', label: 'Robots', icon: FileText },
@@ -164,7 +167,6 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
   const [artistPackPage, setArtistPackPage] = useState(1);
   const [artistPackPageSize, setArtistPackPageSize] = useState(24);
   const [refreshingArtistSlug, setRefreshingArtistSlug] = useState('');
-  const [packAdminView, setPackAdminView] = useState<'artists' | 'playlists' | 'countries'>('artists');
   const [playlistPackType, setPlaylistPackType] = useState<AdminCustomPackType>('genre');
   const [playlistQuery, setPlaylistQuery] = useState('');
   const [playlistTitle, setPlaylistTitle] = useState('');
@@ -314,10 +316,33 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
 
   const customPacks = config?.customPacks || [];
   const customCountries = config?.customCountries || [];
+  const visibleCustomPacks = useMemo(() => {
+    if (activeTab === 'genrePacks') return customPacks.filter((pack) => pack.packType === 'genre');
+    if (activeTab === 'countryPacks') return customPacks.filter((pack) => pack.packType === 'country');
+    return customPacks;
+  }, [activeTab, customPacks]);
+  const genrePackSummaries = useMemo(() => {
+    return genreChallenges.map((genre) => ({
+      ...genre,
+      customCount: customPacks.filter((pack) => pack.packType === 'genre' && pack.genreSlug === genre.slug).length
+    }));
+  }, [customPacks, genreChallenges]);
+  const countryPackSummaries = useMemo(() => {
+    const byCode = new Map([...COUNTRIES, ...customCountries].map((country) => [country.code, country]));
+    return Array.from(byCode.values()).map((country) => ({
+      ...country,
+      customCount: customPacks.filter((pack) => pack.packType === 'country' && pack.countryCode === country.code).length
+    }));
+  }, [customCountries, customPacks]);
 
   useEffect(() => {
     setArtistPackPage(1);
   }, [artistPackSearch, artistPackSort, artistPackSourceFilter, artistPackStatusFilter, artistPackPageSize]);
+
+  useEffect(() => {
+    if (activeTab === 'genrePacks') setPlaylistPackType('genre');
+    if (activeTab === 'countryPacks') setPlaylistPackType('country');
+  }, [activeTab]);
 
   useEffect(() => {
     if (!selectedArtistSlug && artistChoices[0]) {
@@ -608,15 +633,17 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
   const handleAddPlaylistPack = async (playlist: SpotifyPlaylistSuggestion | null = null) => {
     const playlistIdOrUrl = playlist?.id || playlistQuery.trim();
     if (!playlistIdOrUrl) return;
+    const effectivePackType: AdminCustomPackType =
+      activeTab === 'countryPacks' ? 'country' : activeTab === 'genrePacks' ? 'genre' : playlistPackType;
     setSavingPlaylistId(playlist?.id || playlistIdOrUrl);
     setAuthError(null);
     try {
       const result = await addAdminSpotifyPlaylistPack({
         playlistIdOrUrl,
-        packType: playlistPackType,
+        packType: effectivePackType,
         title: playlistTitle.trim() || playlist?.name,
-        countryCode: playlistPackType === 'country' ? playlistCountryCode : undefined,
-        genreName: playlistPackType === 'genre' ? playlistGenreName.trim() || playlist?.name : undefined
+        countryCode: effectivePackType === 'country' ? playlistCountryCode : undefined,
+        genreName: effectivePackType === 'genre' ? playlistGenreName.trim() || playlist?.name : undefined
       });
       setConfig(result.config);
       onConfigChanged?.(result.config);
@@ -1460,31 +1487,50 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
             </div>
           )}
 
-          {activeTab === 'packs' && (
+          {(activeTab === 'packs' || activeTab === 'genrePacks' || activeTab === 'countryPacks') && (
             <div className="space-y-4 text-left">
-              <div className="grid gap-2 sm:grid-cols-3">
-                {[
-                  ['artists', 'Artist packs'],
-                  ['playlists', 'Genres & playlists'],
-                  ['countries', 'Countries']
-                ].map(([id, label]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setPackAdminView(id as 'artists' | 'playlists' | 'countries')}
-                    className={`h-11 rounded-xl border text-sm font-black transition-colors ${
-                      packAdminView === id
-                        ? 'border-[#00e676] bg-[#00e676] text-black'
-                        : 'border-white/10 bg-[#0b100d] text-white/60 hover:text-white'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
-              {packAdminView === 'playlists' && (
+              {(activeTab === 'genrePacks' || activeTab === 'countryPacks') && (
                 <div className="space-y-4 rounded-2xl border border-[#00e676]/20 bg-[#0d1a13] p-4">
+                  <div>
+                    <h3 className="text-sm font-black text-white">
+                      {activeTab === 'genrePacks' ? 'Genre playlist manager' : 'Country playlist manager'}
+                    </h3>
+                    <p className="mt-1 text-xs leading-5 text-white/55">
+                      Search Spotify by playlist name, URL, or ID. Added playlists are saved to the public pack selector, archive pages, online room setup, and sitemap through the same production config.
+                    </p>
+                  </div>
+                  {activeTab === 'genrePacks' && (
+                    <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                      {genrePackSummaries.map((genre) => (
+                        <div key={genre.slug} className="rounded-xl border border-white/10 bg-[#0b100d] p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="truncate text-sm font-black text-white">{genre.name}</p>
+                            <span className="shrink-0 rounded-full bg-[#00e676]/10 px-2 py-1 font-mono text-[10px] font-black text-[#00e676]">
+                              {genre.songsCount} songs
+                            </span>
+                          </div>
+                          <p className="mt-1 line-clamp-2 text-xs leading-5 text-white/45">{genre.description}</p>
+                          <p className="mt-2 text-[11px] font-bold text-white/35">{genre.customCount} custom Spotify playlists</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {activeTab === 'countryPacks' && (
+                    <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                      {countryPackSummaries.map((country) => (
+                        <div key={country.code} className="rounded-xl border border-white/10 bg-[#0b100d] p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="truncate text-sm font-black text-white">{country.flag} {country.name}</p>
+                            <span className="shrink-0 rounded-full bg-[#00e676]/10 px-2 py-1 font-mono text-[10px] font-black text-[#00e676]">
+                              {country.code}
+                            </span>
+                          </div>
+                          <p className="mt-1 line-clamp-2 text-xs leading-5 text-white/45">{country.description}</p>
+                          <p className="mt-2 text-[11px] font-bold text-white/35">{country.customCount} custom Spotify playlists</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex flex-col gap-3 md:flex-row md:items-end">
                     <label className="flex-1 text-xs font-black uppercase tracking-wide text-white/35">
                       Spotify playlist name, URL, or ID
@@ -1499,8 +1545,8 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                       Pack type
                       <select
                         value={playlistPackType}
-                        onChange={(event) => setPlaylistPackType(event.target.value as AdminCustomPackType)}
-                        className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-[#00e676] md:w-44"
+                        disabled
+                        className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm normal-case tracking-normal text-white outline-none opacity-70 md:w-44"
                       >
                         <option value="genre">Genre</option>
                         <option value="country">Country</option>
@@ -1550,20 +1596,32 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                             <p className="truncate text-sm font-black text-white">{playlist.name}</p>
                             <p className="truncate text-xs text-white/45">{playlist.ownerName || 'Spotify'} • {playlist.tracksTotal} songs</p>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => void handleAddPlaylistPack(playlist)}
-                            disabled={Boolean(savingPlaylistId)}
-                            className="rounded-lg bg-[#00e676] px-3 py-2 text-xs font-black text-black disabled:opacity-45"
-                          >
-                            {savingPlaylistId === playlist.id ? 'Adding' : 'Add'}
-                          </button>
+                          <div className="flex gap-2">
+                            {playlist.spotifyUrl && (
+                              <a
+                                href={playlist.spotifyUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="rounded-lg border border-[#1DB954]/35 px-3 py-2 text-xs font-black text-[#1DB954] hover:bg-[#1DB954]/10"
+                              >
+                                Spotify
+                              </a>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => void handleAddPlaylistPack(playlist)}
+                              disabled={Boolean(savingPlaylistId)}
+                              className="rounded-lg bg-[#00e676] px-3 py-2 text-xs font-black text-black disabled:opacity-45"
+                            >
+                              {savingPlaylistId === playlist.id ? 'Adding' : 'Add'}
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
                   )}
                   <div className="grid gap-3 xl:grid-cols-2">
-                    {customPacks.map((pack) => (
+                    {visibleCustomPacks.map((pack) => (
                       <div key={pack.id} className="grid grid-cols-[56px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border border-white/10 bg-[#0b100d] p-3">
                         <img src={getSafeImageUrl(pack.coverImage) || ''} alt="" className="h-14 w-14 rounded-lg object-cover" referrerPolicy="no-referrer" />
                         <div className="min-w-0">
@@ -1590,12 +1648,23 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                         </div>
                       </div>
                     ))}
+                    {visibleCustomPacks.length === 0 && (
+                      <p className="rounded-xl border border-white/10 bg-[#0b100d] p-4 text-xs text-white/45">
+                        No {activeTab === 'genrePacks' ? 'genre' : 'country'} playlist packs added yet.
+                      </p>
+                    )}
                   </div>
                 </div>
               )}
 
-              {packAdminView === 'countries' && (
+              {activeTab === 'countryPacks' && (
                 <div className="space-y-4 rounded-2xl border border-[#00e676]/20 bg-[#0d1a13] p-4">
+                  <div>
+                    <h3 className="text-sm font-black text-white">Country manager</h3>
+                    <p className="mt-1 text-xs leading-5 text-white/55">
+                      Add a new country page, then attach Spotify playlists to it above. Country pages are included in public navigation, archive pages, and sitemap after saving.
+                    </p>
+                  </div>
                   <div className="grid gap-3 md:grid-cols-3">
                     <input value={countryDraft.code} onChange={(event) => setCountryDraft((draft) => ({ ...draft, code: event.target.value }))} placeholder="Country code, e.g. DE" className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm text-white outline-none focus:border-[#00e676]" />
                     <input value={countryDraft.name} onChange={(event) => setCountryDraft((draft) => ({ ...draft, name: event.target.value }))} placeholder="Country name" className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm text-white outline-none focus:border-[#00e676]" />
@@ -1620,202 +1689,206 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                 </div>
               )}
 
-              <div className="rounded-2xl border border-[#00e676]/20 bg-[#0d1a13] p-4">
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <h3 className="flex items-center gap-2 text-sm font-black text-white">
-                      <Music2 className="h-4 w-4 text-[#00e676]" />
-                      Manual artist pack updates
-                    </h3>
-                    <p className="mt-1 text-xs leading-5 text-white/55">
-                      Refresh an artist from Spotify when the pack has too few songs. Manual updates replace the stored pack and become the latest update date used across menus, archives, popups, artist pages, and sitemap.
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-white/55">
-                    {artistPackRows.length} shown • {requestedArtists.length + artistChallenges.length} total sources
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid gap-2 lg:grid-cols-[minmax(240px,1fr)_160px_150px_180px_110px]">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/35" />
-                  <input
-                    value={artistPackSearch}
-                    onChange={(event) => setArtistPackSearch(event.target.value)}
-                    placeholder="Search name, song, slug, Spotify ID..."
-                    className="h-11 w-full rounded-xl border border-white/10 bg-[#0b100d] pl-10 pr-3 text-sm text-white outline-none focus:border-[#00e676]"
-                  />
-                </div>
-                <select
-                  value={artistPackStatusFilter}
-                  onChange={(event) => setArtistPackStatusFilter(event.target.value as ArtistPackStatusFilter)}
-                  className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-xs font-bold text-white outline-none focus:border-[#00e676]"
-                >
-                  <option value="all">All statuses</option>
-                  <option value="ready">Ready</option>
-                  <option value="queued">Queued</option>
-                  <option value="pending">Pending</option>
-                  <option value="needs-update">Needs update</option>
-                </select>
-                <select
-                  value={artistPackSourceFilter}
-                  onChange={(event) => setArtistPackSourceFilter(event.target.value as ArtistPackSourceFilter)}
-                  className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-xs font-bold text-white outline-none focus:border-[#00e676]"
-                >
-                  <option value="all">All sources</option>
-                  <option value="spotify">Spotify built</option>
-                  <option value="catalog">Catalog only</option>
-                </select>
-                <select
-                  value={artistPackSort}
-                  onChange={(event) => setArtistPackSort(event.target.value as ArtistPackSort)}
-                  className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-xs font-bold text-white outline-none focus:border-[#00e676]"
-                >
-                  <option value="updated-desc">Newest update</option>
-                  <option value="updated-asc">Oldest update</option>
-                  <option value="songs-desc">Most songs</option>
-                  <option value="played-desc">Most played</option>
-                  <option value="songs-asc">Fewest songs</option>
-                  <option value="name-asc">Name A-Z</option>
-                  <option value="name-desc">Name Z-A</option>
-                </select>
-                <select
-                  value={artistPackPageSize}
-                  onChange={(event) => setArtistPackPageSize(Number(event.target.value) || 24)}
-                  className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-xs font-bold text-white outline-none focus:border-[#00e676]"
-                >
-                  <option value={12}>12/page</option>
-                  <option value={24}>24/page</option>
-                  <option value={48}>48/page</option>
-                  <option value={96}>96/page</option>
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
-                {[
-                  ['All', requestedArtists.length + artistChallenges.length],
-                  ['Spotify built', requestedArtists.filter((artist) => artist.status === 'ready').length],
-                  ['Queued', requestedArtists.filter((artist) => artist.status === 'queued').length],
-                  ['Pending', requestedArtists.filter((artist) => artist.status === 'pending').length],
-                  ['Needs update', artistPackRows.filter((artist) => artist.songsCount < 10).length]
-                ].map(([label, value]) => (
-                  <div key={String(label)} className="rounded-xl border border-white/10 bg-[#0b100d] p-3">
-                    <p className="text-[10px] font-black uppercase tracking-wide text-white/35">{label}</p>
-                    <p className="mt-1 font-mono text-lg font-black text-[#00e676]">{value}</p>
-                  </div>
-                ))}
-              </div>
-
-              <div className="grid gap-3 xl:grid-cols-2">
-                {paginatedArtistPackRows.map((artist) => {
-                  const isRefreshing = refreshingArtistSlug === artist.slug;
-                  const sourceLabel = artist.requested
-                    ? artist.requested.lastRefreshType === 'manual'
-                      ? 'Manual'
-                      : artist.requested.lastRefreshType === 'automatic'
-                      ? 'Automatic'
-                      : 'Spotify'
-                    : 'Catalog';
-                  return (
-                    <div key={artist.slug} className="rounded-2xl border border-white/10 bg-[#0b100d] p-3">
-                      <div className="grid grid-cols-[64px_minmax(0,1fr)] gap-3">
-                        <img
-                          src={getSafeImageUrl(artist.coverImage) || ''}
-                          alt=""
-                          className="h-16 w-16 rounded-xl bg-black/30 object-cover"
-                          referrerPolicy="no-referrer"
-                        />
-                        <div className="min-w-0">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                                <h4 className="truncate text-sm font-black text-white">{artist.name}</h4>
-                                <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-black uppercase text-white/45">
-                                  {artist.status}
-                                </span>
-                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-black uppercase ${
-                                  artist.source === 'spotify' ? 'bg-[#00e676]/10 text-[#00e676]' : 'bg-white/5 text-white/45'
-                                }`}>
-                                  {artist.source === 'spotify' ? 'Spotify' : 'Catalog'}
-                                </span>
-                              </div>
-                              <p className="mt-1 text-xs text-white/45">{artist.songsCount} songs • {artist.playedCount} plays • {sourceLabel} update</p>
-                              <p className="mt-1 truncate font-mono text-[10px] text-white/30">{artist.slug}</p>
-                            </div>
-                            <button
-                              onClick={() => void handleManualArtistPackRefresh(artist)}
-                              disabled={Boolean(refreshingArtistSlug)}
-                              className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-[#00e676] px-3 text-xs font-black text-black hover:bg-[#1fe682] disabled:cursor-wait disabled:opacity-50"
-                            >
-                              <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
-                              {isRefreshing ? 'Updating' : 'Update'}
-                            </button>
-                          </div>
-                          <div className="mt-3 grid gap-2 text-[11px] text-white/55 sm:grid-cols-2">
-                            <div className="rounded-lg bg-white/[0.04] px-2.5 py-2">
-                              <span className="block text-white/30">Last update</span>
-                              <strong className="font-bold text-white/75">{formatIsoDate(artist.requested?.updatedAt || artist.requested?.createdAt)}</strong>
-                            </div>
-                            <div className="rounded-lg bg-white/[0.04] px-2.5 py-2">
-                              <span className="block text-white/30">Next automatic</span>
-                              <strong className="font-bold text-white/75">{formatIsoDate(artist.requested?.nextRefreshAt)}</strong>
-                            </div>
-                          </div>
-                          {artist.requested?.albumPacks && artist.requested.albumPacks.length > 0 && (
-                            <div className="mt-2 flex gap-1">
-                              {artist.requested.albumPacks.slice(0, 5).map((pack) => (
-                                <span key={pack.id} title={`${pack.title} • ${pack.songsCount} songs`} className="h-7 w-7 overflow-hidden rounded-md bg-black/30">
-                                  {getSafeImageUrl(pack.coverImage) && <img src={getSafeImageUrl(pack.coverImage) || ''} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                          {artist.sampleText && (
-                            <p className="mt-2 truncate text-[11px] text-white/40">
-                              {artist.sampleText}
-                            </p>
-                          )}
-                        </div>
+              {activeTab === 'packs' && (
+                <>
+                  <div className="rounded-2xl border border-[#00e676]/20 bg-[#0d1a13] p-4">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <h3 className="flex items-center gap-2 text-sm font-black text-white">
+                          <Music2 className="h-4 w-4 text-[#00e676]" />
+                          Manual artist pack updates
+                        </h3>
+                        <p className="mt-1 text-xs leading-5 text-white/55">
+                          Refresh an artist from Spotify when the pack has too few songs. Manual updates replace the stored pack and become the latest update date used across menus, archives, popups, artist pages, and sitemap.
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-white/55">
+                        {artistPackRows.length} shown • {requestedArtists.length + artistChallenges.length} total sources
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-
-              {artistPackRows.length === 0 && (
-                <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-8 text-center text-xs text-white/45">
-                  No artist packs match that search.
-                </div>
-              )}
-
-              {artistPackRows.length > 0 && (
-                <div className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-[#0b100d] p-3 sm:flex-row sm:items-center sm:justify-between">
-                  <p className="text-xs font-semibold text-white/45">
-                    Showing {(safeArtistPackPage - 1) * artistPackPageSize + 1}-{Math.min(safeArtistPackPage * artistPackPageSize, artistPackRows.length)} of {artistPackRows.length}
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setArtistPackPage((page) => Math.max(1, page - 1))}
-                      disabled={safeArtistPackPage <= 1}
-                      className="h-9 rounded-lg border border-white/10 px-3 text-xs font-black text-white/60 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-35"
-                    >
-                      Previous
-                    </button>
-                    <span className="rounded-lg bg-white/5 px-3 py-2 font-mono text-xs text-white/70">
-                      Page {safeArtistPackPage} / {artistPackTotalPages}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setArtistPackPage((page) => Math.min(artistPackTotalPages, page + 1))}
-                      disabled={safeArtistPackPage >= artistPackTotalPages}
-                      className="h-9 rounded-lg bg-[#00e676] px-3 text-xs font-black text-black hover:bg-[#1fe682] disabled:cursor-not-allowed disabled:opacity-35"
-                    >
-                      Next
-                    </button>
                   </div>
-                </div>
+
+                  <div className="grid gap-2 lg:grid-cols-[minmax(240px,1fr)_160px_150px_180px_110px]">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/35" />
+                      <input
+                        value={artistPackSearch}
+                        onChange={(event) => setArtistPackSearch(event.target.value)}
+                        placeholder="Search name, song, slug, Spotify ID..."
+                        className="h-11 w-full rounded-xl border border-white/10 bg-[#0b100d] pl-10 pr-3 text-sm text-white outline-none focus:border-[#00e676]"
+                      />
+                    </div>
+                    <select
+                      value={artistPackStatusFilter}
+                      onChange={(event) => setArtistPackStatusFilter(event.target.value as ArtistPackStatusFilter)}
+                      className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-xs font-bold text-white outline-none focus:border-[#00e676]"
+                    >
+                      <option value="all">All statuses</option>
+                      <option value="ready">Ready</option>
+                      <option value="queued">Queued</option>
+                      <option value="pending">Pending</option>
+                      <option value="needs-update">Needs update</option>
+                    </select>
+                    <select
+                      value={artistPackSourceFilter}
+                      onChange={(event) => setArtistPackSourceFilter(event.target.value as ArtistPackSourceFilter)}
+                      className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-xs font-bold text-white outline-none focus:border-[#00e676]"
+                    >
+                      <option value="all">All sources</option>
+                      <option value="spotify">Spotify built</option>
+                      <option value="catalog">Catalog only</option>
+                    </select>
+                    <select
+                      value={artistPackSort}
+                      onChange={(event) => setArtistPackSort(event.target.value as ArtistPackSort)}
+                      className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-xs font-bold text-white outline-none focus:border-[#00e676]"
+                    >
+                      <option value="updated-desc">Newest update</option>
+                      <option value="updated-asc">Oldest update</option>
+                      <option value="songs-desc">Most songs</option>
+                      <option value="played-desc">Most played</option>
+                      <option value="songs-asc">Fewest songs</option>
+                      <option value="name-asc">Name A-Z</option>
+                      <option value="name-desc">Name Z-A</option>
+                    </select>
+                    <select
+                      value={artistPackPageSize}
+                      onChange={(event) => setArtistPackPageSize(Number(event.target.value) || 24)}
+                      className="h-11 rounded-xl border border-white/10 bg-[#0b100d] px-3 text-xs font-bold text-white outline-none focus:border-[#00e676]"
+                    >
+                      <option value={12}>12/page</option>
+                      <option value={24}>24/page</option>
+                      <option value={48}>48/page</option>
+                      <option value={96}>96/page</option>
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+                    {[
+                      ['All', requestedArtists.length + artistChallenges.length],
+                      ['Spotify built', requestedArtists.filter((artist) => artist.status === 'ready').length],
+                      ['Queued', requestedArtists.filter((artist) => artist.status === 'queued').length],
+                      ['Pending', requestedArtists.filter((artist) => artist.status === 'pending').length],
+                      ['Needs update', artistPackRows.filter((artist) => artist.songsCount < 10).length]
+                    ].map(([label, value]) => (
+                      <div key={String(label)} className="rounded-xl border border-white/10 bg-[#0b100d] p-3">
+                        <p className="text-[10px] font-black uppercase tracking-wide text-white/35">{label}</p>
+                        <p className="mt-1 font-mono text-lg font-black text-[#00e676]">{value}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="grid gap-3 xl:grid-cols-2">
+                    {paginatedArtistPackRows.map((artist) => {
+                      const isRefreshing = refreshingArtistSlug === artist.slug;
+                      const sourceLabel = artist.requested
+                        ? artist.requested.lastRefreshType === 'manual'
+                          ? 'Manual'
+                          : artist.requested.lastRefreshType === 'automatic'
+                          ? 'Automatic'
+                          : 'Spotify'
+                        : 'Catalog';
+                      return (
+                        <div key={artist.slug} className="rounded-2xl border border-white/10 bg-[#0b100d] p-3">
+                          <div className="grid grid-cols-[64px_minmax(0,1fr)] gap-3">
+                            <img
+                              src={getSafeImageUrl(artist.coverImage) || ''}
+                              alt=""
+                              className="h-16 w-16 rounded-xl bg-black/30 object-cover"
+                              referrerPolicy="no-referrer"
+                            />
+                            <div className="min-w-0">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                    <h4 className="truncate text-sm font-black text-white">{artist.name}</h4>
+                                    <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-black uppercase text-white/45">
+                                      {artist.status}
+                                    </span>
+                                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-black uppercase ${
+                                      artist.source === 'spotify' ? 'bg-[#00e676]/10 text-[#00e676]' : 'bg-white/5 text-white/45'
+                                    }`}>
+                                      {artist.source === 'spotify' ? 'Spotify' : 'Catalog'}
+                                    </span>
+                                  </div>
+                                  <p className="mt-1 text-xs text-white/45">{artist.songsCount} songs • {artist.playedCount} plays • {sourceLabel} update</p>
+                                  <p className="mt-1 truncate font-mono text-[10px] text-white/30">{artist.slug}</p>
+                                </div>
+                                <button
+                                  onClick={() => void handleManualArtistPackRefresh(artist)}
+                                  disabled={Boolean(refreshingArtistSlug)}
+                                  className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-[#00e676] px-3 text-xs font-black text-black hover:bg-[#1fe682] disabled:cursor-wait disabled:opacity-50"
+                                >
+                                  <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                                  {isRefreshing ? 'Updating' : 'Update'}
+                                </button>
+                              </div>
+                              <div className="mt-3 grid gap-2 text-[11px] text-white/55 sm:grid-cols-2">
+                                <div className="rounded-lg bg-white/[0.04] px-2.5 py-2">
+                                  <span className="block text-white/30">Last update</span>
+                                  <strong className="font-bold text-white/75">{formatIsoDate(artist.requested?.updatedAt || artist.requested?.createdAt)}</strong>
+                                </div>
+                                <div className="rounded-lg bg-white/[0.04] px-2.5 py-2">
+                                  <span className="block text-white/30">Next automatic</span>
+                                  <strong className="font-bold text-white/75">{formatIsoDate(artist.requested?.nextRefreshAt)}</strong>
+                                </div>
+                              </div>
+                              {artist.requested?.albumPacks && artist.requested.albumPacks.length > 0 && (
+                                <div className="mt-2 flex gap-1">
+                                  {artist.requested.albumPacks.slice(0, 5).map((pack) => (
+                                    <span key={pack.id} title={`${pack.title} • ${pack.songsCount} songs`} className="h-7 w-7 overflow-hidden rounded-md bg-black/30">
+                                      {getSafeImageUrl(pack.coverImage) && <img src={getSafeImageUrl(pack.coverImage) || ''} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              {artist.sampleText && (
+                                <p className="mt-2 truncate text-[11px] text-white/40">
+                                  {artist.sampleText}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {artistPackRows.length === 0 && (
+                    <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-8 text-center text-xs text-white/45">
+                      No artist packs match that search.
+                    </div>
+                  )}
+
+                  {artistPackRows.length > 0 && (
+                    <div className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-[#0b100d] p-3 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="text-xs font-semibold text-white/45">
+                        Showing {(safeArtistPackPage - 1) * artistPackPageSize + 1}-{Math.min(safeArtistPackPage * artistPackPageSize, artistPackRows.length)} of {artistPackRows.length}
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setArtistPackPage((page) => Math.max(1, page - 1))}
+                          disabled={safeArtistPackPage <= 1}
+                          className="h-9 rounded-lg border border-white/10 px-3 text-xs font-black text-white/60 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-35"
+                        >
+                          Previous
+                        </button>
+                        <span className="rounded-lg bg-white/5 px-3 py-2 font-mono text-xs text-white/70">
+                          Page {safeArtistPackPage} / {artistPackTotalPages}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setArtistPackPage((page) => Math.min(artistPackTotalPages, page + 1))}
+                          disabled={safeArtistPackPage >= artistPackTotalPages}
+                          className="h-9 rounded-lg bg-[#00e676] px-3 text-xs font-black text-black hover:bg-[#1fe682] disabled:cursor-not-allowed disabled:opacity-35"
+                        >
+                          Next
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}

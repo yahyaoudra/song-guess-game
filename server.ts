@@ -3868,8 +3868,12 @@ function buildSitemapXml(publicConfig: PublicRuntimeConfig, requestedArtists: Re
     '/cookies'
   ]);
 
-  COUNTRIES.forEach((country) => paths.add(getCountryCanonicalPath(country.code, publicConfig)));
+  const runtimeCountries = new Map([...COUNTRIES, ...(publicConfig.customCountries || [])].map((country) => [country.code, country]));
+  runtimeCountries.forEach((country) => paths.add(getCountryCanonicalPath(country.code, publicConfig)));
   getGenreChallenges().forEach((genre) => paths.add(`/play/genre/${genre.slug}`));
+  (publicConfig.customPacks || [])
+    .filter((pack) => pack.packType === 'genre' && pack.genreSlug)
+    .forEach((pack) => paths.add(`/play/genre/${slugifyChallenge(pack.genreSlug || pack.genreName || pack.title)}`));
   getArtistChallenges().forEach((artist) => {
     if (!requestedArtistCanonicalMap.has(artist.slug)) paths.add(`/artist/${artist.slug}`);
   });
@@ -3877,7 +3881,7 @@ function buildSitemapXml(publicConfig: PublicRuntimeConfig, requestedArtists: Re
   readyRequestedArtists.forEach((artist) => paths.add(`/artist/${artist.slug}`));
   addArchivePagePaths(paths, '/artist', getArtistChallenges().filter((artist) => !requestedArtistCanonicalMap.has(artist.slug)).length + readyRequestedArtists.length);
   addArchivePagePaths(paths, '/play/genre', getGenreChallenges().length);
-  addArchivePagePaths(paths, '/play/country', COUNTRIES.length);
+  addArchivePagePaths(paths, '/play/country', runtimeCountries.size);
 
   const urls = Array.from(paths).map((pagePath) => {
     const location = `${publicConfig.appUrl}${pagePath === '/' ? '' : pagePath}`;
