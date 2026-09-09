@@ -2682,14 +2682,14 @@ async function fetchSpotifyArtistImageUrl(name: string): Promise<string> {
   const search = await fetchSpotifyJson<{
     artists?: { items?: Array<{ name?: string; images?: Array<{ url?: string }> }> };
   }>(`/search?${new URLSearchParams({ q: name, type: 'artist', limit: '1' }).toString()}`);
-  return search.artists?.items?.[0]?.images?.[0]?.url || '';
+  return firstSpotifyImageUrl(search.artists?.items?.[0]?.images);
 }
 
 type SpotifyArtistApiItem = {
   id?: string;
   name?: string;
   external_urls?: { spotify?: string };
-  images?: Array<{ url?: string }>;
+  images?: Array<{ url?: string } | null>;
   followers?: { total?: number };
   popularity?: number;
   genres?: string[];
@@ -2700,7 +2700,7 @@ type SpotifyPlaylistApiItem = {
   name?: string;
   description?: string;
   external_urls?: { spotify?: string };
-  images?: Array<{ url?: string }>;
+  images?: Array<{ url?: string } | null>;
   owner?: { display_name?: string };
   tracks?: {
     total?: number;
@@ -2710,6 +2710,12 @@ type SpotifyPlaylistApiItem = {
 };
 
 type RequestedArtistAlbumPack = NonNullable<RequestedArtist['albumPacks']>[number];
+
+function firstSpotifyImageUrl(images: unknown): string {
+  if (!Array.isArray(images)) return '';
+  const image = images.find((item) => item && typeof item === 'object' && safeHttpsUrl((item as { url?: unknown }).url));
+  return image && typeof image === 'object' ? safeHttpsUrl((image as { url?: unknown }).url) : '';
+}
 
 function interleaveSpotifyTracksByAlbum(items: Array<{ track: any; album: any }>): Array<{ track: any; album: any }> {
   const groups = new Map<string, Array<{ track: any; album: any }>>();
@@ -2773,7 +2779,7 @@ function normalizeSpotifyArtistSuggestion(artist: SpotifyArtistApiItem): Spotify
   return {
     id,
     name,
-    imageUrl: safeHttpsUrl(artist.images?.[0]?.url),
+    imageUrl: firstSpotifyImageUrl(artist.images),
     spotifyUrl: safeHttpsUrl(artist.external_urls?.spotify),
     followers: Number.isFinite(Number(artist.followers?.total)) ? Number(artist.followers?.total) : undefined,
     popularity: Number.isFinite(Number(artist.popularity)) ? Number(artist.popularity) : undefined,
@@ -2820,7 +2826,7 @@ function normalizeSpotifyPlaylistSuggestion(playlist: SpotifyPlaylistApiItem | n
     id,
     name,
     description: safeText(stripHtml(String(playlist.description || '')), 240),
-    imageUrl: safeHttpsUrl(playlist.images?.[0]?.url),
+    imageUrl: firstSpotifyImageUrl(playlist.images),
     spotifyUrl: safeHttpsUrl(playlist.external_urls?.spotify),
     ownerName: safeText(playlist.owner?.display_name, 100),
     tracksTotal: Math.max(0, Number(playlist.tracks?.total || 0))
@@ -2843,6 +2849,7 @@ async function searchSpotifyPlaylistSuggestions(queryOrId: string): Promise<Spot
     `/search?${new URLSearchParams({ q: safeText(cleanQuery, 160), type: 'playlist', limit: '10', market: 'US' }).toString()}`
   );
   return (search.playlists?.items || [])
+    .filter((playlist): playlist is SpotifyPlaylistApiItem => Boolean(playlist && safeText(playlist.id, 100) && safeText(playlist.name, 160)))
     .map(normalizeSpotifyPlaylistSuggestion)
     .filter((playlist): playlist is SpotifyPlaylistSuggestion => Boolean(playlist));
 }
@@ -2906,7 +2913,7 @@ async function buildCustomPackFromSpotifyPlaylist(options: {
       seen.add(dedupeKey);
       const album = track.album || {};
       const releaseYear = Number(String(album.release_date || '').slice(0, 4));
-      const artworkUrl = safeHttpsUrl(album.images?.[0]?.url || playlist.images?.[0]?.url);
+      const artworkUrl = firstSpotifyImageUrl(album.images) || firstSpotifyImageUrl(playlist.images);
       const directPreview = safeHttpsUrl(track.preview_url);
       const isrc = safeText(track.external_ids?.isrc, 40);
       const params = new URLSearchParams({ title: trackTitle, artist });
@@ -2947,7 +2954,7 @@ async function buildCustomPackFromSpotifyPlaylist(options: {
     description: safeText(stripHtml(String(playlist.description || '')), 240) || `${title} Spotify playlist pack.`,
     category: packType === 'genre' || packType === 'decade' || packType === 'theme' ? genreName : packType === 'country' ? 'Country Playlist' : 'Spotify Official',
     countryCode,
-    coverImage: safeHttpsUrl(playlist.images?.[0]?.url) || songs[0]?.artworkUrl || '',
+    coverImage: firstSpotifyImageUrl(playlist.images) || songs[0]?.artworkUrl || '',
     difficulty: songs.length >= 30 ? 'MEDIUM' : 'EASY',
     songsCount: songs.length,
     songIds: songs.map((song) => song.id),
@@ -3051,7 +3058,7 @@ async function buildRequestedArtistPackFromSpotify(name: string, spotifyArtistId
     const artist = Array.isArray(track.artists) && track.artists.length > 0
       ? track.artists.map((item: any) => safeText(item.name, 120)).filter(Boolean).join(' & ')
       : safeText(spotifyArtist.name, 100) || safeText(name, 100);
-    const artworkUrl = safeHttpsUrl(album?.images?.[0]?.url);
+    const artworkUrl = firstSpotifyImageUrl(album?.images);
     const releaseYear = Number(String(album?.release_date || '').slice(0, 4));
     const directPreview = safeHttpsUrl(track.preview_url);
     const trackId = safeText(track.id, 80);
@@ -3088,7 +3095,7 @@ async function buildRequestedArtistPackFromSpotify(name: string, spotifyArtistId
     songIds: songs.map((song) => song.id),
     songs,
     songsCount: songs.length,
-    coverImage: safeHttpsUrl(spotifyArtist.images?.[0]?.url) || songs[0]?.artworkUrl || '',
+    coverImage: firstSpotifyImageUrl(spotifyArtist.images) || songs[0]?.artworkUrl || '',
     status: 'ready',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

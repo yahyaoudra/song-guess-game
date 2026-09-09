@@ -26,7 +26,7 @@ import {
   Users,
   X
 } from 'lucide-react';
-import { AdminAdSlot, AdminConfigState, AdminCustomCountry, AdminCustomPack, AdminCustomPackType, AdminEmailEvent, AdminFeatureAnalytics, AdminPageConfig, AdminUserProfile, AdminUserSegments, AdPlacementLocation, AdminUserRecord, PaymentRecord, RequestedArtist, SpotifyPlaylistSuggestion } from '../adminTypes';
+import { AdminAdSlot, AdminConfigState, AdminCustomCountry, AdminCustomPack, AdminCustomPackType, AdminEmailEvent, AdminFeatureAnalytics, AdminPageConfig, AdminUserProfile, AdminUserSegments, AdPlacementLocation, AdminUserRecord, PaymentRecord, PricingSettings, RequestedArtist, SpotifyPlaylistSuggestion } from '../adminTypes';
 import { COUNTRIES } from '../data/countries';
 import {
   clearAdminActivity,
@@ -116,8 +116,31 @@ const EMAIL_TEMPLATES = [
   { key: 'abandoned_checkout_3d', label: 'Checkout abandoned after 3 days', match: (category: string) => category === 'abandoned_checkout_3d' }
 ];
 
+const DEFAULT_PRICING_SETTINGS: PricingSettings = {
+  defaultAmountCents: 399,
+  activeAmountCents: 399,
+  originalAmountCents: 399,
+  experimentEnabled: false,
+  experimentMinAmountCents: 299,
+  experimentMaxAmountCents: 399,
+  experimentStepCents: 50,
+  experimentVariants: []
+};
+
 function formatMoneyFromCents(amountCents?: number): string {
   return `$${((amountCents || 0) / 100).toFixed(2)}`;
+}
+
+function getPricingSettings(config?: Partial<AdminConfigState> | null): PricingSettings {
+  const pricing: Partial<PricingSettings> = config?.pricing || {};
+  return {
+    ...DEFAULT_PRICING_SETTINGS,
+    ...pricing,
+    defaultAmountCents: pricing.defaultAmountCents || DEFAULT_PRICING_SETTINGS.defaultAmountCents,
+    activeAmountCents: pricing.activeAmountCents || pricing.defaultAmountCents || DEFAULT_PRICING_SETTINGS.activeAmountCents,
+    originalAmountCents: pricing.originalAmountCents || pricing.defaultAmountCents || DEFAULT_PRICING_SETTINGS.originalAmountCents,
+    experimentVariants: pricing.experimentVariants || []
+  };
 }
 
 function buildCanonical(appUrl: string, page: AdminPageConfig): string {
@@ -523,11 +546,11 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
   }, [adminUsers, signupDateFilter, userFilter, userSearch]);
   const pricingVariants = useMemo(() => {
     type PricingReportRow = { amountCents: number; purchases: number; revenueCents: number };
-    const pricing = config?.pricing;
-    const startedAt = pricing?.experimentStartedAt ? Date.parse(pricing.experimentStartedAt) : 0;
-    const configured = pricing?.experimentVariants?.length
+    const pricing = getPricingSettings(config);
+    const startedAt = pricing.experimentStartedAt ? Date.parse(pricing.experimentStartedAt) : 0;
+    const configured = pricing.experimentVariants?.length
       ? pricing.experimentVariants.map((variant) => variant.amountCents)
-      : [pricing?.defaultAmountCents || 399];
+      : [pricing.defaultAmountCents || 399];
     const byAmount = new Map<number, PricingReportRow>(configured.map((amountCents) => [amountCents, { amountCents, purchases: 0, revenueCents: 0 }]));
     adminPayments
       .filter((payment) => ['paid', 'succeeded'].includes(payment.status) && !payment.refundedAt)
@@ -725,7 +748,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
       const nextConfig = await saveAdminConfig({
         ...config,
         pricing: {
-          ...config.pricing,
+          ...getPricingSettings(config),
           ...updates
         }
       });
@@ -839,6 +862,17 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
     } finally {
       setSearchingPlaylists(false);
     }
+  };
+
+  const openPlaylistEditor = (packType: AdminCustomPackType, groupName = '', countryCode = 'US') => {
+    setPlaylistPackType(packType);
+    setPlaylistSuggestions([]);
+    setPlaylistQuery('');
+    setPlaylistTitle('');
+    setEditingPackId('');
+    setPlaylistCountryCode(countryCode);
+    setPlaylistGenreName(packType === 'country' ? '' : groupName);
+    setIsPlaylistEditorOpen(true);
   };
 
   const handleAddPlaylistPack = async (playlist: SpotifyPlaylistSuggestion | null = null) => {
@@ -1215,6 +1249,8 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
   }
 
   if (!config) return null;
+
+  const pricingConfig = getPricingSettings(config);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/90 backdrop-blur-md animate-in fade-in duration-200 select-none overflow-y-auto">
@@ -1806,14 +1842,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                     </div>
                     <button
                       type="button"
-                      onClick={() => {
-                        setPlaylistPackType(activePackManagerType);
-                        setPlaylistSuggestions([]);
-                        setPlaylistQuery('');
-                        setPlaylistTitle('');
-                        if (activePackManagerType !== 'country') setPlaylistGenreName('');
-                        setIsPlaylistEditorOpen(true);
-                      }}
+                      onClick={() => openPlaylistEditor(activePackManagerType)}
                       className="inline-flex h-10 items-center justify-center rounded-xl bg-[#00e676] px-4 text-xs font-black text-black hover:bg-[#28f28e]"
                     >
                       <Plus className="mr-2 h-4 w-4" />
@@ -1831,7 +1860,16 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                             </span>
                           </div>
                           <p className="mt-1 line-clamp-2 text-xs leading-5 text-white/45">{genre.description}</p>
-                          <p className="mt-2 text-[11px] font-bold text-white/35">{genre.customCount} custom Spotify playlists</p>
+                          <div className="mt-3 flex items-center justify-between gap-2">
+                            <p className="text-[11px] font-bold text-white/35">{genre.customCount} custom Spotify playlists</p>
+                            <button
+                              type="button"
+                              onClick={() => openPlaylistEditor('genre', genre.name)}
+                              className="shrink-0 rounded-lg border border-[#00e676]/35 px-2.5 py-1.5 text-[11px] font-black text-[#00e676] hover:bg-[#00e676]/10"
+                            >
+                              Add playlist
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -1849,13 +1887,22 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                           <p className="mt-1 line-clamp-2 text-xs leading-5 text-white/45">{country.description}</p>
                           <div className="mt-2 flex items-center justify-between gap-2">
                             <p className="text-[11px] font-bold text-white/35">{country.customCount} custom Spotify playlists</p>
-                            <button
-                              type="button"
-                              onClick={() => beginCountryEdit(country)}
-                              className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[11px] font-black text-white/60 hover:border-[#00e676]/45 hover:text-[#00e676]"
-                            >
-                              Edit
-                            </button>
+                            <div className="flex shrink-0 gap-1">
+                              <button
+                                type="button"
+                                onClick={() => openPlaylistEditor('country', '', country.code)}
+                                className="rounded-lg border border-[#00e676]/35 px-2.5 py-1.5 text-[11px] font-black text-[#00e676] hover:bg-[#00e676]/10"
+                              >
+                                Add playlist
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => beginCountryEdit(country)}
+                                className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[11px] font-black text-white/60 hover:border-[#00e676]/45 hover:text-[#00e676]"
+                              >
+                                Edit country
+                              </button>
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -1872,7 +1919,16 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                             </span>
                           </div>
                           <p className="mt-1 line-clamp-2 text-xs leading-5 text-white/45">{decade.description}</p>
-                          <p className="mt-2 text-[11px] font-bold text-white/35">{decade.customCount} custom Spotify playlists</p>
+                          <div className="mt-3 flex items-center justify-between gap-2">
+                            <p className="text-[11px] font-bold text-white/35">{decade.customCount} custom Spotify playlists</p>
+                            <button
+                              type="button"
+                              onClick={() => openPlaylistEditor('decade', decade.name)}
+                              className="shrink-0 rounded-lg border border-[#00e676]/35 px-2.5 py-1.5 text-[11px] font-black text-[#00e676] hover:bg-[#00e676]/10"
+                            >
+                              Add playlist
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -1892,11 +1948,30 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                             </span>
                           </div>
                           <p className="mt-1 line-clamp-2 text-xs leading-5 text-white/45">{theme.description}</p>
-                          <p className="mt-2 text-[11px] font-bold text-white/35">{theme.customCount} custom Spotify playlists</p>
+                          <div className="mt-3 flex items-center justify-between gap-2">
+                            <p className="text-[11px] font-bold text-white/35">{theme.customCount} custom Spotify playlists</p>
+                            <button
+                              type="button"
+                              onClick={() => openPlaylistEditor('theme', theme.name)}
+                              className="shrink-0 rounded-lg border border-[#00e676]/35 px-2.5 py-1.5 text-[11px] font-black text-[#00e676] hover:bg-[#00e676]/10"
+                            >
+                              Add playlist
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
                   )}
+                  <div className="flex items-center justify-between gap-3 border-t border-white/10 pt-2">
+                    <div>
+                      <h4 className="text-xs font-black uppercase tracking-wide text-white/45">
+                        Saved {activePackManagerLabel.toLowerCase()} playlists
+                      </h4>
+                      <p className="mt-1 text-[11px] text-white/35">
+                        Edit, refresh, or remove the Spotify playlists already connected to this section.
+                      </p>
+                    </div>
+                  </div>
                   <div className="grid gap-3 xl:grid-cols-2">
                     {visibleCustomPacks.map((pack) => (
                       <div key={pack.id} className="rounded-xl border border-white/10 bg-[#0b100d] p-3">
@@ -2360,15 +2435,15 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
               <div className="grid gap-3 md:grid-cols-4">
                 <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-4">
                   <p className="text-[11px] font-black uppercase tracking-wide text-white/35">Default price</p>
-                  <p className="mt-1 text-2xl font-black text-white">{formatMoneyFromCents(config.pricing.defaultAmountCents)}</p>
+                  <p className="mt-1 text-2xl font-black text-white">{formatMoneyFromCents(pricingConfig.defaultAmountCents)}</p>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-4">
                   <p className="text-[11px] font-black uppercase tracking-wide text-white/35">Active checkout</p>
-                  <p className="mt-1 text-2xl font-black text-[#00e676]">{formatMoneyFromCents(config.pricing.activeAmountCents)}</p>
+                  <p className="mt-1 text-2xl font-black text-[#00e676]">{formatMoneyFromCents(pricingConfig.activeAmountCents)}</p>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-4">
                   <p className="text-[11px] font-black uppercase tracking-wide text-white/35">Experiment</p>
-                  <p className="mt-1 text-sm font-black text-white">{config.pricing.experimentEnabled ? 'Running' : 'Stopped'}</p>
+                  <p className="mt-1 text-sm font-black text-white">{pricingConfig.experimentEnabled ? 'Running' : 'Stopped'}</p>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-4">
                   <p className="text-[11px] font-black uppercase tracking-wide text-white/35">Winner so far</p>
@@ -2383,19 +2458,23 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                 <div className="mt-4 grid gap-3 md:grid-cols-4">
                   <label className="text-xs font-black uppercase tracking-wide text-white/35">
                     Default price
-                    <input type="number" step="0.01" value={(config.pricing.defaultAmountCents / 100).toFixed(2)} onChange={(event) => updateConfig((current) => ({ ...current, pricing: { ...current.pricing, defaultAmountCents: Math.round(Number(event.target.value || 0) * 100), activeAmountCents: current.pricing.experimentEnabled ? current.pricing.activeAmountCents : Math.round(Number(event.target.value || 0) * 100), originalAmountCents: Math.round(Number(event.target.value || 0) * 100) } }))} className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-[#00e676]" />
+                    <input type="number" step="0.01" value={(pricingConfig.defaultAmountCents / 100).toFixed(2)} onChange={(event) => updateConfig((current) => {
+                      const currentPricing = getPricingSettings(current);
+                      const amountCents = Math.round(Number(event.target.value || 0) * 100);
+                      return { ...current, pricing: { ...currentPricing, defaultAmountCents: amountCents, activeAmountCents: currentPricing.experimentEnabled ? currentPricing.activeAmountCents : amountCents, originalAmountCents: amountCents } };
+                    })} className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-[#00e676]" />
                   </label>
                   <label className="text-xs font-black uppercase tracking-wide text-white/35">
                     Min test price
-                    <input type="number" step="0.01" value={((config.pricing.experimentMinAmountCents || 299) / 100).toFixed(2)} onChange={(event) => updateConfig((current) => ({ ...current, pricing: { ...current.pricing, experimentMinAmountCents: Math.round(Number(event.target.value || 0) * 100) } }))} className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-[#00e676]" />
+                    <input type="number" step="0.01" value={((pricingConfig.experimentMinAmountCents || 299) / 100).toFixed(2)} onChange={(event) => updateConfig((current) => ({ ...current, pricing: { ...getPricingSettings(current), experimentMinAmountCents: Math.round(Number(event.target.value || 0) * 100) } }))} className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-[#00e676]" />
                   </label>
                   <label className="text-xs font-black uppercase tracking-wide text-white/35">
                     Max test price
-                    <input type="number" step="0.01" value={((config.pricing.experimentMaxAmountCents || config.pricing.defaultAmountCents) / 100).toFixed(2)} onChange={(event) => updateConfig((current) => ({ ...current, pricing: { ...current.pricing, experimentMaxAmountCents: Math.round(Number(event.target.value || 0) * 100) } }))} className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-[#00e676]" />
+                    <input type="number" step="0.01" value={((pricingConfig.experimentMaxAmountCents || pricingConfig.defaultAmountCents) / 100).toFixed(2)} onChange={(event) => updateConfig((current) => ({ ...current, pricing: { ...getPricingSettings(current), experimentMaxAmountCents: Math.round(Number(event.target.value || 0) * 100) } }))} className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-[#00e676]" />
                   </label>
                   <label className="text-xs font-black uppercase tracking-wide text-white/35">
                     Breakpoint
-                    <input type="number" step="0.01" value={((config.pricing.experimentStepCents || 50) / 100).toFixed(2)} onChange={(event) => updateConfig((current) => ({ ...current, pricing: { ...current.pricing, experimentStepCents: Math.round(Number(event.target.value || 0) * 100) } }))} className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-[#00e676]" />
+                    <input type="number" step="0.01" value={((pricingConfig.experimentStepCents || 50) / 100).toFixed(2)} onChange={(event) => updateConfig((current) => ({ ...current, pricing: { ...getPricingSettings(current), experimentStepCents: Math.round(Number(event.target.value || 0) * 100) } }))} className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0b100d] px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-[#00e676]" />
                   </label>
                 </div>
                 <div className="mt-4 flex flex-wrap gap-2">
@@ -2405,7 +2484,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
                   <button type="button" onClick={() => void handleSavePricing({ experimentEnabled: true, experimentStartedAt: new Date().toISOString() }, 'Price experiment started')} disabled={saving} className="h-10 rounded-xl bg-[#00e676] px-4 text-xs font-black text-black disabled:opacity-50">
                     Start experiment now
                   </button>
-                  <button type="button" onClick={() => void handleSavePricing({ experimentEnabled: false, activeAmountCents: config.pricing.defaultAmountCents }, 'Price experiment stopped')} disabled={saving} className="h-10 rounded-xl border border-red-400/35 bg-red-400/10 px-4 text-xs font-black text-red-100 disabled:opacity-50">
+                  <button type="button" onClick={() => void handleSavePricing({ experimentEnabled: false, activeAmountCents: pricingConfig.defaultAmountCents }, 'Price experiment stopped')} disabled={saving} className="h-10 rounded-xl border border-red-400/35 bg-red-400/10 px-4 text-xs font-black text-red-100 disabled:opacity-50">
                     Stop and use default
                   </button>
                   {winningPriceVariant && (
@@ -2417,7 +2496,7 @@ export const AdminBackOfficeModal: React.FC<AdminBackOfficeModalProps> = ({
               </div>
               <div className="rounded-2xl border border-white/10 bg-[#0b100d] p-4">
                 <h3 className="text-sm font-black text-white">Experiment sales since start</h3>
-                <p className="mt-1 text-xs text-white/45">Started: {formatIsoDate(config.pricing.experimentStartedAt)}</p>
+                <p className="mt-1 text-xs text-white/45">Started: {formatIsoDate(pricingConfig.experimentStartedAt)}</p>
                 <div className="mt-3 grid gap-2 md:grid-cols-3">
                   {pricingVariants.map((variant) => (
                     <div key={variant.amountCents} className={`rounded-xl border p-3 ${winningPriceVariant?.amountCents === variant.amountCents ? 'border-[#00e676]/45 bg-[#00e676]/10' : 'border-white/10 bg-[#121915]'}`}>
