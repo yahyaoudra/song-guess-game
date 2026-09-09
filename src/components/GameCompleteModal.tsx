@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Check, X, Share2, Trophy, RotateCcw, ShieldCheck, CheckCheck, AlertCircle, Flame, Download, Mic2, Tags } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { GameResult, UserSettings } from '../types';
@@ -34,6 +34,7 @@ export const GameCompleteModal: React.FC<GameCompleteModalProps> = ({
   const [isDownloadingCard, setIsDownloadingCard] = useState(false);
   const [downloadedCard, setDownloadedCard] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const confettiCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const correctCount = result.rounds.filter((r) => r.isCorrect).length;
   const activeCountry = COUNTRIES.find((c) => c.code === (result.countryCode || settings.selectedCountry)) || COUNTRIES[0];
@@ -52,6 +53,9 @@ export const GameCompleteModal: React.FC<GameCompleteModalProps> = ({
       : getCountryPath(result.countryCode || settings.selectedCountry);
 
   useEffect(() => {
+    const canvas = confettiCanvasRef.current;
+    if (!canvas) return;
+    const fireConfetti = confetti.create(canvas, { resize: true, useWorker: false });
     // Launch energetic dual particle cannons for victory!
     const count = 200;
     const defaults = {
@@ -59,7 +63,7 @@ export const GameCompleteModal: React.FC<GameCompleteModalProps> = ({
     };
 
     function fire(particleRatio: number, opts: confetti.Options) {
-      confetti({
+      fireConfetti({
         ...defaults,
         ...opts,
         particleCount: Math.floor(count * particleRatio)
@@ -205,6 +209,11 @@ export const GameCompleteModal: React.FC<GameCompleteModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md overflow-y-auto animate-in fade-in duration-300 select-none">
+      <canvas
+        ref={confettiCanvasRef}
+        className="pointer-events-none fixed inset-0 z-[70] h-screen w-screen"
+        aria-hidden="true"
+      />
       <div
         id="game-complete-card"
         className="relative w-full max-w-md bg-[#131916] border border-white/15 rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col items-center text-center my-auto"

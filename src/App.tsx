@@ -164,6 +164,7 @@ export default function App() {
   const checkoutAttemptIdRef = useRef('');
   const roundTimeoutRef = useRef(false);
   const albumAccessTooltipTimeoutRef = useRef<number | null>(null);
+  const confettiCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Modals state
   const [isCollectionsOpen, setIsCollectionsOpen] = useState(false);
@@ -1050,8 +1051,11 @@ export default function App() {
   }, [activeMultiplayerSession?.roomCode, activeMultiplayerSession?.socket]);
 
   const fireCorrectGuessConfetti = useCallback(() => {
+    const canvas = confettiCanvasRef.current;
+    if (!canvas) return;
     const colors = ['#00e676', '#ffd600', '#ffffff', '#00e5ff'];
-    confetti({
+    const fire = confetti.create(canvas, { resize: true, useWorker: false });
+    fire({
       particleCount: 70,
       spread: 58,
       startVelocity: 40,
@@ -1059,7 +1063,7 @@ export default function App() {
       origin: { y: 0.68 },
       colors
     });
-    confetti({
+    fire({
       particleCount: 32,
       spread: 95,
       startVelocity: 28,
@@ -2468,6 +2472,11 @@ export default function App() {
 
   return (
     <div className="relative min-h-screen w-full bg-[#080c0a] text-white flex flex-col justify-between overflow-x-hidden pb-14 font-sans selection:bg-[#00e676] selection:text-black">
+      <canvas
+        ref={confettiCanvasRef}
+        className="pointer-events-none fixed inset-0 z-[260] h-screen w-screen"
+        aria-hidden="true"
+      />
       <GoogleIntegrations config={publicConfig} pageTitle={pageTitle} pagePath={pagePath} />
       {/* 1. Perspective Stage Lighting Background & Watermark */}
       <StageLighting
