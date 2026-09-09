@@ -2634,7 +2634,8 @@ function extractSpotifyPlaylistId(input: string): string {
   return /^[A-Za-z0-9]{12,100}$/.test(clean) ? clean : '';
 }
 
-function normalizeSpotifyPlaylistSuggestion(playlist: SpotifyPlaylistApiItem): SpotifyPlaylistSuggestion | null {
+function normalizeSpotifyPlaylistSuggestion(playlist: SpotifyPlaylistApiItem | null | undefined): SpotifyPlaylistSuggestion | null {
+  if (!playlist) return null;
   const id = safeText(playlist.id, 100);
   const name = safeText(playlist.name, 160);
   if (!id || !name) return null;
